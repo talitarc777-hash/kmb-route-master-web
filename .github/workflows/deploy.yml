@@ -1,22 +1,15 @@
-# Simple workflow for deploying static content to GitHub Pages
 name: Deploy static content to Pages
 
 on:
-  # Runs on pushes targeting the default branch
   push:
     branches: ["main"]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -28,7 +21,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     
-    # ADD THIS LINE HERE:
+    # This tells GitHub to look inside your subfolder for ALL steps
     defaults:
       run:
         working-directory: kmb-route-master-web
@@ -42,7 +35,7 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-          # ADD THIS LINE SO IT FINDS THE LOCK FILE:
+          # This tells the cache where to find your lock file
           cache-dependency-path: kmb-route-master-web/package-lock.json
 
       - name: Install dependencies
@@ -59,50 +52,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # UPDATE THIS PATH TO INCLUDE THE FOLDER NAME:
-          path: './kmb-route-master-web/dist'
-      
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    
-    # ADD THIS LINE HERE:
-    defaults:
-      run:
-        working-directory: kmb-route-master-web
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          # ADD THIS LINE SO IT FINDS THE LOCK FILE:
-          cache-dependency-path: kmb-route-master-web/package-lock.json
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build
-        run: npm run build
-        env:
-          GCP_API_KEY: ${{ secrets.GCP_API_KEY }}
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-      
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          # UPDATE THIS PATH TO INCLUDE THE FOLDER NAME:
+          # This path must point to the 'dist' folder inside your subfolder
           path: './kmb-route-master-web/dist'
       
       - name: Deploy to GitHub Pages
