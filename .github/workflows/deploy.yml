@@ -22,15 +22,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Single deploy job since we're just deploying
   deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    
+    # ADD THIS LINE HERE:
     defaults:
       run:
         working-directory: kmb-route-master-web
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,12 +42,13 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
+          # ADD THIS LINE SO IT FINDS THE LOCK FILE:
+          cache-dependency-path: kmb-route-master-web/package-lock.json
 
       - name: Install dependencies
         run: npm install
 
       - name: Build
-        # This section is updated to include your Gemini API Key
         run: npm run build
         env:
           GCP_API_KEY: ${{ secrets.GCP_API_KEY }}
@@ -56,8 +59,51 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: './dist'
+          # UPDATE THIS PATH TO INCLUDE THE FOLDER NAME:
+          path: './kmb-route-master-web/dist'
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    
+    # ADD THIS LINE HERE:
+    defaults:
+      run:
+        working-directory: kmb-route-master-web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          # ADD THIS LINE SO IT FINDS THE LOCK FILE:
+          cache-dependency-path: kmb-route-master-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+        env:
+          GCP_API_KEY: ${{ secrets.GCP_API_KEY }}
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # UPDATE THIS PATH TO INCLUDE THE FOLDER NAME:
+          path: './kmb-route-master-web/dist'
       
       - name: Deploy to GitHub Pages
         id: deployment
