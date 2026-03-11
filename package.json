@@ -1,5 +1,5 @@
 {
-    "name": "kmb-routing",
+    "name": "kmb-route-master-web",
     "private": true,
     "version": "1.0.0",
     "description": "KMB Route Master — Hong Kong bus navigation with React, ArcGIS, and Gemini AI",
