@@ -110,7 +110,6 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback, useMemo } = React;
-        const GCP_API_KEY = 'AIzaSyD2JDKPfhDErK6nhBaM-rLLQwzPGiBdgzc';
 
         // ─── Utility: Coordinate conversion ───
         function hk80ToWgs84(x, y) {
@@ -665,8 +664,8 @@
                                                         setExcludedRoutesText(newText);
                                                     }}
                                                     className={`px-3 py-1 rounded-lg text-sm font-bold transition-all border ${isExcluded
-                                                            ? 'bg-slate-200 text-slate-400 border-slate-300'
-                                                            : 'bg-white text-slate-700 border-slate-300 hover:border-[#E1251B] hover:text-[#E1251B]'
+                                                        ? 'bg-slate-200 text-slate-400 border-slate-300'
+                                                        : 'bg-white text-slate-700 border-slate-300 hover:border-[#E1251B] hover:text-[#E1251B]'
                                                         }`}
                                                 >
                                                     {r} {isExcluded && '✕'}

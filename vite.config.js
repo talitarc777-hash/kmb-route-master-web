@@ -38,5 +38,5 @@ export default defineConfig({
       },
     }),
   ],
-  base: './',
+  base: ''/kmb-route-master-web/'',
 });
