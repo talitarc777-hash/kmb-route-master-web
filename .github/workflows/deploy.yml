@@ -21,27 +21,27 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     
-    # This tells GitHub to look inside your subfolder for ALL steps
     defaults:
       run:
+        # IMPORTANT: Double check this folder name matches your GitHub folder exactly
         working-directory: kmb-route-master-web
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       
-- name: Set up Node
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          # We removed the cache lines to prevent the "paths not resolved" error
 
       - name: Install dependencies
-        run: npm install  # We use 'install' instead of 'ci' for better compatibility
+        run: npm install
 
       - name: Build
         run: npm run build
         env:
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
           GCP_API_KEY: ${{ secrets.GCP_API_KEY }}
 
       - name: Setup Pages
@@ -50,7 +50,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # This path must point to the 'dist' folder inside your subfolder
+          # This path points to the 'dist' folder inside your subfolder
           path: './kmb-route-master-web/dist'
       
       - name: Deploy to GitHub Pages
