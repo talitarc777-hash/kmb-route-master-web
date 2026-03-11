@@ -21,10 +21,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     
-    defaults:
-      run:
-        # IMPORTANT: Double check this folder name matches your GitHub folder exactly
-        working-directory: kmb-route-master-web
+    # We removed the 'defaults' block here to stop the "No such file" error
 
     steps:
       - name: Checkout
@@ -50,8 +47,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # This path points to the 'dist' folder inside your subfolder
-          path: './kmb-route-master-web/dist'
+          # We changed this back to just 'dist'
+          path: './dist'
       
       - name: Deploy to GitHub Pages
         id: deployment
