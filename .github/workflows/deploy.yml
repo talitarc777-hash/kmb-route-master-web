@@ -30,16 +30,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Set up Node
+- name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-          # This tells the cache where to find your lock file
-          cache-dependency-path: kmb-route-master-web/package-lock.json
+          # We removed the cache lines to prevent the "paths not resolved" error
 
       - name: Install dependencies
-        run: npm install
+        run: npm install  # We use 'install' instead of 'ci' for better compatibility
 
       - name: Build
         run: npm run build
