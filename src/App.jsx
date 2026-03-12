@@ -361,14 +361,17 @@ const App = () => {
   const loadKMBData = async () => {
     try {
       setLoadingStatus('Loading stops...');
+    // We fetch the base data files without parameters.
+      // These endpoints return the full list of stops, routes, and sequences.
       const [stopsRes, routesRes, routeStopsRes] = await Promise.all([
-        // fetch('/api/kmb/stop'),
-        // fetch('/api/kmb/route/'),
-        // fetch('/api/kmb/route-stop'),
-        fetch('/api/kmb/route-stop?route=' + route + '&bound=' + bound),
-        fetch('/api/kmb/stop?stop=' + stopId),
-        fetch('/api/kmb/route?route=' + route)
+        fetch('/api/kmb/stop'),
+        fetch('/api/kmb/route'),
+        fetch('/api/kmb/route-stop')
       ]);
+
+      if (!stopsRes.ok || !routesRes.ok || !routeStopsRes.ok) {
+        throw new Error(`Server Error: ${stopsRes.status}`);
+      }
         setLoadingStatus('Parsing data...');
         const [stopsData, routesData, routeStopsData] = await Promise.all([
             stopsRes.json(),
