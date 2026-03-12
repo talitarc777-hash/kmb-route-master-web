@@ -644,12 +644,15 @@ const App = () => {
         setExpandedSegments(new Set());
         drawRouteOnMap(route);
 
-        // Update this part to use your new API path:
+        // Fetch directly from Official KMB Open Data (No CORS issues, much faster)
         const etaPromises = route.segments.map((seg) =>
-        // We point this to our python proxy
-        fetch(`/api/kmb/route-stop?action=getEta&route=${seg.route}&bound=${seg.bound}&service_type=${seg.service_type}`)
+          fetch(`https://data.etabus.gov.hk/v1/transport/kmb/eta/${seg.fromStop}/${seg.route}/${seg.service_type}`)
             .then(res => res.json())
             .then(data => data.data || [])
+            .catch(err => {
+              console.error("ETA Fetch Error:", err);
+              return [];
+            })
         );
 
     // Live ETA update for display
