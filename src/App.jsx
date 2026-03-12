@@ -369,54 +369,64 @@ const App = () => {
         fetch('/api/kmb/stop?stop=' + stopId),
         fetch('/api/kmb/route?route=' + route)
       ]);
-      setLoadingStatus('Parsing data...');
-      const [stopsData, routesData, routeStopsData] = await Promise.all([
-        stopsRes.json(),
-        routesRes.json(),
-        routeStopsRes.json(),
-      ]);
+        setLoadingStatus('Parsing data...');
+        const [stopsData, routesData, routeStopsData] = await Promise.all([
+            stopsRes.json(),
+            routesRes.json(),
+            routeStopsRes.json(),
+        ]);
 
-      const sm = {};
-      for (const s of stopsData.data) {
-        sm[s.stop] = {
-          name_en: s.name_en,
-          name_tc: s.name_tc,
-          lat: parseFloat(s.lat),
-          lng: parseFloat(s.long),
-        };
-      }
-      stopMapRef.current = sm;
+        // Process Stops
+        const sm = {};
+        if (stopsData.data) {
+            for (const s of stopsData.data) {
+            sm[s.stop] = {
+                name_en: s.name_en,
+                name_tc: s.name_tc,
+                lat: parseFloat(s.lat),
+                lng: parseFloat(s.long),
+            };
+            }
+        }
+        stopMapRef.current = sm;
 
-      const rm = {};
-      for (const r of routesData.data) {
-        rm[`${r.route}|${r.bound}|${r.service_type}`] = r;
-      }
-      routeMapRef.current = rm;
+        // Process Routes
+        const rm = {};
+        if (routesData.data) {
+            for (const r of routesData.data) {
+            rm[`${r.route}|${r.bound}|${r.service_type}`] = r;
+            }
+        }
+        routeMapRef.current = rm;
 
-      const rs = {};
-      const sr = {};
-      routeStopsData.data.sort((a, b) => parseInt(a.seq) - parseInt(b.seq));
-      for (const item of routeStopsData.data) {
-        const key = `${item.route}|${item.bound}|${item.service_type}`;
-        if (!rs[key]) rs[key] = [];
-        rs[key].push(item.stop);
-        if (!sr[item.stop]) sr[item.stop] = [];
-        sr[item.stop].push({
-          route: item.route,
-          bound: item.bound,
-          service_type: item.service_type,
-          seq: parseInt(item.seq),
-        });
-      }
-      routeStopsRef.current = rs;
-      stopRoutesRef.current = sr;
+        // Process Route-Stop Relationships
+        const rs = {};
+        const sr = {};
+        if (routeStopsData.data) {
+            routeStopsData.data.sort((a, b) => parseInt(a.seq) - parseInt(b.seq));
+            for (const item of routeStopsData.data) {
+            const key = `${item.route}|${item.bound}|${item.service_type}`;
+            if (!rs[key]) rs[key] = [];
+            rs[key].push(item.stop);
+            if (!sr[item.stop]) sr[item.stop] = [];
+            sr[item.stop].push({
+                route: item.route,
+                bound: item.bound,
+                service_type: item.service_type,
+                seq: parseInt(item.seq),
+            });
+            }
+        }
+        routeStopsRef.current = rs;
+        stopRoutesRef.current = sr;
 
-      setLoadingStatus('Ready');
-      setDataLoaded(true);
-    } catch (err) {
-      setLoadingStatus('Failed to load data. Please refresh.');
-    }
-  };
+        setLoadingStatus('Ready');
+        setDataLoaded(true);
+        } catch (err) {
+        console.error("KMB Load Error:", err);
+        setLoadingStatus('Failed to load data. Please refresh.');
+        }
+    };
 
   const initArcGIS = () => {
     window.require(
@@ -642,15 +652,23 @@ const App = () => {
   };
 
   // Select route handler
-  const handleSelectRoute = async (route) => {
-    setSelectedRoute(route);
-    setExpandedSegments(new Set());
-    drawRouteOnMap(route);
+    const handleSelectRoute = async (route) => {
+        setSelectedRoute(route);
+        setExpandedSegments(new Set());
+        drawRouteOnMap(route);
+
+        // Update this part to use your new API path:
+        const etaPromises = route.segments.map((seg) =>
+        // We point this to our python proxy
+        fetch(`/api/kmb/route-stop?action=getEta&route=${seg.route}&bound=${seg.bound}&service_type=${seg.service_type}`)
+            .then(res => res.json())
+            .then(data => data.data || [])
+        );
 
     // Live ETA update for display
-    const etaPromises = route.segments.map((seg) =>
-      window.routeEngine.fetchETA(seg.fromStop, seg.route, seg.service_type),
-    );
+    // const etaPromises = route.segments.map((seg) =>
+    //   window.routeEngine.fetchETA(seg.fromStop, seg.route, seg.service_type),
+    // );
     const etas = await Promise.all(etaPromises);
     const now = new Date();
     const updatedSegments = route.segments.map((seg, i) => {
