@@ -21,8 +21,8 @@ export default defineConfig({
         theme_color: '#E1251B',
         background_color: '#ffffff',
         display: 'standalone',
-        scope: '/kmb-route-master-web/',
-        start_url: '/kmb-route-master-web/',
+        scope: '/',
+        start_url: '/',
         icons: [
           {
             src: '/pwa-192x192.png',

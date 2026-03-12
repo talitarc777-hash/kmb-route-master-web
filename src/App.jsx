@@ -56,7 +56,7 @@ function parseLocationInput(input) {
 }
 
 async function geocode(query, placeId = null) {
-  const GCP_API_KEY = import.meta.env.GCP_API_KEY || '';
+  const GCP_API_KEY = import.meta.env.VITE_GCP_API_KEY || '';
   let url = `/api/google/geocode/json?key=${GCP_API_KEY}`;
   if (placeId) url += `&place_id=${placeId}`;
   else url += `&address=${encodeURIComponent(query)}&components=country:HK`;
@@ -82,7 +82,7 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
   const displayValue = typeof value === 'string' ? value : value?.name || '';
   const [suggestions, setSuggestions] = useState([]);
   const [show, setShow] = useState(false);
-  const GCP_API_KEY = import.meta.env.GCP_API_KEY || '';
+  const GCP_API_KEY = import.meta.env.VITE_GCP_API_KEY || '';
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -97,7 +97,8 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
         //   )}&components=country:hk&key=${GCP_API_KEY}`,
         // );
         // Ensure this URL matches the rewrite in vercel.json
-        const res = await fetch(`/api/google/place/autocomplete/json?input=${input}&components=country:hk&key=${GCP_API_KEY}`);
+        // Change ${input} to ${encodeURIComponent(displayValue)}
+        const res = await fetch(`/api/google/place/autocomplete/json?input=${encodeURIComponent(displayValue)}&components=country:hk&key=${GCP_API_KEY}`);
         const data = await res.json();
         if (data.status === 'OK') setSuggestions(data.predictions.slice(0, 5));
         else setSuggestions([]);
@@ -349,7 +350,7 @@ const App = () => {
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
 
-  const GCP_API_KEY = import.meta.env.GCP_API_KEY || '';
+  const GCP_API_KEY = import.meta.env.VITE_GCP_API_KEY || '';
 
   // Load KMB data
   useEffect(() => {
