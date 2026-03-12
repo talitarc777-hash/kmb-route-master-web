@@ -313,6 +313,7 @@ const App = () => {
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(true);
+  const [isFilterExpanded, setIsFilterExpanded] = useState(false);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('Initialising...');
@@ -830,7 +831,7 @@ const App = () => {
           </h2>
 
           {/* Filter Section */}
-          <div className="mb-4 shrink-0 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+          {/* <div className="mb-4 shrink-0 bg-slate-50 p-3 rounded-2xl border border-slate-200">
             <div className="text-xs font-bold text-slate-500 mb-2 flex justify-between items-center">
               <span>FILTER ROUTES</span>
               {excludedRoutesText && (
@@ -896,7 +897,106 @@ const App = () => {
                 Apply
               </button>
             </div>
-          </div>
+          </div> */}
+        {/* Filter Section - Expandable */}
+        <div className="mb-4 shrink-0 bg-white/80 backdrop-blur rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* Accordion Header */}
+        <button 
+            onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+            className="w-full flex items-center justify-between p-3 hover:bg-slate-50 transition-colors"
+        >
+            <div className="flex items-center gap-2">
+            <span className="text-sm">🧪</span>
+            <span className="text-xs font-black italic uppercase tracking-tighter text-slate-800">Filter Routes</span>
+            </div>
+            <div className="flex items-center gap-3">
+            {excludedRoutesText && !isFilterExpanded && (
+                <span className="text-[10px] bg-red-50 text-[#E1251B] px-2 py-0.5 rounded-full font-bold border border-red-100">
+                Active Filters
+                </span>
+            )}
+            <span className={`text-[#E1251B] text-xs font-bold transform transition-transform duration-300 ${isFilterExpanded ? 'rotate-180' : ''}`}>
+                {isFilterExpanded ? '▲' : '▼'}
+            </span>
+            </div>
+        </button>
+
+        {/* Expandable Content */}
+        {isFilterExpanded && (
+            <div className="p-3 pt-0 border-t border-slate-100 bg-slate-50/50">
+            <div className="text-[10px] font-bold text-slate-400 mt-2 mb-2 flex justify-between items-center uppercase tracking-widest">
+                <span>Quick Select to Hide</span>
+                {excludedRoutesText && (
+                <button
+                    onClick={() => {
+                    setExcludedRoutesText('');
+                    // Optional: auto-search after clear
+                    setTimeout(() => handleSearch(), 0);
+                    }}
+                    className="text-[#E1251B] hover:underline normal-case"
+                >
+                    Clear All
+                </button>
+                )}
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-3">
+                {Array.from(new Set(results.flatMap((r) => r.segments.map((s) => s.route))))
+                .sort((a, b) =>
+                    b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }),
+                )
+                .map((r) => {
+                    const isExcluded = excludedRoutesText
+                    .toUpperCase()
+                    .split(/[\s,]+/)
+                    .includes(r.toUpperCase());
+                    return (
+                    <button
+                        key={r}
+                        onClick={() => {
+                        let current = excludedRoutesText
+                            .toUpperCase()
+                            .split(/[\s,]+/)
+                            .filter(Boolean);
+                        if (isExcluded) current = current.filter((x) => x !== r);
+                        else current.push(r.toUpperCase());
+                        setExcludedRoutesText(current.join(', '));
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${
+                        isExcluded
+                            ? 'bg-slate-200 text-slate-400 border-slate-300'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-[#E1251B] hover:text-[#E1251B]'
+                        }`}
+                    >
+                        {r} {isExcluded ? '✕' : '+'}
+                    </button>
+                    );
+                })}
+            </div>
+
+            <div className="flex gap-2">
+                <input
+                type="text"
+                placeholder="Or type routes (e.g. 960, 968)..."
+                value={excludedRoutesText}
+                onChange={(e) => setExcludedRoutesText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                className="flex-1 p-2.5 bg-white rounded-xl font-bold border border-slate-200 uppercase placeholder:normal-case focus:ring-2 focus:ring-[#E1251B]/50 outline-none text-xs"
+                />
+                <button
+                onClick={() => {
+                    setIsFilterExpanded(false); // Auto-collapse on apply
+                    handleSearch();
+                }}
+                disabled={isLoading}
+                className="px-4 bg-[#E1251B] text-white rounded-xl font-bold text-xs hover:bg-red-700 transition shadow-md active:scale-95"
+                >
+                Apply
+                </button>
+            </div>
+            </div>
+        )}
+        </div>
 
           <div className="space-y-2 overflow-y-auto flex-1 scrollbar-hide">
             {results.map((r) => (
