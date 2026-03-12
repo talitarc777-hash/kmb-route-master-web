@@ -86,7 +86,8 @@ async function fetchStopETAs(stopId, routes) {
     const results = await Promise.all(
         routes.map(async ({ route, service_type }) => {
             try {
-                const res = await fetch(`/api/kmb/eta/${stopId}/${route}/${service_type}`);
+                // const res = await fetch(`/api/kmb/eta/${stopId}/${route}/${service_type}`);
+                const res = await fetch(`https://data.etabus.gov.hk/v1/transport/kmb/eta/${seg.fromStop}/${seg.route}/${seg.service_type}`);
                 const data = await res.json();
                 const now = new Date();
                 const upcoming = (data.data || [])

@@ -128,7 +128,8 @@ async function fetchETA(stopId, route, serviceType) {
     const key = `${stopId}|${route}|${serviceType}`;
     if (ETA_CACHE.has(key)) return ETA_CACHE.get(key);
     const p = (async () => {
-        try { return (await (await fetch(`/api/kmb/eta/${stopId}/${route}/${serviceType}`)).json()).data || []; }
+        // try { return (await (await fetch(`/api/kmb/eta/${stopId}/${route}/${serviceType}`)).json()).data || []; }
+        try { return (await (await fetch(`https://data.etabus.gov.hk/v1/transport/kmb/eta/${stopId}/${route}/${serviceType}`)).json()).data || []; }
         catch { return []; }
     })();
     ETA_CACHE.set(key, p);

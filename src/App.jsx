@@ -700,7 +700,9 @@ const App = () => {
       >
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3 bg-white/80 backdrop-blur p-2 rounded-2xl border border-white/50 shadow-sm">
-            <div className="bg-[#E1251B] p-2 rounded-xl text-white font-bold">BUS</div>
+            {/* Replaced CSS Icon with PWA Image */}
+            <img src="/pwa-192x192.png" alt="KMB Bus" className="w-10 h-10 rounded-xl shadow-sm object-contain" />
+            
             <h1 className="text-xl font-black italic uppercase tracking-tighter">
               KMB <span className="text-[#E1251B]">Route Master</span>
             </h1>
