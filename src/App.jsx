@@ -85,20 +85,17 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
         setSuggestions([]);
         return;
       }
-      try {
-        // const res = await fetch(
-        //   `/api/google/place/autocomplete/json?input=${encodeURIComponent(
-        //     displayValue,
-        //   )}&components=country:hk&key=${GCP_API_KEY}`,
-        // );
-        // Ensure this URL matches the rewrite in vercel.json
-        // Change ${input} to ${encodeURIComponent(displayValue)}
+    try {
         const res = await fetch(`/api/google/place/autocomplete/json?input=${encodeURIComponent(displayValue)}&components=country:hk`);
         const data = await res.json();
+        
+        // ADD THIS LINE TO SEE GOOGLE'S SECRET MESSAGE:
+        console.log("Google API Response:", data); 
+
         if (data.status === 'OK') setSuggestions(data.predictions.slice(0, 5));
         else setSuggestions([]);
       } catch (e) {
-        // Handle error silently
+        console.error("Fetch Error:", e);
       }
     }, 300);
     return () => clearTimeout(timer);
@@ -700,7 +697,7 @@ const App = () => {
       >
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3 bg-white/80 backdrop-blur p-2 rounded-2xl border border-white/50 shadow-sm">
-            {/* <div className="bg-[#E1251B] p-2 rounded-xl text-white font-bold">BUS</div> */}
+            <div className="bg-[#E1251B] p-2 rounded-xl text-white font-bold">BUS</div>
             <h1 className="text-xl font-black italic uppercase tracking-tighter">
               KMB <span className="text-[#E1251B]">Route Master</span>
             </h1>
