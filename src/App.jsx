@@ -360,75 +360,69 @@ const App = () => {
 
   const loadKMBData = async () => {
     try {
-      setLoadingStatus('Loading stops...');
-    // We fetch the base data files without parameters.
-      // These endpoints return the full list of stops, routes, and sequences.
-const [stopsRes, routesRes, routeStopsRes] = await Promise.all([
+      setLoadingStatus('Connecting to KMB Open Data...');
+      
+      const [stopsRes, routesRes, routeStopsRes] = await Promise.all([
         fetch('/api/kmb/stop'),
         fetch('/api/kmb/route'),
         fetch('/api/kmb/route-stop')
       ]);
 
-      if (!stopsRes.ok) throw new Error(`Server Error: ${stopsRes.status}`);
+      if (!stopsRes.ok) throw new Error('API Response Error');
 
-      setLoadingStatus('Parsing data...');
+      setLoadingStatus('Processing Map Data...');
       const [stopsData, routesData, routeStopsData] = await Promise.all([
         stopsRes.json(),
         routesRes.json(),
         routeStopsRes.json(),
       ]);
 
-        // Process Stops
-        const sm = {};
-        if (stopsData.data) {
-            for (const s of stopsData.data) {
-            sm[s.stop] = {
-                name_en: s.name_en,
-                name_tc: s.name_tc,
-                lat: parseFloat(s.lat),
-                lng: parseFloat(s.long),
-            };
-            }
-        }
-        stopMapRef.current = sm;
+      // 1. Process Stops (ID -> Name/Lat/Long)
+      const sm = {};
+      stopsData.data.forEach(s => {
+        sm[s.stop] = {
+          name_en: s.name_en,
+          name_tc: s.name_tc,
+          lat: parseFloat(s.lat),
+          lng: parseFloat(s.long),
+        };
+      });
+      stopMapRef.current = sm;
 
-        // Process Routes
-        const rm = {};
-        if (routesData.data) {
-            for (const r of routesData.data) {
-            rm[`${r.route}|${r.bound}|${r.service_type}`] = r;
-            }
-        }
-        routeMapRef.current = rm;
+      // 2. Process Routes
+      const rm = {};
+      routesData.data.forEach(r => {
+        // Create a unique key for each route direction
+        rm[`${r.route}|${r.bound}|${r.service_type}`] = r;
+      });
+      routeMapRef.current = rm;
 
-        // Process Route-Stop Relationships
-        const rs = {};
-        const sr = {};
-        if (routeStopsData.data) {
-            routeStopsData.data.sort((a, b) => parseInt(a.seq) - parseInt(b.seq));
-            for (const item of routeStopsData.data) {
-            const key = `${item.route}|${item.bound}|${item.service_type}`;
-            if (!rs[key]) rs[key] = [];
-            rs[key].push(item.stop);
-            if (!sr[item.stop]) sr[item.stop] = [];
-            sr[item.stop].push({
-                route: item.route,
-                bound: item.bound,
-                service_type: item.service_type,
-                seq: parseInt(item.seq),
-            });
-            }
-        }
-        routeStopsRef.current = rs;
-        stopRoutesRef.current = sr;
+      // 3. Process Route-Stop Relationships (The sequences)
+      const rs = {};
+      const sr = {};
+      routeStopsData.data.forEach(item => {
+        const key = `${item.route}|${item.bound}|${item.service_type}`;
+        if (!rs[key]) rs[key] = [];
+        rs[key].push(item.stop);
+        
+        if (!sr[item.stop]) sr[item.stop] = [];
+        sr[item.stop].push({
+          route: item.route,
+          bound: item.bound,
+          service_type: item.service_type,
+          seq: parseInt(item.seq),
+        });
+      });
+      routeStopsRef.current = rs;
+      stopRoutesRef.current = sr;
 
-        setLoadingStatus('Ready');
-        setDataLoaded(true);
-        } catch (err) {
-        console.error("KMB Load Error:", err);
-        setLoadingStatus('Failed to load data. Please refresh.');
-        }
-    };
+      setLoadingStatus('Ready');
+      setDataLoaded(true);
+    } catch (err) {
+      console.error("Data Load Error:", err);
+      setLoadingStatus('Connection failed. Please check your internet and refresh.');
+    }
+  };
 
   const initArcGIS = () => {
     window.require(

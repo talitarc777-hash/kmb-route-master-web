@@ -6,50 +6,35 @@ import json
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urllib.parse.urlparse(self.path)
-        query_params = urllib.parse.parse_qs(parsed_path.query)
         path = parsed_path.path
-
-        # Safety: Get parameters, but default to empty string if missing
-        route = query_params.get('route', [''])[0]
-        bound = query_params.get('bound', ['1'])[0]
-        stop_id = query_params.get('stop', [''])[0]
-        service_type = query_params.get('service_type', ['1'])[0]
-
-        # 1. Determine which KMB URL to use
+        
+        # 1. Map our internal paths to the Official KMB Open Data API
+        # These endpoints allow downloading the WHOLE list at once.
         if 'route-stop' in path:
-            # If no route is specified, get the full relationship list
-            if not route:
-                kmb_url = "https://search.kmb.hk/KMBWebSite/Function/GetRouteStop.ashx?action=getRouteStop"
-            else:
-                kmb_url = f"https://search.kmb.hk/KMBWebSite/Function/GetRouteStop.ashx?action=getRouteStop&route={route}&bound={bound}&service_type={service_type}"
-        
+            kmb_url = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop"
         elif 'stop' in path:
-            kmb_url = "https://search.kmb.hk/KMBWebSite/Function/GetStop.ashx?action=getStop"
-        
+            kmb_url = "https://data.etabus.gov.hk/v1/transport/kmb/stop"
         elif 'route' in path:
-            kmb_url = "https://search.kmb.hk/KMBWebSite/Function/GetBaseData.ashx?action=getRoute"
-            
+            kmb_url = "https://data.etabus.gov.hk/v1/transport/kmb/route"
         else:
-            # Fallback
-            kmb_url = "https://search.kmb.hk/KMBWebSite/Function/GetBaseData.ashx?action=getRoute"
+            kmb_url = "https://data.etabus.gov.hk/v1/transport/kmb/route"
 
         try:
-            # 2. Fetch from KMB
+            # 2. Fetch the data
             req = urllib.request.Request(kmb_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=15) as response:
                 data = response.read()
                 
-            # 3. Successful Response
+            # 3. Send the data back to your React app
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*') # Essential for browsers
+            self.send_header('Access-Control-Allow-Origin', '*') 
             self.end_headers()
             self.wfile.write(data)
 
         except Exception as e:
-            # 4. If it fails, send the actual error message so we can see it in Inspect
+            # 4. If it fails, return the error message so you can see it in 'Inspect'
             self.send_response(500)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            error_message = f"Python Error: {str(e)}"
-            self.wfile.write(error_message.encode())
+            self.wfile.write(f"Python Error: {str(e)}".encode())
