@@ -37,7 +37,15 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            req = urllib.request.Request(target_url, headers={'User-Agent': 'Mozilla/5.0'})
+            # Dynamically grab your Vercel URL
+            host = self.headers.get('Host', 'localhost')
+            
+            # Add the Referer header so Google's security lets it pass
+            req = urllib.request.Request(target_url, headers={
+                'User-Agent': 'Mozilla/5.0',
+                'Referer': f"https://{host}/" 
+            })
+            
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = response.read()
             
