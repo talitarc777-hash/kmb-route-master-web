@@ -10,33 +10,37 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-	  workbox: {
+      workbox: {
         maximumFileSizeToCacheInBytes: 4000000, // Raise limit to 4MB
       },
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['pwa-192x192.png', 'pwa-512x512.png', 'arcgis.css'],
       manifest: {
         name: 'KMB Route Master',
         short_name: 'KMB Master',
-        description: 'Advanced HK Bus Navigation with AI Insights',
+        description: 'Advanced HK Bus Navigation',
         theme_color: '#E1251B',
         background_color: '#ffffff',
         display: 'standalone',
+        scope: '/kmb-route-master-web/',
+        start_url: '/kmb-route-master-web/',
         icons: [
           {
-            src: 'pwa-192x192.png',
+            src: '/kmb-route-master-web/pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
+            purpose: 'any',
           },
           {
-            src: 'pwa-512x512.png',
+            src: '/kmb-route-master-web/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
+            purpose: 'any',
           },
           {
-            src: 'pwa-512x512.png',
+            src: '/kmb-route-master-web/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable',
+            purpose: 'maskable',
           },
         ],
       },
