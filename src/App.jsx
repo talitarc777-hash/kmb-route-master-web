@@ -362,9 +362,12 @@ const App = () => {
     try {
       setLoadingStatus('Loading stops...');
       const [stopsRes, routesRes, routeStopsRes] = await Promise.all([
-        fetch('/api/kmb/stop'),
-        fetch('/api/kmb/route/'),
-        fetch('/api/kmb/route-stop'),
+        // fetch('/api/kmb/stop'),
+        // fetch('/api/kmb/route/'),
+        // fetch('/api/kmb/route-stop'),
+        fetch('/api/kmb/route-stop?route=' + route + '&bound=' + bound),
+        fetch('/api/kmb/stop?stop=' + stopId),
+        fetch('/api/kmb/route?route=' + route)
       ]);
       setLoadingStatus('Parsing data...');
       const [stopsData, routesData, routeStopsData] = await Promise.all([
