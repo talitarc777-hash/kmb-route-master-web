@@ -1,6 +1,6 @@
 {
   "rewrites": [
     { "source": "/api/kmb/(.*)", "destination": "/api/kmb.py" },
-    { "source": "/api/google/(.*)", "destination": "https://maps.googleapis.com/maps/api/$1" }
+    { "source": "/api/google/(.*)", "destination": "/api/kmb.py" }
   ]
 }

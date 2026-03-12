@@ -56,11 +56,7 @@ function parseLocationInput(input) {
 }
 
 async function geocode(query, placeId = null) {
-  const GCP_API_KEY = import.meta.env.VITE_GCP_API_KEY || '';
-  let url = `/api/google/geocode/json?key=${GCP_API_KEY}`;
-  if (placeId) url += `&place_id=${placeId}`;
-  else url += `&address=${encodeURIComponent(query)}&components=country:HK`;
-  const res = await fetch(url);
+  const res = await fetch(`/api/google/geocode/json?address=${encodeURIComponent(query)}&components=country:hk`);
   const data = await res.json();
   if (!data || data.status !== 'OK' || data.results.length === 0) return null;
   const loc = data.results[0].geometry.location;
@@ -82,7 +78,6 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
   const displayValue = typeof value === 'string' ? value : value?.name || '';
   const [suggestions, setSuggestions] = useState([]);
   const [show, setShow] = useState(false);
-  const GCP_API_KEY = import.meta.env.VITE_GCP_API_KEY || '';
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -98,7 +93,7 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
         // );
         // Ensure this URL matches the rewrite in vercel.json
         // Change ${input} to ${encodeURIComponent(displayValue)}
-        const res = await fetch(`/api/google/place/autocomplete/json?input=${encodeURIComponent(displayValue)}&components=country:hk&key=${GCP_API_KEY}`);
+        const res = await fetch(`/api/google/place/autocomplete/json?input=${encodeURIComponent(displayValue)}&components=country:hk`);
         const data = await res.json();
         if (data.status === 'OK') setSuggestions(data.predictions.slice(0, 5));
         else setSuggestions([]);
@@ -107,7 +102,7 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [value, displayValue, GCP_API_KEY]);
+  }, [value, displayValue]);
 
   return (
     <div className="relative w-full">
@@ -350,8 +345,6 @@ const App = () => {
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
 
-  const GCP_API_KEY = import.meta.env.VITE_GCP_API_KEY || '';
-
   // Load KMB data
   useEffect(() => {
     loadKMBData();
@@ -500,7 +493,6 @@ const App = () => {
         dateValue,
         timeValue,
         excludedRoutesText,
-        gcpKey: GCP_API_KEY,
         onProgress: (msg) => setLoadingStatus(msg),
       });
 
@@ -599,7 +591,6 @@ const App = () => {
           end.lng,
           'driving',
           intermediates,
-          GCP_API_KEY,
         );
         drawPoly(roadInfo.geometry, color, 6, 'solid');
       }
