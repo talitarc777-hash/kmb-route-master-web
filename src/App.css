@@ -22,3 +22,59 @@ html,
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.slide-up {
+  animation: slideUp 0.25s ease-out;
+}
+
+.eta-green {
+  color: #16a34a;
+  border-color: #16a34a;
+}
+
+.eta-yellow {
+  color: #d97706;
+  border-color: #d97706;
+}
+
+.eta-grey {
+  color: #94a3b8;
+  border-color: #94a3b8;
+}
