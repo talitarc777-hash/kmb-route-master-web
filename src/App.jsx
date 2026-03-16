@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 // Constants
 const ROUTE_COLORS = [
@@ -360,7 +360,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                 }}
                 className="text-red-400 text-xs font-bold"
               >
-                ✕
+                🗑️
               </button>
             </div>
 
@@ -408,7 +408,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                     }}
                     className="text-slate-300 text-sm hover:text-red-400 ml-2 mt-0.5"
                   >
-                    ✕
+                    🗑️
                   </button>
                 </div>
               );
@@ -466,6 +466,52 @@ const App = () => {
       route.segments.every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta)),
     );
   }, [results, strictEtaOnly]);
+
+  const displayedResultCards = useMemo(() => {
+    const groups = new Map();
+    for (const route of displayedResults) {
+      const stopPattern = route.segments
+        .map((seg) => `${seg.fromStop}->${seg.toStop}`)
+        .join('|');
+      const groupKey = `${route.transfers}|${stopPattern}`;
+      if (!groups.has(groupKey)) groups.set(groupKey, []);
+      groups.get(groupKey).push(route);
+    }
+
+    return Array.from(groups.entries()).map(([groupKey, groupRoutes]) => {
+      const sortedRoutes = [...groupRoutes].sort(
+        (a, b) => (a.estimatedTime || 9999) - (b.estimatedTime || 9999),
+      );
+      const representative = sortedRoutes[0];
+      const segmentDisplay = representative.segments.map((seg, si) => {
+        const routeNames = Array.from(
+          new Set(
+            sortedRoutes.map((r) => r.segments[si]?.route).filter(Boolean),
+          ),
+        ).sort((a, b) =>
+          a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
+        );
+
+        const earliestEta = sortedRoutes
+          .map((r) => r.segments[si]?.nextEta)
+          .filter(Boolean)
+          .map((eta) => new Date(eta))
+          .sort((a, b) => a - b)[0];
+
+        return {
+          ...seg,
+          routeLabel: routeNames.join('/'),
+          nextEta: earliestEta || seg.nextEta,
+        };
+      });
+
+      return {
+        key: groupKey,
+        representative,
+        segmentDisplay,
+      };
+    });
+  }, [displayedResults]);
 
   // Load KMB data
   useEffect(() => {
@@ -917,11 +963,11 @@ const App = () => {
             >
               {isLoading ? (
                 <>
-                  <span className="animate-spin">⏳</span> {loadingStatus || 'Searching...'}
+                  <span className="animate-spin">🔄</span> {loadingStatus || 'Searching...'}
                 </>
               ) : !dataLoaded ? (
                 <>
-                  <span className="animate-pulse">📡</span> {loadingStatus}
+                  <span className="animate-pulse">⏳</span> {loadingStatus}
                 </>
               ) : (
                 'Search Routes'
@@ -959,7 +1005,7 @@ const App = () => {
       {results.length > 0 && !selectedRoute && !showBookmarks && (
         <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[60vh] overflow-y-auto scrollbar-hide slide-up flex flex-col">
           <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 shrink-0">
-            {displayedResults.length} Route{displayedResults.length > 1 ? 's' : ''} Found
+            {displayedResultCards.length} Route{displayedResultCards.length > 1 ? 's' : ''} Found
           </h2>
           <label className="mb-3 shrink-0 flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
             <input
@@ -1024,7 +1070,7 @@ const App = () => {
                           : 'bg-white text-slate-700 border-slate-300 hover:border-[#E1251B] hover:text-[#E1251B]'
                       }`}
                     >
-                      {r} {isExcluded && '✕'}
+                      {r} {isExcluded && '??}
                     </button>
                   );
                 })}
@@ -1148,23 +1194,23 @@ const App = () => {
         </div>
 
           <div className="space-y-2 overflow-y-auto flex-1 scrollbar-hide">
-            {displayedResults.length === 0 && strictEtaOnly && (
+            {displayedResultCards.length === 0 && strictEtaOnly && (
               <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-700">
                 No routes match strict ETA filter right now. Try turning off strict ETA filter.
               </div>
             )}
-            {displayedResults.map((r) => (
+            {displayedResultCards.map((card) => (
               <div
-                key={r.id}
+                key={card.key}
                 className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
-                onClick={() => handleSelectRoute(r)}
+                onClick={() => handleSelectRoute(card.representative)}
               >
                 <div className="flex justify-between items-center">
                   <div>
                     <div className="font-black text-lg flex items-center gap-2 flex-wrap">
-                      {r.segments.map((seg, si) => (
+                      {card.segmentDisplay.map((seg, si) => (
                         <React.Fragment key={si}>
-                          {si > 0 && <span className="text-slate-300 text-sm">→</span>}
+                          {si > 0 && <span className="text-slate-300 text-sm">??/span>}
                           <div className="flex flex-col items-start gap-1">
                             <span
                               className="px-2 py-0.5 rounded-lg text-white text-sm"
@@ -1172,7 +1218,7 @@ const App = () => {
                                 backgroundColor: ROUTE_COLORS[si % ROUTE_COLORS.length],
                               }}
                             >
-                              {seg.route}
+                              {seg.routeLabel || seg.route}
                             </span>
                             {seg.nextEta ? (
                               <span className="text-[10px] text-[#E1251B] leading-none whitespace-nowrap">
@@ -1191,15 +1237,23 @@ const App = () => {
                     </div>
                     <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-2">
                       <span>
-                        {r.transfers === 0 ? 'Direct' : `${r.transfers} transfer${r.transfers > 1 ? 's' : ''}`}
+                        {card.representative.transfers === 0
+                          ? 'Direct'
+                          : `${card.representative.transfers} transfer${card.representative.transfers > 1 ? 's' : ''}`}
                       </span>
-                      <span>· {r.totalStops} stops</span>
-                      {r.walkTimeOrigin > 0 && <span>· 🚶 {r.walkTimeOrigin}min walk</span>}
-                      {r.originWaitTime > 0 && <span>· ⏱ {r.originWaitTime}min wait</span>}
+                      <span>• {card.representative.totalStops} stops</span>
+                      {card.representative.walkTimeOrigin > 0 && (
+                        <span>• {card.representative.walkTimeOrigin}min walk</span>
+                      )}
+                      {card.representative.originWaitTime > 0 && (
+                        <span>• {card.representative.originWaitTime}min wait</span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[#E1251B] font-bold text-lg">~{r.estimatedTime}min</div>
+                    <div className="text-[#E1251B] font-bold text-lg">
+                      ~{card.representative.estimatedTime}min
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1335,7 +1389,7 @@ const App = () => {
                       </div>
                     )}
                   </div>
-                  <div className="text-sm font-bold">🏁 {toStop?.name_tc || toStop?.name_en}</div>
+                  <div className="text-sm font-bold">📍 {toStop?.name_tc || toStop?.name_en}</div>
                 </div>
                 {si < selectedRoute.segments.length - 1 && (
                   <div className="flex items-center gap-2 text-sm text-slate-500 my-2 pl-2 border-l-2 border-dashed border-slate-300">
