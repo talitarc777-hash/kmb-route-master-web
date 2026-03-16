@@ -327,6 +327,7 @@ const App = () => {
     new Date().toTimeString().substring(0, 5),
   );
   const [excludedRoutesText, setExcludedRoutesText] = useState('');
+  const [strictEtaOnly, setStrictEtaOnly] = useState(false);
 
   // Add-to-bookmark modal state
   const [addToBookmark, setAddToBookmark] = useState(null);
@@ -342,6 +343,13 @@ const App = () => {
   const routeMapRef = useRef({});
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
+
+  const displayedResults = useMemo(() => {
+    if (!strictEtaOnly) return results;
+    return results.filter((route) =>
+      route.segments.every((seg) => Boolean(seg.nextEta)),
+    );
+  }, [results, strictEtaOnly]);
 
   // Load KMB data
   useEffect(() => {
@@ -827,8 +835,17 @@ const App = () => {
       {results.length > 0 && !selectedRoute && !showBookmarks && (
         <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[60vh] overflow-y-auto scrollbar-hide slide-up flex flex-col">
           <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 shrink-0">
-            {results.length} Route{results.length > 1 ? 's' : ''} Found
+            {displayedResults.length} Route{displayedResults.length > 1 ? 's' : ''} Found
           </h2>
+          <label className="mb-3 shrink-0 flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={strictEtaOnly}
+              onChange={(e) => setStrictEtaOnly(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B]"
+            />
+            Strict ETA filter (show only routes where every segment has ETA)
+          </label>
 
           {/* Filter Section */}
           {/* <div className="mb-4 shrink-0 bg-slate-50 p-3 rounded-2xl border border-slate-200">
@@ -999,7 +1016,12 @@ const App = () => {
         </div>
 
           <div className="space-y-2 overflow-y-auto flex-1 scrollbar-hide">
-            {results.map((r) => (
+            {displayedResults.length === 0 && strictEtaOnly && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-700">
+                No routes match strict ETA filter right now. Try turning off strict ETA filter.
+              </div>
+            )}
+            {displayedResults.map((r) => (
               <div
                 key={r.id}
                 className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
