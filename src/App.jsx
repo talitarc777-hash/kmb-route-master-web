@@ -260,6 +260,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
 
             {group.stops.map((s, si) => {
               const stopInfo = stopMap[s.stopId];
+              const hasEtaData = etaMap.has(s.stopId);
               const etas = etaMap.get(s.stopId) || [];
               return (
                 <div
@@ -272,8 +273,11 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                     </div>
                     <div className="text-xs text-slate-400">{stopInfo?.name_en}</div>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {etas.length === 0 && (
+                      {!hasEtaData && (
                         <span className="text-xs text-slate-300">Fetching ETAs...</span>
+                      )}
+                      {hasEtaData && etas.length === 0 && (
+                        <span className="text-xs text-slate-400">No ETA available now</span>
                       )}
                       {etas.slice(0, 4).map((e, ei) => (
                         <span
