@@ -180,7 +180,7 @@ async function resolveLocation(inputObj) {
 }
 
 // Autocomplete Input Component
-const AutocompleteInput = ({ value, onChange, placeholder }) => {
+const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
   const displayValue = typeof value === 'string' ? value : value?.name || '';
   const [suggestions, setSuggestions] = useState([]);
   const [show, setShow] = useState(false);
@@ -216,7 +216,7 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
   return (
     <div className="relative w-full">
       <input
-        className="w-full p-4 bg-slate-50 rounded-2xl font-bold border border-slate-200"
+        className={`w-full p-4 bg-slate-50 rounded-2xl font-bold border border-slate-200 ${onClear ? 'pr-12' : ''}`}
         placeholder={placeholder}
         value={displayValue}
         onChange={(e) => {
@@ -226,6 +226,21 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
         onFocus={() => setShow(true)}
         onBlur={() => setTimeout(() => setShow(false), 200)}
       />
+      {onClear && displayValue && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            onClear();
+            setSuggestions([]);
+            setShow(false);
+          }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-black text-lg leading-none"
+          aria-label={`Clear ${placeholder}`}
+        >
+          {'\u2715'}
+        </button>
+      )}
       {show && suggestions.length > 0 && (
         <div className="absolute top-full left-0 right-0 z-50 bg-white border border-slate-200 rounded-xl shadow-xl mt-1 overflow-hidden">
           {suggestions.map((s) => (
@@ -866,6 +881,13 @@ const App = () => {
     URL.revokeObjectURL(url);
   }, []);
 
+  const handleSwapLocations = () => {
+    const fromValue = origin;
+    const toValue = destination;
+    setOrigin(toValue);
+    setDestination(fromValue);
+  };
+
   // RENDER
   return (
     <div className="relative h-full w-full bg-slate-100 flex flex-col font-sans">
@@ -950,11 +972,22 @@ const App = () => {
               placeholder="From... (e.g. Mong Kok)"
               value={origin}
               onChange={setOrigin}
+              onClear={() => setOrigin('')}
             />
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={handleSwapLocations}
+                className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
+              >
+                Swap From / To
+              </button>
+            </div>
             <AutocompleteInput
               placeholder="To... (e.g. Tsim Sha Tsui)"
               value={destination}
               onChange={setDestination}
+              onClear={() => setDestination('')}
             />
             <button
               type="submit"
