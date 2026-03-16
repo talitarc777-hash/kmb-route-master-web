@@ -293,10 +293,9 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="font-black text-lg">⭐ Bookmarks</h2>
+        <h2 className="font-black text-lg">{'\u2B50'} Bookmarks</h2>
         <button onClick={onClose} className="text-slate-400 text-xl font-bold">
-          ✕
-        </button>
+          {'\u2715'}
       </div>
 
       {/* Add group */}
@@ -350,7 +349,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                   className="font-black text-sm text-slate-700 cursor-pointer"
                   onClick={() => setEditing(gi)}
                 >
-                  {group.groupName} ✏️
+                  {group.groupName} {'\u270F\uFE0F'}
                 </span>
               )}
               <button
@@ -360,8 +359,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                 }}
                 className="text-red-400 text-xs font-bold"
               >
-                🗑️
-              </button>
+                {'\u2715'}
             </div>
 
             {group.stops.length === 0 && (
@@ -396,7 +394,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                           key={ei}
                           className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white border eta-${e.color}`}
                         >
-                          {e.route} · {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
+                          {e.route} {'\u00B7'} {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
                         </span>
                       ))}
                     </div>
@@ -408,8 +406,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                     }}
                     className="text-slate-300 text-sm hover:text-red-400 ml-2 mt-0.5"
                   >
-                    🗑️
-                  </button>
+                    {'\u2715'}
                 </div>
               );
             })}
@@ -895,8 +892,7 @@ const App = () => {
               className="p-3 bg-white rounded-2xl shadow-md text-xl"
               title="Bookmarks"
             >
-              ⭐
-            </button>
+              {'\u2B50'}
             <button
               onClick={() => {
                 setIsSearchOpen((v) => !v);
@@ -904,7 +900,7 @@ const App = () => {
               }}
               className="p-3 bg-white rounded-2xl shadow-md text-xl"
             >
-              {isSearchOpen ? '✕' : '🔍'}
+              {isSearchOpen ? '\u2715' : '\uD83D\uDD0D'}
             </button>
           </div>
         </div>
@@ -947,12 +943,12 @@ const App = () => {
               )}
             </div>
             <AutocompleteInput
-              placeholder="From... (e.g. 旺角, Mong Kok)"
+              placeholder="From... (e.g. Mong Kok)"
               value={origin}
               onChange={setOrigin}
             />
             <AutocompleteInput
-              placeholder="To... (e.g. 尖沙咀, Tsim Sha Tsui)"
+              placeholder="To... (e.g. Tsim Sha Tsui)"
               value={destination}
               onChange={setDestination}
             />
@@ -963,11 +959,11 @@ const App = () => {
             >
               {isLoading ? (
                 <>
-                  <span className="animate-spin">🔄</span> {loadingStatus || 'Searching...'}
+                  <span className="animate-spin">{'\u23F3'}</span> {loadingStatus || 'Searching...'}
                 </>
               ) : !dataLoaded ? (
                 <>
-                  <span className="animate-pulse">⏳</span> {loadingStatus}
+                  <span className="animate-pulse">{'\u{1F4E1}'}</span> {loadingStatus}
                 </>
               ) : (
                 'Search Routes'
@@ -975,7 +971,7 @@ const App = () => {
             </button>
             {searchError && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-bold">
-                ⚠️ {searchError}
+                ?蹎? {searchError}
               </div>
             )}
           </form>
@@ -985,7 +981,7 @@ const App = () => {
       {/* Loading overlay */}
       {!dataLoaded && !isSearchOpen && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 bg-white/90 backdrop-blur px-6 py-4 rounded-2xl shadow-xl text-sm font-bold text-slate-600">
-          🗺️ {loadingStatus}
+          ?謑桀?{loadingStatus}
         </div>
       )}
 
@@ -1070,7 +1066,7 @@ const App = () => {
                           : 'bg-white text-slate-700 border-slate-300 hover:border-[#E1251B] hover:text-[#E1251B]'
                       }`}
                     >
-                      {r} {isExcluded && '??}
+                      {r} {isExcluded && '\u2715'}
                     </button>
                   );
                 })}
@@ -1101,7 +1097,7 @@ const App = () => {
             className="w-full flex items-center justify-between p-3 hover:bg-slate-50 transition-colors"
         >
             <div className="flex items-center gap-2">
-            <span className="text-sm">🧪</span>
+            <span className="text-sm">?憒?/span>
             <span className="text-xs font-black italic uppercase tracking-tighter text-slate-800">Filter Routes</span>
             </div>
             <div className="flex items-center gap-3">
@@ -1111,7 +1107,7 @@ const App = () => {
                 </span>
             )}
             <span className={`text-[#E1251B] text-xs font-bold transform transition-transform duration-300 ${isFilterExpanded ? 'rotate-180' : ''}`}>
-                {isFilterExpanded ? '▲' : '▼'}
+                {isFilterExpanded ? '\u25B2' : '\u25BC'}
             </span>
             </div>
         </button>
@@ -1163,7 +1159,7 @@ const App = () => {
                             : 'bg-white text-slate-700 border-slate-200 hover:border-[#E1251B] hover:text-[#E1251B]'
                         }`}
                     >
-                        {r} {isExcluded ? '✕' : '+'}
+                        {r} {isExcluded ? '\u2715' : '+'}
                     </button>
                     );
                 })}
@@ -1210,7 +1206,7 @@ const App = () => {
                     <div className="font-black text-lg flex items-center gap-2 flex-wrap">
                       {card.segmentDisplay.map((seg, si) => (
                         <React.Fragment key={si}>
-                          {si > 0 && <span className="text-slate-300 text-sm">??/span>}
+                          {si > 0 && <span className="text-slate-300 text-sm">{'\u2192'}</span>}
                           <div className="flex flex-col items-start gap-1">
                             <span
                               className="px-2 py-0.5 rounded-lg text-white text-sm"
@@ -1241,12 +1237,12 @@ const App = () => {
                           ? 'Direct'
                           : `${card.representative.transfers} transfer${card.representative.transfers > 1 ? 's' : ''}`}
                       </span>
-                      <span>• {card.representative.totalStops} stops</span>
+                      <span>{'\u00B7'} {card.representative.totalStops} stops</span>
                       {card.representative.walkTimeOrigin > 0 && (
-                        <span>• {card.representative.walkTimeOrigin}min walk</span>
+                        <span>{'\u00B7'} {'\u{1F6B6}'} {card.representative.walkTimeOrigin}min walk</span>
                       )}
                       {card.representative.originWaitTime > 0 && (
-                        <span>• {card.representative.originWaitTime}min wait</span>
+                        <span>{'\u00B7'} {'\u23F1'} {card.representative.originWaitTime}min wait</span>
                       )}
                     </div>
                   </div>
@@ -1272,13 +1268,13 @@ const App = () => {
             }}
             className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"
           >
-            ← Back
+            {'\u2190'} Back
           </button>
 
           <div className="flex items-center gap-3 mb-3">
             {selectedRoute.segments.map((seg, si) => (
               <React.Fragment key={si}>
-                {si > 0 && <span className="text-slate-300">→</span>}
+                {si > 0 && <span className="text-slate-300">{'\u2192'}</span>}
                 <span
                   className="px-3 py-1 rounded-xl text-white font-black text-lg"
                   style={{ backgroundColor: ROUTE_COLORS[si % ROUTE_COLORS.length] }}
@@ -1294,7 +1290,7 @@ const App = () => {
 
           {selectedRoute.walkTimeOrigin > 0 && (
             <div className="flex items-center gap-2 text-sm text-slate-500 mb-2 pl-2 border-l-2 border-dashed border-slate-300">
-              🚶 Walk {selectedRoute.walkTimeOrigin} min to stop
+              {'\u{1F6B6}'} Walk {selectedRoute.walkTimeOrigin} min to stop
             </div>
           )}
 
@@ -1314,11 +1310,11 @@ const App = () => {
                       {seg.route}
                     </span>
                     <span className="text-xs text-slate-500">
-                      {seg.routeInfo?.orig_tc} → {seg.routeInfo?.dest_tc}
+                      {seg.routeInfo?.orig_tc} {'\u2192'} {seg.routeInfo?.dest_tc}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-bold">📍 {fromStop?.name_tc || fromStop?.name_en}</div>
+                    <div className="text-sm font-bold">{'\u{1F4CD}'} {fromStop?.name_tc || fromStop?.name_en}</div>
                     <button
                       onClick={() =>
                         handleAddToBookmark(seg.fromStop, fromStop?.name_tc || fromStop?.name_en, routesAtFromStop)
@@ -1326,8 +1322,7 @@ const App = () => {
                       className="text-xs text-slate-400 hover:text-yellow-500"
                       title="Bookmark this stop"
                     >
-                      ⭐
-                    </button>
+                      {'\u2B50'}
                   </div>
                   <div
                     className="text-xs text-slate-400 my-1 cursor-pointer hover:text-slate-600 flex flex-col gap-1"
@@ -1338,7 +1333,7 @@ const App = () => {
                     }}
                   >
                     <div className="flex items-center gap-1 font-bold">
-                      {expandedSegments.has(si) ? '▲' : '▼'} {seg.stops.length - 2} intermediate
+                      {expandedSegments.has(si) ? '\u25B2' : '\u25BC'} {seg.stops.length - 2} intermediate
                       stops
                     </div>
                     <div className="flex font-normal flex-wrap gap-2">
@@ -1368,7 +1363,7 @@ const App = () => {
                               className="flex items-center justify-between text-sm text-slate-600"
                             >
                               <span>
-                                <span className="text-slate-300 mr-2">•</span>
+                                <span className="text-slate-300 mr-2">{'\u2022'}</span>
                                 {stp?.name_tc || stp?.name_en}
                               </span>
                               <button
@@ -1381,19 +1376,18 @@ const App = () => {
                                 }
                                 className="text-xs text-slate-300 hover:text-yellow-500"
                               >
-                                ⭐
-                              </button>
+                                {'\u2B50'}
                             </div>
                           );
                         })}
                       </div>
                     )}
                   </div>
-                  <div className="text-sm font-bold">📍 {toStop?.name_tc || toStop?.name_en}</div>
+                  <div className="text-sm font-bold">{'\u{1F3C1}'} {toStop?.name_tc || toStop?.name_en}</div>
                 </div>
                 {si < selectedRoute.segments.length - 1 && (
                   <div className="flex items-center gap-2 text-sm text-slate-500 my-2 pl-2 border-l-2 border-dashed border-slate-300">
-                    🚶 Transfer ({selectedRoute.walkTimeTransfer || '?'} min walk)
+                    {'\u{1F6B6}'} Transfer ({selectedRoute.walkTimeTransfer || '?'} min walk)
                   </div>
                 )}
               </div>
@@ -1402,7 +1396,7 @@ const App = () => {
 
           {selectedRoute.walkTimeDest > 0 && (
             <div className="flex items-center gap-2 text-sm text-slate-500 mt-2 pl-2 border-l-2 border-dashed border-slate-300">
-              🚶 Walk {selectedRoute.walkTimeDest} min to destination
+              {'\u{1F6B6}'} Walk {selectedRoute.walkTimeDest} min to destination
             </div>
           )}
         </div>
@@ -1412,7 +1406,7 @@ const App = () => {
       {addToBookmark && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-3xl p-6 mx-4 w-full max-w-xs shadow-2xl">
-            <h3 className="font-black text-lg mb-1">⭐ Add to Bookmark</h3>
+            <h3 className="font-black text-lg mb-1">{'\u2B50'} Add to Bookmark</h3>
             <p className="text-sm text-slate-500 mb-4">{addToBookmark.stopName}</p>
             {bookmarks.length === 0 && (
               <p className="text-sm text-slate-400 mb-3">
