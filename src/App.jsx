@@ -296,6 +296,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
         <h2 className="font-black text-lg">{'\u2B50'} Bookmarks</h2>
         <button onClick={onClose} className="text-slate-400 text-xl font-bold">
           {'\u2715'}
+        </button>
       </div>
 
       {/* Add group */}
@@ -360,6 +361,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                 className="text-red-400 text-xs font-bold"
               >
                 {'\u2715'}
+              </button>
             </div>
 
             {group.stops.length === 0 && (
@@ -407,6 +409,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                     className="text-slate-300 text-sm hover:text-red-400 ml-2 mt-0.5"
                   >
                     {'\u2715'}
+                  </button>
                 </div>
               );
             })}
@@ -893,6 +896,7 @@ const App = () => {
               title="Bookmarks"
             >
               {'\u2B50'}
+            </button>
             <button
               onClick={() => {
                 setIsSearchOpen((v) => !v);
@@ -971,7 +975,7 @@ const App = () => {
             </button>
             {searchError && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-bold">
-                ?蹎? {searchError}
+                {'\u26A0\uFE0F'} {searchError}
               </div>
             )}
           </form>
@@ -981,7 +985,7 @@ const App = () => {
       {/* Loading overlay */}
       {!dataLoaded && !isSearchOpen && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 bg-white/90 backdrop-blur px-6 py-4 rounded-2xl shadow-xl text-sm font-bold text-slate-600">
-          ?謑桀?{loadingStatus}
+          {'\u{1F5FA}\uFE0F'} {loadingStatus}
         </div>
       )}
 
@@ -1097,7 +1101,7 @@ const App = () => {
             className="w-full flex items-center justify-between p-3 hover:bg-slate-50 transition-colors"
         >
             <div className="flex items-center gap-2">
-            <span className="text-sm">?憒?/span>
+            <span className="text-sm">{'\u{1F9EA}'}</span>
             <span className="text-xs font-black italic uppercase tracking-tighter text-slate-800">Filter Routes</span>
             </div>
             <div className="flex items-center gap-3">
@@ -1323,6 +1327,7 @@ const App = () => {
                       title="Bookmark this stop"
                     >
                       {'\u2B50'}
+                    </button>
                   </div>
                   <div
                     className="text-xs text-slate-400 my-1 cursor-pointer hover:text-slate-600 flex flex-col gap-1"
@@ -1377,6 +1382,7 @@ const App = () => {
                                 className="text-xs text-slate-300 hover:text-yellow-500"
                               >
                                 {'\u2B50'}
+                              </button>
                             </div>
                           );
                         })}
