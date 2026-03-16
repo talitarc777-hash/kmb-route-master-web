@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 // Constants
 const ROUTE_COLORS = [
@@ -1335,7 +1335,7 @@ const App = () => {
                       </div>
                     )}
                   </div>
-                  <div className="text-sm font-bold">📍 {toStop?.name_tc || toStop?.name_en}</div>
+                  <div className="text-sm font-bold">🏁 {toStop?.name_tc || toStop?.name_en}</div>
                 </div>
                 {si < selectedRoute.segments.length - 1 && (
                   <div className="flex items-center gap-2 text-sm text-slate-500 my-2 pl-2 border-l-2 border-dashed border-slate-300">
