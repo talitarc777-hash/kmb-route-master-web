@@ -968,27 +968,30 @@ const App = () => {
                 </div>
               )}
             </div>
-            <AutocompleteInput
-              placeholder="From... (e.g. Mong Kok)"
-              value={origin}
-              onChange={setOrigin}
-              onClear={() => setOrigin('')}
-            />
-            <div className="flex justify-center">
+            <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
+              <div className="space-y-3">
+                <AutocompleteInput
+                  placeholder="From... (e.g. Mong Kok)"
+                  value={origin}
+                  onChange={setOrigin}
+                  onClear={() => setOrigin('')}
+                />
+                <AutocompleteInput
+                  placeholder="To... (e.g. Tsim Sha Tsui)"
+                  value={destination}
+                  onChange={setDestination}
+                  onClear={() => setDestination('')}
+                />
+              </div>
               <button
                 type="button"
                 onClick={handleSwapLocations}
-                className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
+                className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
+                title="Swap From and To"
               >
-                Swap From / To
+                Swap
               </button>
             </div>
-            <AutocompleteInput
-              placeholder="To... (e.g. Tsim Sha Tsui)"
-              value={destination}
-              onChange={setDestination}
-              onClear={() => setDestination('')}
-            />
             <button
               type="submit"
               disabled={isLoading || !dataLoaded}
