@@ -1,0 +1,12 @@
+KMB ETA Call Log Sample
+Generated: 2026-03-16
+
+This file is a placeholder sample.
+Use the app button "Download KMB ETA call log (.txt)" after a search to get real API call records.
+
+Format:
+#<index> | <ISO timestamp> | <type> | route=<route> | stop=<stopId> | service=<service_type> | count=<rows> | durationMs=<ms> | key=<stop|route|service>
+
+Example:
+#1 | 2026-03-16T03:10:20.123Z | network_ok | route=968 | stop=123456 | service=1 | count=0 | durationMs=143 | key=123456|968|1 | url=https://data.etabus.gov.hk/v1/transport/kmb/eta/123456/968/1
+#2 | 2026-03-16T03:10:20.124Z | cache_hit | route=968 | stop=123456 | service=1 | count=- | durationMs=- | key=123456|968|1

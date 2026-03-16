@@ -347,7 +347,7 @@ const App = () => {
   const displayedResults = useMemo(() => {
     if (!strictEtaOnly) return results;
     return results.filter((route) =>
-      route.segments.every((seg) => Boolean(seg.nextEta)),
+      route.segments.every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta)),
     );
   }, [results, strictEtaOnly]);
 
@@ -475,6 +475,7 @@ const App = () => {
   const handleSearch = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!dataLoaded) return;
+    window.routeEngine?.clearEtaCallLog?.();
     setIsLoading(true);
     setSearchError(null);
     setResults([]);
@@ -652,30 +653,22 @@ const App = () => {
         setSelectedRoute(route);
         setExpandedSegments(new Set());
         drawRouteOnMap(route);
-
-        // Fetch directly from Official KMB Open Data (No CORS issues, much faster)
         const etaPromises = route.segments.map((seg) =>
-          fetch(`https://data.etabus.gov.hk/v1/transport/kmb/eta/${seg.fromStop}/${seg.route}/${seg.service_type}`)
-            .then(res => res.json())
-            .then(data => data.data || [])
-            .catch(err => {
-              console.error("ETA Fetch Error:", err);
-              return [];
-            })
+          window.routeEngine.fetchETA(seg.fromStop, seg.route, seg.service_type),
         );
-
-    // Live ETA update for display
-    // const etaPromises = route.segments.map((seg) =>
-    //   window.routeEngine.fetchETA(seg.fromStop, seg.route, seg.service_type),
-    // );
     const etas = await Promise.all(etaPromises);
     const now = new Date();
     const updatedSegments = route.segments.map((seg, i) => {
       const etaList = etas[i] || [];
-      const next = etaList.find((e) => e.eta && new Date(e.eta) > now);
+      const activeEtas = window.routeEngine.getActiveEtas
+        ? window.routeEngine.getActiveEtas(etaList, now)
+        : etaList.filter((e) => e.eta && new Date(e.eta) > now);
+      const next = activeEtas[0];
       return {
         ...seg,
         nextEta: next?.eta ? new Date(next.eta) : null,
+        hasActiveEta: activeEtas.length > 0,
+        activeEtaCount: activeEtas.length,
         busInterval:
           etaList.length >= 2 && etaList[0].eta && etaList[1].eta
             ? Math.round((new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000)
@@ -695,6 +688,21 @@ const App = () => {
     setBookmarks(updated);
     setAddToBookmark(null);
   };
+
+  const downloadEtaCallLog = useCallback(() => {
+    const text =
+      window.routeEngine?.formatEtaCallLogTxt?.() ||
+      'No ETA calls captured in this session.';
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'kmb-eta-call-log.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
 
   // RENDER
   return (
@@ -844,8 +852,16 @@ const App = () => {
               onChange={(e) => setStrictEtaOnly(e.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B]"
             />
-            Strict ETA filter (show only routes where every segment has ETA)
+            Strict ETA filter (show only routes where every segment has active ETA now)
           </label>
+          <div className="mb-3 shrink-0">
+            <button
+              onClick={downloadEtaCallLog}
+              className="text-[11px] font-bold text-[#E1251B] hover:underline"
+            >
+              Download KMB ETA call log (.txt)
+            </button>
+          </div>
 
           {/* Filter Section */}
           {/* <div className="mb-4 shrink-0 bg-slate-50 p-3 rounded-2xl border border-slate-200">
