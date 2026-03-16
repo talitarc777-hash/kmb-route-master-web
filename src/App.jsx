@@ -12,6 +12,105 @@ const ROUTE_COLORS = [
   '#65A30D',
 ];
 
+const GCP_CACHE_LIMIT = 200;
+const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
+const GCP_AUTOCOMPLETE_CACHE_KEY = 'kmb_gcp_autocomplete_cache_v1';
+const GCP_GEOCODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const GCP_AUTOCOMPLETE_TTL_MS = 12 * 60 * 60 * 1000;
+
+const geocodeCacheState = {
+  memory: new Map(),
+  inflight: new Map(),
+  persisted: null,
+  storageKey: GCP_GEOCODE_CACHE_KEY,
+  ttlMs: GCP_GEOCODE_TTL_MS,
+};
+
+const autocompleteCacheState = {
+  memory: new Map(),
+  inflight: new Map(),
+  persisted: null,
+  storageKey: GCP_AUTOCOMPLETE_CACHE_KEY,
+  ttlMs: GCP_AUTOCOMPLETE_TTL_MS,
+};
+
+function loadGcpCache(state) {
+  if (state.persisted) return state.persisted;
+  state.persisted = new Map();
+  try {
+    const raw = localStorage.getItem(state.storageKey);
+    if (!raw) return state.persisted;
+    const rows = JSON.parse(raw);
+    const now = Date.now();
+    rows.forEach((row) => {
+      if (!row?.key) return;
+      if (!row.expiresAt || row.expiresAt <= now) return;
+      state.persisted.set(row.key, row);
+    });
+  } catch {
+    state.persisted = new Map();
+  }
+  return state.persisted;
+}
+
+function saveGcpCache(state) {
+  try {
+    const now = Date.now();
+    const rows = Array.from(loadGcpCache(state).entries())
+      .map(([key, row]) => ({ key, ...row }))
+      .filter((row) => row.expiresAt > now)
+      .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+      .slice(0, GCP_CACHE_LIMIT);
+    localStorage.setItem(state.storageKey, JSON.stringify(rows));
+  } catch {
+    // Ignore quota/storage errors to avoid blocking UI.
+  }
+}
+
+function getCachedGcpValue(state, key) {
+  if (state.memory.has(key)) return state.memory.get(key);
+  const cache = loadGcpCache(state);
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    cache.delete(key);
+    saveGcpCache(state);
+    return null;
+  }
+  state.memory.set(key, hit.value);
+  return hit.value;
+}
+
+function setCachedGcpValue(state, key, value) {
+  state.memory.set(key, value);
+  const cache = loadGcpCache(state);
+  cache.set(key, {
+    value,
+    savedAt: Date.now(),
+    expiresAt: Date.now() + state.ttlMs,
+  });
+  saveGcpCache(state);
+}
+
+async function fetchGcpWithCache(state, key, fetcher) {
+  const cached = getCachedGcpValue(state, key);
+  if (cached) return cached;
+  if (state.inflight.has(key)) return state.inflight.get(key);
+
+  const request = (async () => {
+    try {
+      const value = await fetcher();
+      if (value !== null && value !== undefined) setCachedGcpValue(state, key, value);
+      return value;
+    } finally {
+      state.inflight.delete(key);
+    }
+  })();
+
+  state.inflight.set(key, request);
+  return request;
+}
+
 // Utility: Coordinate conversion
 function hk80ToWgs84(x, y) {
   return {
@@ -56,11 +155,18 @@ function parseLocationInput(input) {
 }
 
 async function geocode(query, placeId = null) {
-  const res = await fetch(`/api/google/geocode/json?address=${encodeURIComponent(query)}&components=country:hk`);
-  const data = await res.json();
-  if (!data || data.status !== 'OK' || data.results.length === 0) return null;
-  const loc = data.results[0].geometry.location;
-  return { lat: loc.lat, lng: loc.lng, name: query };
+  const normalizedQuery = query.trim().toLowerCase();
+  const cacheKey = placeId ? `pid:${placeId}` : `q:${normalizedQuery}`;
+  return fetchGcpWithCache(geocodeCacheState, cacheKey, async () => {
+    const queryPart = placeId
+      ? `place_id=${encodeURIComponent(placeId)}`
+      : `address=${encodeURIComponent(query)}&components=country:hk`;
+    const res = await fetch(`/api/google/geocode/json?${queryPart}`);
+    const data = await res.json();
+    if (!data || data.status !== 'OK' || data.results.length === 0) return null;
+    const loc = data.results[0].geometry.location;
+    return { lat: loc.lat, lng: loc.lng, name: query };
+  });
 }
 
 async function resolveLocation(inputObj) {
@@ -85,17 +191,23 @@ const AutocompleteInput = ({ value, onChange, placeholder }) => {
         setSuggestions([]);
         return;
       }
-    try {
-        const res = await fetch(`/api/google/place/autocomplete/json?input=${encodeURIComponent(displayValue)}&components=country:hk`);
-        const data = await res.json();
-        
-        // ADD THIS LINE TO SEE GOOGLE'S SECRET MESSAGE:
-        console.log("Google API Response:", data); 
-
-        if (data.status === 'OK') setSuggestions(data.predictions.slice(0, 5));
-        else setSuggestions([]);
+      try {
+        const key = displayValue.trim().toLowerCase();
+        const predictions = await fetchGcpWithCache(
+          autocompleteCacheState,
+          key,
+          async () => {
+            const res = await fetch(
+              `/api/google/place/autocomplete/json?input=${encodeURIComponent(displayValue)}&components=country:hk`,
+            );
+            const data = await res.json();
+            return data.status === 'OK' ? data.predictions.slice(0, 5) : [];
+          },
+        );
+        setSuggestions(predictions || []);
       } catch (e) {
-        console.error("Fetch Error:", e);
+        console.error('Fetch Error:', e);
+        setSuggestions([]);
       }
     }, 300);
     return () => clearTimeout(timer);

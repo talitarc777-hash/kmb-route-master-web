@@ -1,33 +1,37 @@
 /**
- * KMB Route Engine — Bidirectional Search with Spatial Grid
+ * KMB Route Engine ??Bidirectional Search with Spatial Grid
  *
  * Algorithm:
  *  1. Build a spatial grid of all stops (O(1) neighbor lookups)
- *  2. Build ORIGIN SET — routes departing from within 600m of origin
- *  3. Build DEST SET   — routes arriving  at  stops within 600m of dest
- *  4. Direct routes    — set intersection (ORIGIN SET ∩ DEST SET, same route)
- *  5. 1-Transfer       — for each origin route, scan forward stops;
+ *  2. Build ORIGIN SET ??routes departing from within 600m of origin
+ *  3. Build DEST SET   ??routes arriving  at  stops within 600m of dest
+ *  4. Direct routes    ??set intersection (ORIGIN SET ??DEST SET, same route)
+ *  5. 1-Transfer       ??for each origin route, scan forward stops;
  *                        check the spatial grid for dest-set routes nearby
- *  6. 2-Transfer       — extend 1-transfer dropoffs using the same approach
- *  7. Rank & dedup     — by (estimatedTime, transfers, walk)
+ *  6. 2-Transfer       ??extend 1-transfer dropoffs using the same approach
+ *  7. Rank & dedup     ??by (estimatedTime, transfers, walk)
  */
 
 'use strict';
 
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // CONSTANTS
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 const WALK_RADIUS_KM = 0.6;   // walk from origin/dest to bus stop
 const TRANSFER_WALK_KM = 0.6;   // walk between transfer stops
 const MAX_FINAL = 100;   // results shown to user (increased for debugging)
 const RIDE_MIN_PER_STOP = 1.5;  // minutes per bus stop
-const GRID_DEG = 0.005; // spatial grid cell ≈ 500m
+const GRID_DEG = 0.005; // spatial grid cell ??500m
 const ETA_ACTIVE_WINDOW_MIN = 120; // ETA must be within this window to be considered active
-const GCP_CACHE = new Map();
+const GCP_CACHE = new Map(); // in-memory promise cache
+const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
+const GCP_CACHE_MAX_ENTRIES = 180;
+const GCP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+let GCP_PERSISTED_CACHE = null;
 
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // MATH
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function haversine(lat1, lon1, lat2, lon2) {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -38,9 +42,9 @@ function haversine(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// SPATIAL GRID  — build once per search, reuse for all lookups
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// SPATIAL GRID  ??build once per search, reuse for all lookups
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function buildSpatialGrid(stopMap) {
     const grid = new Map();
     for (const [id, s] of Object.entries(stopMap)) {
@@ -69,9 +73,9 @@ function nearbyFromGrid(grid, lat, lng, radiusKm) {
     return out.sort((a, b) => a.distance - b.distance);
 }
 
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // GCP ROUTE FETCH (with caching)
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function decodePolyline(encoded) {
     const points = [];
     let index = 0, lat = 0, lng = 0;
@@ -87,9 +91,86 @@ function decodePolyline(encoded) {
     return points;
 }
 
-async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermediateStops = [], gcpKey) {
-    const cacheKey = `${lat1.toFixed(4)},${lng1.toFixed(4)}→${lat2.toFixed(4)},${lng2.toFixed(4)}|${mode}`;
+function getFallbackRoute(lat1, lng1, lat2, lng2, mode) {
+    const d = haversine(lat1, lng1, lat2, lng2);
+    return {
+        distance: d * 1000,
+        duration: Math.ceil(d / (mode === 'walking' ? 4 : 30) * 60),
+        geometry: [[lng1, lat1], [lng2, lat2]],
+    };
+}
+
+function getWaypointSignature(intermediateStops) {
+    if (!intermediateStops || intermediateStops.length === 0) return 'none';
+    const sampled = intermediateStops.length > 23
+        ? Array.from({ length: 23 }, (_, i) => intermediateStops[Math.floor(i * intermediateStops.length / 23)])
+        : intermediateStops;
+    return sampled.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join('|');
+}
+
+function loadPersistedGcpCache() {
+    if (GCP_PERSISTED_CACHE) return GCP_PERSISTED_CACHE;
+    GCP_PERSISTED_CACHE = new Map();
+    try {
+        const raw = localStorage.getItem(GCP_CACHE_STORAGE_KEY);
+        if (!raw) return GCP_PERSISTED_CACHE;
+        const rows = JSON.parse(raw);
+        const now = Date.now();
+        for (const row of rows) {
+            if (!row?.key || !row?.value || !row?.expiresAt) continue;
+            if (row.expiresAt <= now) continue;
+            GCP_PERSISTED_CACHE.set(row.key, row);
+        }
+    } catch {
+        GCP_PERSISTED_CACHE = new Map();
+    }
+    return GCP_PERSISTED_CACHE;
+}
+
+function savePersistedGcpCache(cache) {
+    try {
+        const now = Date.now();
+        const rows = Array.from(cache.entries())
+            .map(([key, row]) => ({ key, ...row }))
+            .filter((row) => row.expiresAt > now)
+            .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+            .slice(0, GCP_CACHE_MAX_ENTRIES);
+        localStorage.setItem(GCP_CACHE_STORAGE_KEY, JSON.stringify(rows));
+    } catch {
+        // Ignore storage/quota errors to keep routing functional.
+    }
+}
+
+function getGcpCachedValue(cacheKey) {
     if (GCP_CACHE.has(cacheKey)) return GCP_CACHE.get(cacheKey);
+    const cache = loadPersistedGcpCache();
+    const hit = cache.get(cacheKey);
+    if (!hit) return null;
+    if (hit.expiresAt <= Date.now()) {
+        cache.delete(cacheKey);
+        savePersistedGcpCache(cache);
+        return null;
+    }
+    const resolved = Promise.resolve(hit.value);
+    GCP_CACHE.set(cacheKey, resolved);
+    return resolved;
+}
+
+function setGcpCachedValue(cacheKey, value, ttlMs = GCP_CACHE_TTL_MS) {
+    const cache = loadPersistedGcpCache();
+    cache.set(cacheKey, {
+        value,
+        savedAt: Date.now(),
+        expiresAt: Date.now() + ttlMs,
+    });
+    savePersistedGcpCache(cache);
+}
+
+async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermediateStops = [], _gcpKey) {
+    const wpSig = getWaypointSignature(intermediateStops);
+    const cacheKey = `${mode}|${lat1.toFixed(4)},${lng1.toFixed(4)}->${lat2.toFixed(4)},${lng2.toFixed(4)}|${wpSig}`;
+    const cached = getGcpCachedValue(cacheKey);
+    if (cached) return cached;
 
     const promise = (async () => {
         try {
@@ -100,29 +181,34 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
                     : intermediateStops;
                 wpStr = '&waypoints=' + s.map(p => `${p.lat},${p.lng}`).join('%7C');
             }
-            const url = `/api/google/directions/json?origin=${lat1},${lng1}&destination=${lat2},${lng2}&mode=${mode}${wpStr}&key=${gcpKey}`;
+            const url = `/api/google/directions/json?origin=${lat1},${lng1}&destination=${lat2},${lng2}&mode=${mode}${wpStr}`;
             const data = await (await fetch(url)).json();
             if (data.status === 'OK' && data.routes.length > 0) {
                 const r = data.routes[0];
-                return {
+                const out = {
                     distance: r.legs.reduce((s, l) => s + l.distance.value, 0),
                     duration: Math.ceil(r.legs.reduce((s, l) => s + l.duration.value, 0) / 60),
-                    geometry: decodePolyline(r.overview_polyline.points)
+                    geometry: decodePolyline(r.overview_polyline.points),
                 };
+                setGcpCachedValue(cacheKey, out);
+                return out;
             }
             console.warn(`GCP ${mode}:`, data.status);
-        } catch (e) { console.warn(`GCP ${mode} error:`, e); }
-        const d = haversine(lat1, lng1, lat2, lng2);
-        return { distance: d * 1000, duration: Math.ceil(d / (mode === 'walking' ? 4 : 30) * 60), geometry: [[lng1, lat1], [lng2, lat2]] };
+        } catch (e) {
+            console.warn(`GCP ${mode} error:`, e);
+        }
+        const fallback = getFallbackRoute(lat1, lng1, lat2, lng2, mode);
+        setGcpCachedValue(cacheKey, fallback, 10 * 60 * 1000);
+        return fallback;
     })();
 
     GCP_CACHE.set(cacheKey, promise);
     return promise;
 }
 
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // ETA FETCH (per-search cache)
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 const ETA_CACHE = new Map();
 const ETA_CALL_LOG = [];
 
@@ -202,9 +288,9 @@ function getActiveEtas(etaList, now = new Date(), maxMinutes = ETA_ACTIVE_WINDOW
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// MAIN ROUTE FINDER — Bidirectional
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// MAIN ROUTE FINDER ??Bidirectional
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 async function findRoutes(params) {
     const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, gcpKey, onProgress } = params;
     clearETACache();
@@ -230,8 +316,8 @@ async function findRoutes(params) {
 
     onProgress?.('Building route index...');
 
-    // ── Build ORIGIN ROUTE SET
-    // routeKey → { oStop, oIdx, stops, route }  (best = closest origin stop)
+    // ?€?€ Build ORIGIN ROUTE SET
+    // routeKey ??{ oStop, oIdx, stops, route }  (best = closest origin stop)
     const originRouteSet = new Map();
     for (const oStop of originStops) {
         for (const r of (stopRoutes[oStop.id] || [])) {
@@ -246,8 +332,8 @@ async function findRoutes(params) {
         }
     }
 
-    // ── Build DEST ROUTE SET
-    // routeKey → { dStop, dIdx, stops, route }  (best = closest dest stop)
+    // ?€?€ Build DEST ROUTE SET
+    // routeKey ??{ dStop, dIdx, stops, route }  (best = closest dest stop)
     const destRouteSet = new Map();
     for (const dStop of destStops) {
         for (const r of (stopRoutes[dStop.id] || [])) {
@@ -262,11 +348,11 @@ async function findRoutes(params) {
         }
     }
 
-    // ── Build DEST STOP INDEX
+    // ?€?€ Build DEST STOP INDEX
     // For every stop that appears BEFORE the dest stop on any dest-set route,
-    // map stopId → [{ routeKey, dIdx, dStop, route }]
+    // map stopId ??[{ routeKey, dIdx, dStop, route }]
     // This is what makes fast 1-transfer matching possible.
-    const destStopIndex = new Map(); // stopId → [destRouteEntry]
+    const destStopIndex = new Map(); // stopId ??[destRouteEntry]
     for (const [key, dest] of destRouteSet) {
         for (let i = 0; i < dest.dIdx; i++) {
             const sid = dest.stops[i];
@@ -278,7 +364,7 @@ async function findRoutes(params) {
     const found = [];
     const dedupSeen = new Set();
 
-    // ── DIRECT routes (ORIGIN ∩ DEST, same routeKey, oIdx < dIdx) 
+    // ?€?€ DIRECT routes (ORIGIN ??DEST, same routeKey, oIdx < dIdx) 
     onProgress?.('Finding direct routes...');
     for (const [key, orig] of originRouteSet) {
         if (!destRouteSet.has(key)) continue;
@@ -300,7 +386,7 @@ async function findRoutes(params) {
         });
     }
 
-    // ── 1-TRANSFER routes
+    // ?€?€ 1-TRANSFER routes
     // For each origin route, walk its stops forward. For each stop, check its
     // neighbors in the spatial grid. If any neighbor's stopId is in destStopIndex,
     // we found a valid transfer.
@@ -311,7 +397,7 @@ async function findRoutes(params) {
             const transferStop = stopMap[transferStopId];
             if (!transferStop) continue;
 
-            // Find nearby stops — use grid for speed
+            // Find nearby stops ??use grid for speed
             const nearby = nearbyFromGrid(grid, transferStop.lat, transferStop.lng, TRANSFER_WALK_KM);
 
             for (const nb of nearby) {
@@ -322,7 +408,7 @@ async function findRoutes(params) {
 
                     const seg1Stops = orig.stops.slice(orig.oIdx, i + 1);
                     const seg2Stops = dest.stops.slice(dest.transferIdx, dest.dIdx + 1);
-                    const dk = `1t|${orig.route.route}→${dest.route.route}`;
+                    const dk = `1t|${orig.route.route}->${dest.route.route}`;
 
                     // Only keep one candidate per route-pair; pick best by heuristic
                     const hScore = seg1Stops.length * RIDE_MIN_PER_STOP + seg2Stops.length * RIDE_MIN_PER_STOP
@@ -368,7 +454,7 @@ async function findRoutes(params) {
         }
     }
 
-    // ── 2-TRANSFER routes
+    // ?€?€ 2-TRANSFER routes
     // Seed from 1-transfer results. At the dropoff of seg2, look for a 3rd leg
     // that reaches the destination. Same grid trick.
     onProgress?.('Finding 2-transfer routes...');
@@ -385,7 +471,7 @@ async function findRoutes(params) {
                 if (dest3.routeKey === seg2.routeKey) continue;
 
                 const seg3Stops = dest3.stops.slice(dest3.transferIdx, dest3.dIdx + 1);
-                const dk = `2t|${parent.segments[0].route}→${parent.segments[1].route}→${dest3.route.route}`;
+                const dk = `2t|${parent.segments[0].route}->${parent.segments[1].route}->${dest3.route.route}`;
                 if (dedupSeen.has(dk)) continue;
                 dedupSeen.add(dk);
 
@@ -409,7 +495,7 @@ async function findRoutes(params) {
         }
     }
 
-    // ── Initial heuristic sort (to prioritize for GCP/ETA enrichments)
+    // ?€?€ Initial heuristic sort (to prioritize for GCP/ETA enrichments)
     found.sort((a, b) => {
         // Drastically reduce stop penalty: a highway route with 5 stops vs an express route with 25 stops 
         // often take the same time. The real penalty should be transfers and walking distance.
@@ -436,7 +522,7 @@ async function findRoutes(params) {
         }
     }
 
-    // ── Parallel GCP walking times
+    // ?€?€ Parallel GCP walking times
     onProgress?.('Calculating walking times...');
     await Promise.all(candidates.map(async route => {
         const [wO, wD] = await Promise.all([
@@ -457,7 +543,7 @@ async function findRoutes(params) {
         }
     }));
 
-    // ── ETA filter + accurate time calculation
+    // ?€?€ ETA filter + accurate time calculation
     onProgress?.('Checking scheduled services...');
     const now = new Date();
     const filteredCandidates = [];
@@ -481,7 +567,7 @@ async function findRoutes(params) {
         // Discard ONLY if the API returned an entirely empty array
         // (route does not serve this stop in this direction at all).
         // Records with eta=null mean the route IS scheduled but has no
-        // current real-time GPS data — keep these.
+        // current real-time GPS data ??keep these.
         if (firstETAs.length === 0) return;
 
         const futureETAs = getActiveEtas(firstETAs, now);
@@ -492,7 +578,7 @@ async function findRoutes(params) {
             if (futureETAs.length > 0) {
                 waitTime = Math.max(0, (new Date(futureETAs[0].eta) - now) / 60000);
             } else {
-                // No real-time data — use scheduled frequency as wait estimate
+                // No real-time data ??use scheduled frequency as wait estimate
                 waitTime = parseFloat(route.segments[0].routeInfo?.freq) || 15;
             }
         } else {
@@ -517,7 +603,7 @@ async function findRoutes(params) {
         filteredCandidates.push(route);
     }));
 
-    // ── Final sort: time → transfers → walk
+    // ?€?€ Final sort: time ??transfers ??walk
     filteredCandidates.sort((a, b) => {
         const dt = a.estimatedTime - b.estimatedTime;
         if (Math.abs(dt) > 5) return dt;
@@ -528,9 +614,9 @@ async function findRoutes(params) {
     return { filteredCandidates: filteredCandidates.slice(0, MAX_FINAL), originStops, destStops };
 }
 
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // EXPORT
-// ─────────────────────────────────────────────────────────────────────
+// ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 window.routeEngine = {
     findRoutes,
     fetchETA,
