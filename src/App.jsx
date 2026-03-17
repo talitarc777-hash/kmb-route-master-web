@@ -1099,7 +1099,7 @@ const App = () => {
                     className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
                     title="Use current GPS location"
                   >
-                    {isLocating ? 'Locating...' : 'GPS'}
+                    {isLocating ? 'Locating...' : '📍'}
                   </button>
                 </div>
                 <AutocompleteInput
