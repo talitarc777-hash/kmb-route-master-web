@@ -459,6 +459,7 @@ const App = () => {
   );
   const [excludedRoutesText, setExcludedRoutesText] = useState('');
   const [strictEtaOnly, setStrictEtaOnly] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
 
   // Add-to-bookmark modal state
   const [addToBookmark, setAddToBookmark] = useState(null);
@@ -888,6 +889,50 @@ const App = () => {
     setDestination(fromValue);
   };
 
+  const zoomToLocation = useCallback((lat, lng) => {
+    const view = viewRef.current;
+    if (!view) return;
+    const Point = arcgisModulesRef.current?.Point;
+    const target = Point
+      ? new Point({ x: lng, y: lat, spatialReference: { wkid: 4326 } })
+      : { longitude: lng, latitude: lat };
+    view.goTo({ target, zoom: 16 }).catch(() => {});
+  }, []);
+
+  const handleUseCurrentLocation = async () => {
+    if (!navigator.geolocation) {
+      setSearchError('GPS is not supported on this device/browser.');
+      return;
+    }
+    setIsLocating(true);
+    setSearchError(null);
+    try {
+      const position = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 30000,
+        }),
+      );
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      setOrigin(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+      zoomToLocation(lat, lng);
+    } catch (err) {
+      const msg =
+        err?.code === 1
+          ? 'Location permission denied. Please allow GPS permission.'
+          : err?.code === 2
+            ? 'Unable to get current location.'
+            : err?.code === 3
+              ? 'GPS request timed out. Please try again.'
+              : 'Failed to get current location.';
+      setSearchError(msg);
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
   // RENDER
   return (
     <div className="relative h-full w-full bg-slate-100 flex flex-col font-sans">
@@ -970,12 +1015,23 @@ const App = () => {
             </div>
             <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
               <div className="space-y-3">
-                <AutocompleteInput
-                  placeholder="From... (e.g. Mong Kok)"
-                  value={origin}
-                  onChange={setOrigin}
-                  onClear={() => setOrigin('')}
-                />
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <AutocompleteInput
+                    placeholder="From... (e.g. Mong Kok)"
+                    value={origin}
+                    onChange={setOrigin}
+                    onClear={() => setOrigin('')}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUseCurrentLocation}
+                    disabled={isLocating}
+                    className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
+                    title="Use current GPS location"
+                  >
+                    {isLocating ? 'Locating...' : 'GPS'}
+                  </button>
+                </div>
                 <AutocompleteInput
                   placeholder="To... (e.g. Tsim Sha Tsui)"
                   value={destination}
