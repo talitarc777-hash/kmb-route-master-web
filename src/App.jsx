@@ -555,6 +555,17 @@ const App = () => {
     return waitMin <= 0 ? 'Arriving' : `${waitMin} min`;
   }, []);
 
+  const getEtaChipClass = useCallback((etaValue) => {
+    if (!etaValue) return 'bg-slate-100 text-slate-500 border-slate-200';
+    const waitMin = Math.max(
+      0,
+      Math.round((new Date(etaValue) - new Date()) / 60000),
+    );
+    if (waitMin <= 3) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (waitMin <= 10) return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-rose-50 text-rose-700 border-rose-200';
+  }, []);
+
   // Load KMB data
   useEffect(() => {
     loadKMBData();
@@ -1083,9 +1094,9 @@ const App = () => {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-start">
               <div className="space-y-3">
-                <div className="grid grid-cols-[1fr_auto] gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
                   <AutocompleteInput
                     placeholder="From... (e.g. Mong Kok)"
                     value={origin}
@@ -1096,10 +1107,10 @@ const App = () => {
                     type="button"
                     onClick={handleUseCurrentLocation}
                     disabled={isLocating}
-                    className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
+                    className="h-11 sm:h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
                     title="Use current GPS location"
                   >
-                    {isLocating ? 'Locating...' : '📍'}
+                    {isLocating ? 'Locating...' : 'Use GPS'}
                   </button>
                 </div>
                 <AutocompleteInput
@@ -1112,10 +1123,10 @@ const App = () => {
               <button
                 type="button"
                 onClick={handleSwapLocations}
-                className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
+                className="h-11 sm:h-[52px] w-full sm:w-auto px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
                 title="Swap From and To"
               >
-                🔁
+                Swap
               </button>
             </div>
             <button
@@ -1387,9 +1398,7 @@ const App = () => {
                                 {seg.routeOptions.map((option) => (
                                   <span
                                     key={`${option.route}|${option.service_type || '1'}`}
-                                    className={`text-[10px] leading-none whitespace-nowrap ${
-                                      option.nextEta ? 'text-[#E1251B]' : 'text-slate-400'
-                                    }`}
+                                    className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
                                   >
                                     {option.route}: {getEtaText(option.nextEta)}
                                   </span>
@@ -1520,7 +1529,7 @@ const App = () => {
                         displaySeg.routeOptions.map((option) => (
                           <span
                             key={`${option.route}|${option.service_type || '1'}`}
-                            className={option.nextEta ? 'text-[#E1251B]' : 'text-slate-500'}
+                            className={`text-[11px] px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
                           >
                             {option.route}: {getEtaText(option.nextEta)}
                             {!option.nextEta && option.busInterval

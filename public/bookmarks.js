@@ -87,7 +87,14 @@ async function fetchStopETAs(stopId, routes) {
         routes.map(async ({ route, service_type }) => {
             try {
                 const svc = service_type || '1';
-                const res = await fetch(`https://data.etabus.gov.hk/v1/transport/kmb/eta/${stopId}/${route}/${svc}`);
+                const etaUrl = `https://data.etabus.gov.hk/v1/transport/kmb/eta/${stopId}/${route}/${svc}?_=${Date.now()}`;
+                const res = await fetch(etaUrl, {
+                    cache: 'no-store',
+                    headers: {
+                        'cache-control': 'no-cache',
+                        pragma: 'no-cache',
+                    },
+                });
                 const data = await res.json();
                 const now = new Date();
                 const upcoming = (data.data || [])
