@@ -500,23 +500,40 @@ const App = () => {
       );
       const representative = sortedRoutes[0];
       const segmentDisplay = representative.segments.map((seg, si) => {
-        const routeNames = Array.from(
-          new Set(
-            sortedRoutes.map((r) => r.segments[si]?.route).filter(Boolean),
-          ),
-        ).sort((a, b) =>
-          a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
-        );
+        const routeOptionMap = new Map();
+        sortedRoutes.forEach((routeCandidate) => {
+          const candidateSeg = routeCandidate.segments[si];
+          if (!candidateSeg?.route) return;
+          const optionKey = `${candidateSeg.route}|${candidateSeg.service_type || '1'}`;
+          const candidateEta = candidateSeg.nextEta ? new Date(candidateSeg.nextEta) : null;
+          const previous = routeOptionMap.get(optionKey);
+          const shouldReplace =
+            !previous ||
+            (candidateEta && (!previous.nextEta || candidateEta < previous.nextEta));
+          if (shouldReplace) {
+            routeOptionMap.set(optionKey, {
+              route: candidateSeg.route,
+              service_type: candidateSeg.service_type || '1',
+              nextEta: candidateEta,
+              hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
+              busInterval: candidateSeg.busInterval ?? null,
+            });
+          }
+        });
 
-        const earliestEta = sortedRoutes
-          .map((r) => r.segments[si]?.nextEta)
+        const routeOptions = Array.from(routeOptionMap.values()).sort((a, b) =>
+          a.route.localeCompare(b.route, undefined, { numeric: true, sensitivity: 'base' }),
+        );
+        const routeNames = routeOptions.map((o) => o.route);
+        const earliestEta = routeOptions
+          .map((o) => o.nextEta)
           .filter(Boolean)
-          .map((eta) => new Date(eta))
           .sort((a, b) => a - b)[0];
 
         return {
           ...seg,
           routeLabel: routeNames.join('/'),
+          routeOptions,
           nextEta: earliestEta || seg.nextEta,
         };
       });
@@ -528,6 +545,15 @@ const App = () => {
       };
     });
   }, [displayedResults]);
+
+  const getEtaText = useCallback((etaValue) => {
+    if (!etaValue) return 'No ETA';
+    const waitMin = Math.max(
+      0,
+      Math.round((new Date(etaValue) - new Date()) / 60000),
+    );
+    return waitMin <= 0 ? 'Arriving' : `${waitMin} min`;
+  }, []);
 
   // Load KMB data
   useEffect(() => {
@@ -827,33 +853,75 @@ const App = () => {
   };
 
   // Select route handler
-    const handleSelectRoute = async (route) => {
-        setSelectedRoute(route);
-        setExpandedSegments(new Set());
-        drawRouteOnMap(route);
-        const etaPromises = route.segments.map((seg) =>
-          window.routeEngine.fetchETA(seg.fromStop, seg.route, seg.service_type),
+  const handleSelectRoute = async (cardOrRoute) => {
+    const isCard = Boolean(cardOrRoute?.representative && cardOrRoute?.segmentDisplay);
+    const baseRoute = isCard ? cardOrRoute.representative : cardOrRoute;
+    const initialSegmentDisplay = isCard ? cardOrRoute.segmentDisplay : baseRoute.segments;
+
+    setSelectedRoute({ ...baseRoute, segmentDisplay: initialSegmentDisplay });
+    setExpandedSegments(new Set());
+    drawRouteOnMap(baseRoute);
+
+    const updatedSegmentDisplay = await Promise.all(
+      initialSegmentDisplay.map(async (seg) => {
+        const options =
+          seg.routeOptions && seg.routeOptions.length > 0
+            ? seg.routeOptions
+            : [
+                {
+                  route: seg.route,
+                  service_type: seg.service_type || '1',
+                  nextEta: seg.nextEta || null,
+                  hasActiveEta: Boolean(seg.hasActiveEta ?? seg.nextEta),
+                  busInterval: seg.busInterval ?? null,
+                },
+              ];
+
+        const refreshedOptions = await Promise.all(
+          options.map(async (option) => {
+            const etaList = await window.routeEngine.fetchETA(
+              seg.fromStop,
+              option.route,
+              option.service_type || '1',
+            );
+            const now = new Date();
+            const activeEtas = window.routeEngine.getActiveEtas
+              ? window.routeEngine.getActiveEtas(etaList, now)
+              : etaList.filter((e) => e.eta && new Date(e.eta) > now);
+            const next = activeEtas[0];
+            return {
+              ...option,
+              nextEta: next?.eta ? new Date(next.eta) : null,
+              hasActiveEta: activeEtas.length > 0,
+              busInterval:
+                etaList.length >= 2 && etaList[0].eta && etaList[1].eta
+                  ? Math.round(
+                      (new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000,
+                    )
+                  : null,
+            };
+          }),
         );
-    const etas = await Promise.all(etaPromises);
-    const now = new Date();
-    const updatedSegments = route.segments.map((seg, i) => {
-      const etaList = etas[i] || [];
-      const activeEtas = window.routeEngine.getActiveEtas
-        ? window.routeEngine.getActiveEtas(etaList, now)
-        : etaList.filter((e) => e.eta && new Date(e.eta) > now);
-      const next = activeEtas[0];
-      return {
-        ...seg,
-        nextEta: next?.eta ? new Date(next.eta) : null,
-        hasActiveEta: activeEtas.length > 0,
-        activeEtaCount: activeEtas.length,
-        busInterval:
-          etaList.length >= 2 && etaList[0].eta && etaList[1].eta
-            ? Math.round((new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000)
-            : null,
-      };
-    });
-    setSelectedRoute((prev) => ({ ...prev, segments: updatedSegments }));
+
+        const earliestEta = refreshedOptions
+          .map((option) => option.nextEta)
+          .filter(Boolean)
+          .sort((a, b) => a - b)[0];
+
+        return {
+          ...seg,
+          routeOptions: refreshedOptions.sort((a, b) =>
+            a.route.localeCompare(b.route, undefined, {
+              numeric: true,
+              sensitivity: 'base',
+            }),
+          ),
+          nextEta: earliestEta || null,
+        };
+      }),
+    );
+
+    setSelectedRoute((prev) => ({ ...prev, segmentDisplay: updatedSegmentDisplay }));
   };
 
   // Add to bookmark
@@ -932,6 +1000,8 @@ const App = () => {
       setIsLocating(false);
     }
   };
+
+  const detailSegments = selectedRoute?.segmentDisplay || selectedRoute?.segments || [];
 
   // RENDER
   return (
@@ -1295,7 +1365,7 @@ const App = () => {
               <div
                 key={card.key}
                 className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
-                onClick={() => handleSelectRoute(card.representative)}
+                onClick={() => handleSelectRoute(card)}
               >
                 <div className="flex justify-between items-center">
                   <div>
@@ -1312,11 +1382,22 @@ const App = () => {
                             >
                               {seg.routeLabel || seg.route}
                             </span>
-                            {seg.nextEta ? (
+                            {seg.routeOptions && seg.routeOptions.length > 0 ? (
+                              <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                {seg.routeOptions.map((option) => (
+                                  <span
+                                    key={`${option.route}|${option.service_type || '1'}`}
+                                    className={`text-[10px] leading-none whitespace-nowrap ${
+                                      option.nextEta ? 'text-[#E1251B]' : 'text-slate-400'
+                                    }`}
+                                  >
+                                    {option.route}: {getEtaText(option.nextEta)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : seg.nextEta ? (
                               <span className="text-[10px] text-[#E1251B] leading-none whitespace-nowrap">
-                                Next bus:{' '}
-                                {Math.max(0, Math.round((new Date(seg.nextEta) - new Date()) / 60000))}{' '}
-                                mins
+                                Next bus: {getEtaText(seg.nextEta)}
                               </span>
                             ) : seg.busInterval ? (
                               <span className="text-[10px] text-slate-400 leading-none whitespace-nowrap">
@@ -1368,14 +1449,14 @@ const App = () => {
           </button>
 
           <div className="flex items-center gap-3 mb-3">
-            {selectedRoute.segments.map((seg, si) => (
+            {detailSegments.map((seg, si) => (
               <React.Fragment key={si}>
                 {si > 0 && <span className="text-slate-300">{'\u2192'}</span>}
                 <span
                   className="px-3 py-1 rounded-xl text-white font-black text-lg"
                   style={{ backgroundColor: ROUTE_COLORS[si % ROUTE_COLORS.length] }}
                 >
-                  {seg.route}
+                  {seg.routeLabel || seg.route}
                 </span>
               </React.Fragment>
             ))}
@@ -1391,6 +1472,7 @@ const App = () => {
           )}
 
           {selectedRoute.segments.map((seg, si) => {
+            const displaySeg = detailSegments[si] || seg;
             const fromStop = stopMapRef.current[seg.fromStop];
             const toStop = stopMapRef.current[seg.toStop];
             const color = ROUTE_COLORS[si % ROUTE_COLORS.length];
@@ -1403,7 +1485,7 @@ const App = () => {
                 <div className="pl-2 border-l-4 py-2" style={{ borderColor: color }}>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="px-2 py-0.5 rounded-lg text-white text-xs font-bold" style={{ backgroundColor: color }}>
-                      {seg.route}
+                      {displaySeg.routeLabel || seg.route}
                     </span>
                     <span className="text-xs text-slate-500">
                       {seg.routeInfo?.orig_tc} {'\u2192'} {seg.routeInfo?.dest_tc}
@@ -1434,16 +1516,32 @@ const App = () => {
                       stops
                     </div>
                     <div className="flex font-normal flex-wrap gap-2">
-                      {seg.nextEta && (
-                        <span className="text-[#E1251B]">
-                          Next: {new Date(seg.nextEta).toLocaleTimeString('en-HK', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      )}
-                      {seg.busInterval && (
-                        <span className="text-slate-500">Every ~{seg.busInterval}min</span>
+                      {displaySeg.routeOptions && displaySeg.routeOptions.length > 0 ? (
+                        displaySeg.routeOptions.map((option) => (
+                          <span
+                            key={`${option.route}|${option.service_type || '1'}`}
+                            className={option.nextEta ? 'text-[#E1251B]' : 'text-slate-500'}
+                          >
+                            {option.route}: {getEtaText(option.nextEta)}
+                            {!option.nextEta && option.busInterval
+                              ? ` (~${option.busInterval}min)`
+                              : ''}
+                          </span>
+                        ))
+                      ) : (
+                        <>
+                          {seg.nextEta && (
+                            <span className="text-[#E1251B]">
+                              Next: {new Date(seg.nextEta).toLocaleTimeString('en-HK', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          )}
+                          {seg.busInterval && (
+                            <span className="text-slate-500">Every ~{seg.busInterval}min</span>
+                          )}
+                        </>
                       )}
                     </div>
                     {expandedSegments.has(si) && (
@@ -1483,7 +1581,7 @@ const App = () => {
                   </div>
                   <div className="text-sm font-bold">{'\u{1F3C1}'} {toStop?.name_tc || toStop?.name_en}</div>
                 </div>
-                {si < selectedRoute.segments.length - 1 && (
+                {si < detailSegments.length - 1 && (
                   <div className="flex items-center gap-2 text-sm text-slate-500 my-2 pl-2 border-l-2 border-dashed border-slate-300">
                     {'\u{1F6B6}'} Transfer ({selectedRoute.walkTimeTransfer || '?'} min walk)
                   </div>
