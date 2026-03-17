@@ -1045,7 +1045,7 @@ const App = () => {
                 className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
                 title="Swap From and To"
               >
-                Swap
+                🔁
               </button>
             </div>
             <button
