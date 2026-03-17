@@ -460,6 +460,7 @@ const App = () => {
   const [excludedRoutesText, setExcludedRoutesText] = useState('');
   const [strictEtaOnly, setStrictEtaOnly] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isResultsMinimized, setIsResultsMinimized] = useState(false);
 
   // Add-to-bookmark modal state
   const [addToBookmark, setAddToBookmark] = useState(null);
@@ -1014,6 +1015,16 @@ const App = () => {
 
   const detailSegments = selectedRoute?.segmentDisplay || selectedRoute?.segments || [];
 
+  useEffect(() => {
+    if (results.length === 0) setIsResultsMinimized(false);
+  }, [results.length]);
+
+  useEffect(() => {
+    if (isSearchOpen && results.length > 0 && !selectedRoute && !showBookmarks) {
+      setIsResultsMinimized(true);
+    }
+  }, [isSearchOpen, results.length, selectedRoute, showBookmarks]);
+
   // RENDER
   return (
     <div className="relative h-full w-full bg-slate-100 flex flex-col font-sans">
@@ -1047,7 +1058,13 @@ const App = () => {
             </button>
             <button
               onClick={() => {
-                setIsSearchOpen((v) => !v);
+                setIsSearchOpen((v) => {
+                  const next = !v;
+                  if (next && results.length > 0 && !selectedRoute && !showBookmarks) {
+                    setIsResultsMinimized(true);
+                  }
+                  return next;
+                });
                 setShowBookmarks(false);
               }}
               className="p-3 bg-white rounded-2xl shadow-md text-xl"
@@ -1176,10 +1193,25 @@ const App = () => {
 
       {/* Results panel */}
       {results.length > 0 && !selectedRoute && !showBookmarks && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[60vh] overflow-y-auto scrollbar-hide slide-up flex flex-col">
-          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 shrink-0">
-            {displayedResultCards.length} Route{displayedResultCards.length > 1 ? 's' : ''} Found
-          </h2>
+        <div
+          className={`absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl scrollbar-hide slide-up flex flex-col ${
+            isResultsMinimized ? 'max-h-[94px] overflow-hidden' : 'max-h-[60vh] overflow-y-auto'
+          }`}
+        >
+          <div className="mb-3 shrink-0 flex items-center justify-between gap-2">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+              {displayedResultCards.length} Route{displayedResultCards.length > 1 ? 's' : ''} Found
+            </h2>
+            <button
+              type="button"
+              onClick={() => setIsResultsMinimized((v) => !v)}
+              className="text-[11px] font-bold text-slate-500 hover:text-[#E1251B] border border-slate-200 rounded-lg px-2 py-1"
+            >
+              {isResultsMinimized ? 'Expand' : 'Minimize'}
+            </button>
+          </div>
+          {!isResultsMinimized && (
+            <>
           <label className="mb-3 shrink-0 flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -1441,6 +1473,8 @@ const App = () => {
               </div>
             ))}
           </div>
+            </>
+          )}
         </div>
       )}
 
