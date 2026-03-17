@@ -1127,7 +1127,7 @@ const App = () => {
                     className="h-11 sm:h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
                     title="Use current GPS location"
                   >
-                    {isLocating ? 'Locating...' : 'Use GPS'}
+                    {isLocating ? 'Locating...' : '📍'}
                   </button>
                 </div>
                 <AutocompleteInput
@@ -1143,7 +1143,7 @@ const App = () => {
                 className="h-11 sm:h-[52px] w-full sm:w-auto px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
                 title="Swap From and To"
               >
-                Swap
+                🔁
               </button>
             </div>
             <button
