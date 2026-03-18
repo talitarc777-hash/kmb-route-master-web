@@ -547,6 +547,12 @@ const App = () => {
     });
   }, [displayedResults]);
 
+  const availableFilterRoutes = useMemo(() => {
+    return Array.from(
+      new Set(displayedResults.flatMap((route) => route.segments.map((seg) => seg.route))),
+    ).sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [displayedResults]);
+
   const getEtaText = useCallback((etaValue) => {
     if (!etaValue) return 'No ETA';
     const waitMin = Math.max(
@@ -1111,9 +1117,9 @@ const App = () => {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-start">
+            <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
               <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                <div className="grid grid-cols-[1fr_auto] gap-2">
                   <AutocompleteInput
                     placeholder="From... (e.g. Mong Kok)"
                     value={origin}
@@ -1124,10 +1130,10 @@ const App = () => {
                     type="button"
                     onClick={handleUseCurrentLocation}
                     disabled={isLocating}
-                    className="h-11 sm:h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
+                    className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
                     title="Use current GPS location"
                   >
-                    {isLocating ? 'Locating...' : '📍'}
+                    {isLocating ? 'Locating...' : 'Use GPS'}
                   </button>
                 </div>
                 <AutocompleteInput
@@ -1140,10 +1146,10 @@ const App = () => {
               <button
                 type="button"
                 onClick={handleSwapLocations}
-                className="h-11 sm:h-[52px] w-full sm:w-auto px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
+                className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition"
                 title="Swap From and To"
               >
-                🔁
+                Swap
               </button>
             </div>
             <button
@@ -1247,10 +1253,7 @@ const App = () => {
               )}
             </div>
             <div className="flex flex-wrap gap-2 mb-2">
-              {Array.from(new Set(results.flatMap((r) => r.segments.map((s) => s.route))))
-                .sort((a, b) =>
-                  b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }),
-                )
+              {availableFilterRoutes
                 .map((r) => {
                   const isExcluded = excludedRoutesText
                     .toUpperCase()
@@ -1341,10 +1344,7 @@ const App = () => {
             </div>
 
             <div className="flex flex-wrap gap-2 mb-3">
-                {Array.from(new Set(results.flatMap((r) => r.segments.map((s) => s.route))))
-                .sort((a, b) =>
-                    b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }),
-                )
+                {availableFilterRoutes
                 .map((r) => {
                     const isExcluded = excludedRoutesText
                     .toUpperCase()
