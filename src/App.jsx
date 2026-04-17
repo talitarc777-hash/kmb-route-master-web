@@ -461,6 +461,9 @@ const App = () => {
   const [strictEtaOnly, setStrictEtaOnly] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isResultsMinimized, setIsResultsMinimized] = useState(false);
+  const [isRefreshingEta, setIsRefreshingEta] = useState(false);
+  const [lastEtaRefreshAt, setLastEtaRefreshAt] = useState(null);
+  const [refreshFeedback, setRefreshFeedback] = useState(null);
 
   // Add-to-bookmark modal state
   const [addToBookmark, setAddToBookmark] = useState(null);
@@ -571,6 +574,122 @@ const App = () => {
     if (waitMin <= 3) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     if (waitMin <= 10) return 'bg-amber-50 text-amber-700 border-amber-200';
     return 'bg-rose-50 text-rose-700 border-rose-200';
+  }, []);
+
+  const refreshStatusClass = useMemo(() => {
+    if (!refreshFeedback) return '';
+    if (refreshFeedback.type === 'success')
+      return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+    if (refreshFeedback.type === 'error')
+      return 'bg-red-50 border-red-200 text-red-600';
+    return 'bg-slate-100 border-slate-200 text-slate-600';
+  }, [refreshFeedback]);
+
+  const formatRefreshTime = useCallback((time) => {
+    if (!time) return '';
+    return time.toLocaleTimeString('en-HK', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  }, []);
+
+  const refreshBaseSegmentsEta = useCallback(async (segments) => {
+    const now = new Date();
+    return Promise.all(
+      (segments || []).map(async (seg) => {
+        const etaList = await window.routeEngine.fetchETA(
+          seg.fromStop,
+          seg.route,
+          seg.service_type || '1',
+        );
+        const activeEtas = window.routeEngine.getActiveEtas
+          ? window.routeEngine.getActiveEtas(etaList, now)
+          : etaList.filter((e) => e.eta && new Date(e.eta) > now);
+        const next = activeEtas[0];
+        const dynamicInterval =
+          etaList.length >= 2 && etaList[0]?.eta && etaList[1]?.eta
+            ? Math.round(
+                (new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000,
+              )
+            : null;
+        const routeFrequency = parseFloat(seg.routeInfo?.freq);
+
+        return {
+          ...seg,
+          nextEta: next?.eta ? new Date(next.eta) : null,
+          hasActiveEta: activeEtas.length > 0,
+          activeEtaCount: activeEtas.length,
+          busInterval:
+            dynamicInterval ??
+            seg.busInterval ??
+            (Number.isFinite(routeFrequency) ? routeFrequency : null),
+        };
+      }),
+    );
+  }, []);
+
+  const refreshSegmentDisplayEta = useCallback(async (segments) => {
+    const now = new Date();
+    return Promise.all(
+      (segments || []).map(async (seg) => {
+        const options =
+          seg.routeOptions && seg.routeOptions.length > 0
+            ? seg.routeOptions
+            : [
+                {
+                  route: seg.route,
+                  service_type: seg.service_type || '1',
+                  nextEta: seg.nextEta || null,
+                  hasActiveEta: Boolean(seg.hasActiveEta ?? seg.nextEta),
+                  busInterval: seg.busInterval ?? null,
+                },
+              ];
+
+        const refreshedOptions = await Promise.all(
+          options.map(async (option) => {
+            const etaList = await window.routeEngine.fetchETA(
+              seg.fromStop,
+              option.route,
+              option.service_type || '1',
+            );
+            const activeEtas = window.routeEngine.getActiveEtas
+              ? window.routeEngine.getActiveEtas(etaList, now)
+              : etaList.filter((e) => e.eta && new Date(e.eta) > now);
+            const next = activeEtas[0];
+
+            return {
+              ...option,
+              nextEta: next?.eta ? new Date(next.eta) : null,
+              hasActiveEta: activeEtas.length > 0,
+              busInterval:
+                etaList.length >= 2 && etaList[0]?.eta && etaList[1]?.eta
+                  ? Math.round(
+                      (new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000,
+                    )
+                  : option.busInterval ?? null,
+            };
+          }),
+        );
+
+        const sortedOptions = refreshedOptions.sort((a, b) =>
+          a.route.localeCompare(b.route, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          }),
+        );
+        const earliestEta = sortedOptions
+          .map((option) => option.nextEta)
+          .filter(Boolean)
+          .sort((a, b) => a - b)[0];
+
+        return {
+          ...seg,
+          routeOptions: sortedOptions,
+          nextEta: earliestEta || null,
+        };
+      }),
+    );
   }, []);
 
   // Load KMB data
@@ -880,67 +999,68 @@ const App = () => {
     setExpandedSegments(new Set());
     drawRouteOnMap(baseRoute);
 
-    const updatedSegmentDisplay = await Promise.all(
-      initialSegmentDisplay.map(async (seg) => {
-        const options =
-          seg.routeOptions && seg.routeOptions.length > 0
-            ? seg.routeOptions
-            : [
-                {
-                  route: seg.route,
-                  service_type: seg.service_type || '1',
-                  nextEta: seg.nextEta || null,
-                  hasActiveEta: Boolean(seg.hasActiveEta ?? seg.nextEta),
-                  busInterval: seg.busInterval ?? null,
-                },
-              ];
-
-        const refreshedOptions = await Promise.all(
-          options.map(async (option) => {
-            const etaList = await window.routeEngine.fetchETA(
-              seg.fromStop,
-              option.route,
-              option.service_type || '1',
-            );
-            const now = new Date();
-            const activeEtas = window.routeEngine.getActiveEtas
-              ? window.routeEngine.getActiveEtas(etaList, now)
-              : etaList.filter((e) => e.eta && new Date(e.eta) > now);
-            const next = activeEtas[0];
-            return {
-              ...option,
-              nextEta: next?.eta ? new Date(next.eta) : null,
-              hasActiveEta: activeEtas.length > 0,
-              busInterval:
-                etaList.length >= 2 && etaList[0].eta && etaList[1].eta
-                  ? Math.round(
-                      (new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000,
-                    )
-                  : null,
-            };
-          }),
-        );
-
-        const earliestEta = refreshedOptions
-          .map((option) => option.nextEta)
-          .filter(Boolean)
-          .sort((a, b) => a - b)[0];
-
-        return {
-          ...seg,
-          routeOptions: refreshedOptions.sort((a, b) =>
-            a.route.localeCompare(b.route, undefined, {
-              numeric: true,
-              sensitivity: 'base',
-            }),
-          ),
-          nextEta: earliestEta || null,
-        };
-      }),
-    );
+    const updatedSegmentDisplay = await refreshSegmentDisplayEta(initialSegmentDisplay);
 
     setSelectedRoute((prev) => ({ ...prev, segmentDisplay: updatedSegmentDisplay }));
   };
+
+  const handleRefreshEtaSession = useCallback(async () => {
+    if (isLoading || isRefreshingEta || results.length === 0) return;
+
+    setIsRefreshingEta(true);
+    setRefreshFeedback({
+      type: 'loading',
+      message: 'Refreshing arrival times...',
+    });
+
+    try {
+      window.routeEngine?.clearETACache?.();
+      const refreshedResults = await Promise.all(
+        results.map(async (route) => ({
+          ...route,
+          segments: await refreshBaseSegmentsEta(route.segments),
+        })),
+      );
+
+      setResults(refreshedResults);
+
+      if (selectedRoute) {
+        const latestBaseRoute =
+          refreshedResults.find((route) => route.id === selectedRoute.id) || selectedRoute;
+        const sourceSegments =
+          selectedRoute.segmentDisplay || latestBaseRoute.segmentDisplay || latestBaseRoute.segments;
+        const refreshedSegmentDisplay = await refreshSegmentDisplayEta(sourceSegments);
+
+        setSelectedRoute({
+          ...selectedRoute,
+          ...latestBaseRoute,
+          segmentDisplay: refreshedSegmentDisplay,
+        });
+      }
+
+      const refreshedAt = new Date();
+      setLastEtaRefreshAt(refreshedAt);
+      setRefreshFeedback({
+        type: 'success',
+        message: `Updated at ${formatRefreshTime(refreshedAt)}`,
+      });
+    } catch {
+      setRefreshFeedback({
+        type: 'error',
+        message: 'Refresh failed. Please try again.',
+      });
+    } finally {
+      setIsRefreshingEta(false);
+    }
+  }, [
+    formatRefreshTime,
+    isLoading,
+    isRefreshingEta,
+    refreshBaseSegmentsEta,
+    refreshSegmentDisplayEta,
+    results,
+    selectedRoute,
+  ]);
 
   // Add to bookmark
   const handleAddToBookmark = (stopId, stopName, routesAtStop) => {
@@ -1031,6 +1151,12 @@ const App = () => {
     }
   }, [isSearchOpen, results.length, selectedRoute, showBookmarks]);
 
+  useEffect(() => {
+    if (!refreshFeedback) return;
+    const timeout = setTimeout(() => setRefreshFeedback(null), 5000);
+    return () => clearTimeout(timeout);
+  }, [refreshFeedback]);
+
   // RENDER
   return (
     <div className="relative h-full w-full bg-slate-100 flex flex-col font-sans">
@@ -1042,7 +1168,7 @@ const App = () => {
           isSearchOpen ? 'bg-white shadow-xl' : ''
         }`}
       >
-        <div className="max-w-md mx-auto flex items-center justify-between">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 bg-white/80 backdrop-blur p-2 rounded-2xl border border-white/50 shadow-sm">
             {/* Replaced CSS Icon with PWA Image */}
             <img src="/pwa-192x192.png" alt="KMB Bus" className="w-10 h-10 rounded-xl shadow-sm object-contain" />
@@ -1081,7 +1207,7 @@ const App = () => {
         </div>
 
         {isSearchOpen && (
-          <form onSubmit={handleSearch} className="max-w-md mx-auto mt-4 space-y-3">
+          <form onSubmit={handleSearch} className="max-w-xl mx-auto mt-4 space-y-3">
             <div className="bg-slate-50 p-2 rounded-2xl flex items-center justify-between border border-slate-200">
               <div className="flex gap-2">
                 {['now', 'leave', 'arrive'].map((mode) => (
@@ -1201,21 +1327,47 @@ const App = () => {
       {results.length > 0 && !selectedRoute && !showBookmarks && (
         <div
           className={`absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl scrollbar-hide slide-up flex flex-col ${
-            isResultsMinimized ? 'max-h-[94px] overflow-hidden' : 'max-h-[60vh] overflow-y-auto'
+            isResultsMinimized ? 'max-h-[110px] overflow-hidden' : 'max-h-[70vh] md:max-h-[60vh] overflow-y-auto'
           }`}
         >
-          <div className="mb-3 shrink-0 flex items-center justify-between gap-2">
-            <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
-              {displayedResultCards.length} Route{displayedResultCards.length > 1 ? 's' : ''} Found
-            </h2>
-            <button
-              type="button"
-              onClick={() => setIsResultsMinimized((v) => !v)}
-              className="text-[11px] font-bold text-slate-500 hover:text-[#E1251B] border border-slate-200 rounded-lg px-2 py-1"
-            >
-              {isResultsMinimized ? 'Expand' : 'Minimize'}
-            </button>
+          <div className="mb-3 shrink-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                {displayedResultCards.length} Route{displayedResultCards.length > 1 ? 's' : ''}{' '}
+                Found
+              </h2>
+              {lastEtaRefreshAt && (
+                <div className="text-[11px] text-slate-500 font-semibold mt-1">
+                  Last refreshed: {formatRefreshTime(lastEtaRefreshAt)}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRefreshEtaSession}
+                disabled={isRefreshingEta || isLoading}
+                className="text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-2 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRefreshingEta ? 'Refreshing...' : 'Refresh ETA'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsResultsMinimized((v) => !v)}
+                className="text-[11px] font-bold text-slate-500 hover:text-[#E1251B] border border-slate-200 rounded-lg px-2 py-1"
+              >
+                {isResultsMinimized ? 'Expand' : 'Minimize'}
+              </button>
+            </div>
           </div>
+          {refreshFeedback && (
+            <div
+              aria-live="polite"
+              className={`mb-3 p-2 border rounded-xl text-xs font-bold ${refreshStatusClass}`}
+            >
+              {refreshFeedback.message}
+            </div>
+          )}
           {!isResultsMinimized && (
             <>
           <label className="mb-3 shrink-0 flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
@@ -1426,7 +1578,7 @@ const App = () => {
                               {seg.routeLabel || seg.route}
                             </span>
                             {seg.routeOptions && seg.routeOptions.length > 0 ? (
-                              <div className="flex flex-wrap gap-1 max-w-[220px]">
+                              <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
                                 {seg.routeOptions.map((option) => (
                                   <span
                                     key={`${option.route}|${option.service_type || '1'}`}
@@ -1480,16 +1632,39 @@ const App = () => {
 
       {/* Selected route detail */}
       {selectedRoute && !showBookmarks && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[55vh] overflow-y-auto scrollbar-hide slide-up">
-          <button
-            onClick={() => {
-              setSelectedRoute(null);
-              clearMapGraphics();
-            }}
-            className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"
-          >
-            {'\u2190'} Back
-          </button>
+        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[70vh] md:max-h-[55vh] overflow-y-auto scrollbar-hide slide-up">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <button
+              onClick={() => {
+                setSelectedRoute(null);
+                clearMapGraphics();
+              }}
+              className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"
+            >
+              {'\u2190'} Back
+            </button>
+            <button
+              type="button"
+              onClick={handleRefreshEtaSession}
+              disabled={isRefreshingEta || isLoading}
+              className="text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-2 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isRefreshingEta ? 'Refreshing...' : 'Refresh ETA'}
+            </button>
+          </div>
+          {lastEtaRefreshAt && (
+            <div className="text-[11px] text-slate-500 font-semibold mb-2">
+              Last refreshed: {formatRefreshTime(lastEtaRefreshAt)}
+            </div>
+          )}
+          {refreshFeedback && (
+            <div
+              aria-live="polite"
+              className={`mb-3 p-2 border rounded-xl text-xs font-bold ${refreshStatusClass}`}
+            >
+              {refreshFeedback.message}
+            </div>
+          )}
 
           <div className="flex items-center gap-3 mb-3">
             {detailSegments.map((seg, si) => (
