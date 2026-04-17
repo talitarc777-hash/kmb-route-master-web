@@ -288,12 +288,41 @@ function getActiveEtas(etaList, now = new Date(), maxMinutes = ETA_ACTIVE_WINDOW
     });
 }
 
+function parseFrequencyMinutes(value, fallback = 15) {
+    const freq = parseFloat(value);
+    return Number.isFinite(freq) && freq > 0 ? freq : fallback;
+}
+
+function buildPlannedDateTime(dateValue, timeValue, fallback = new Date()) {
+    if (!dateValue || !timeValue) return fallback;
+    const planned = new Date(`${dateValue}T${timeValue}:00`);
+    return Number.isNaN(planned.getTime()) ? fallback : planned;
+}
+
+function setRouteTimingMetadata(route, anchorTime, timeMode) {
+    if (!(anchorTime instanceof Date) || Number.isNaN(anchorTime.getTime())) return;
+    const durationMs = (route.estimatedTime || 0) * 60000;
+    if (timeMode === 'leave') {
+        route.plannedDepartureTime = anchorTime.toISOString();
+        route.plannedArrivalTime = new Date(anchorTime.getTime() + durationMs).toISOString();
+        return;
+    }
+    if (timeMode === 'arrive') {
+        route.plannedArrivalTime = anchorTime.toISOString();
+        route.plannedDepartureTime = new Date(anchorTime.getTime() - durationMs).toISOString();
+    }
+}
+
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // MAIN ROUTE FINDER ??Bidirectional
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 async function findRoutes(params) {
     const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, gcpKey, onProgress } = params;
     clearETACache();
+    const isPlannedMode = timeMode === 'leave' || timeMode === 'arrive';
+    const plannedAnchorTime = isPlannedMode
+        ? buildPlannedDateTime(dateValue, timeValue)
+        : null;
 
     // Build spatial grid once
     const grid = buildSpatialGrid(stopMap);
@@ -549,57 +578,64 @@ async function findRoutes(params) {
     const filteredCandidates = [];
 
     await Promise.all(candidates.map(async route => {
-        const etaResults = await Promise.all(
-            route.segments.map(seg => fetchETA(seg.fromStop, seg.route, seg.service_type))
-        );
-
-        // Attach ETAs and intervals to segments so UI can show them immediately
-        route.segments.forEach((seg, i) => {
-            const etasForSeg = etaResults[i] || [];
-            const active = getActiveEtas(etasForSeg, now);
-            seg.nextEta = active.length > 0 ? active[0].eta : null;
-            seg.hasActiveEta = active.length > 0;
-            seg.activeEtaCount = active.length;
-            seg.busInterval = parseFloat(seg.routeInfo?.freq) || null;
-        });
-
-        const firstETAs = etaResults[0];
-        // Discard ONLY if the API returned an entirely empty array
-        // (route does not serve this stop in this direction at all).
-        // Records with eta=null mean the route IS scheduled but has no
-        // current real-time GPS data ??keep these.
-        if (firstETAs.length === 0) return;
-
-        const futureETAs = getActiveEtas(firstETAs, now);
-
-        // Determine wait
         let waitTime;
+
         if (timeMode === 'now') {
+            const etaResults = await Promise.all(
+                route.segments.map(seg => fetchETA(seg.fromStop, seg.route, seg.service_type))
+            );
+
+            // Real-time ETAs are only used to rank "now" searches.
+            route.segments.forEach((seg, i) => {
+                const etasForSeg = etaResults[i] || [];
+                const active = getActiveEtas(etasForSeg, now);
+                seg.nextEta = active.length > 0 ? active[0].eta : null;
+                seg.hasActiveEta = active.length > 0;
+                seg.activeEtaCount = active.length;
+                seg.busInterval = parseFrequencyMinutes(seg.routeInfo?.freq, 15);
+            });
+
+            const firstETAs = etaResults[0];
+            // Discard ONLY if the API returned an entirely empty array
+            // (route does not serve this stop in this direction at all).
+            // Records with eta=null mean the route IS scheduled but has no
+            // current real-time GPS data ??keep these.
+            if (firstETAs.length === 0) return;
+
+            const futureETAs = getActiveEtas(firstETAs, now);
             if (futureETAs.length > 0) {
                 waitTime = Math.max(0, (new Date(futureETAs[0].eta) - now) / 60000);
             } else {
                 // No real-time data ??use scheduled frequency as wait estimate
-                waitTime = parseFloat(route.segments[0].routeInfo?.freq) || 15;
+                waitTime = parseFrequencyMinutes(route.segments[0].routeInfo?.freq, 15);
             }
         } else {
-            waitTime = parseFloat(route.segments[0].routeInfo?.freq) || 15;
+            // Planned trips should use scheduled assumptions, not the bus that
+            // happens to be approaching right now.
+            route.segments.forEach((seg) => {
+                seg.nextEta = null;
+                seg.hasActiveEta = false;
+                seg.activeEtaCount = 0;
+                seg.busInterval = parseFrequencyMinutes(seg.routeInfo?.freq, 15);
+            });
+            waitTime = parseFrequencyMinutes(route.segments[0].routeInfo?.freq, 15);
         }
 
-        // Bump wait if we can't make the first bus in time
         if (waitTime < route.walkTimeOrigin) {
-            waitTime = route.walkTimeOrigin + (parseFloat(route.segments[0].routeInfo?.freq) || 15);
+            waitTime = route.walkTimeOrigin + parseFrequencyMinutes(route.segments[0].routeInfo?.freq, 15);
         }
 
         let totalTime = route.walkTimeOrigin + waitTime + route.segments[0].stops.length * RIDE_MIN_PER_STOP;
         for (let i = 1; i < route.segments.length; i++) {
             const xwalk = i === 1 ? route.walkTimeTransfer : route.walkTimeTransfer2;
-            const xwait = parseFloat(route.segments[i].routeInfo?.freq) || 12;
+            const xwait = parseFrequencyMinutes(route.segments[i].routeInfo?.freq, 12);
             totalTime += (xwalk || 0) + xwait + route.segments[i].stops.length * RIDE_MIN_PER_STOP;
         }
         totalTime += route.walkTimeDest;
 
         route.estimatedTime = Math.round(totalTime);
         route.originWaitTime = Math.round(waitTime);
+        if (isPlannedMode) setRouteTimingMetadata(route, plannedAnchorTime, timeMode);
         filteredCandidates.push(route);
     }));
 

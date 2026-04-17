@@ -179,6 +179,31 @@ async function resolveLocation(inputObj) {
   return result;
 }
 
+function cloneRouteResults(routes) {
+  return (routes || []).map((route) => ({
+    ...route,
+    segments: (route.segments || []).map((seg) => ({ ...seg })),
+  }));
+}
+
+function buildSearchCacheKey({
+  originLoc,
+  destLoc,
+  timeMode,
+  dateValue,
+  timeValue,
+  excludedRoutesText,
+}) {
+  return JSON.stringify({
+    origin: [originLoc.lat.toFixed(6), originLoc.lng.toFixed(6)],
+    destination: [destLoc.lat.toFixed(6), destLoc.lng.toFixed(6)],
+    timeMode,
+    dateValue: timeMode === 'now' ? '' : dateValue,
+    timeValue: timeMode === 'now' ? '' : timeValue,
+    excludedRoutesText: (excludedRoutesText || '').trim().toUpperCase(),
+  });
+}
+
 // Autocomplete Input Component
 const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
   const displayValue = typeof value === 'string' ? value : value?.name || '';
@@ -187,18 +212,22 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
 
   useEffect(() => {
     const timer = setTimeout(async () => {
-      if (displayValue.length < 2) {
+      const trimmedValue = displayValue.trim();
+      const hasSelectedPlace = Boolean(value && typeof value === 'object' && value.place_id);
+      const parsedValue = trimmedValue ? parseLocationInput(trimmedValue) : null;
+
+      if (trimmedValue.length < 2 || hasSelectedPlace || parsedValue?.type === 'coords') {
         setSuggestions([]);
         return;
       }
       try {
-        const key = displayValue.trim().toLowerCase();
+        const key = trimmedValue.toLowerCase();
         const predictions = await fetchGcpWithCache(
           autocompleteCacheState,
           key,
           async () => {
             const res = await fetch(
-              `/api/google/place/autocomplete/json?input=${encodeURIComponent(displayValue)}&components=country:hk`,
+              `/api/google/place/autocomplete/json?input=${encodeURIComponent(trimmedValue)}&components=country:hk`,
             );
             const data = await res.json();
             return data.status === 'OK' ? data.predictions.slice(0, 5) : [];
@@ -209,7 +238,7 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
         console.error('Fetch Error:', e);
         setSuggestions([]);
       }
-    }, 300);
+    }, 350);
     return () => clearTimeout(timer);
   }, [value, displayValue]);
 
@@ -479,13 +508,14 @@ const App = () => {
   const routeMapRef = useRef({});
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
+  const searchCacheRef = useRef(new Map());
 
   const displayedResults = useMemo(() => {
-    if (!strictEtaOnly) return results;
+    if (!strictEtaOnly || timeMode !== 'now') return results;
     return results.filter((route) =>
       route.segments.every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta)),
     );
-  }, [results, strictEtaOnly]);
+  }, [results, strictEtaOnly, timeMode]);
 
   const displayedResultCards = useMemo(() => {
     const groups = new Map();
@@ -828,6 +858,24 @@ const App = () => {
         resolveLocation(origin),
         resolveLocation(destination),
       ]);
+      const searchCacheKey = buildSearchCacheKey({
+        originLoc,
+        destLoc,
+        timeMode,
+        dateValue,
+        timeValue,
+        excludedRoutesText,
+      });
+      const canReusePlannedSearch = timeMode !== 'now';
+      const cachedSearch = canReusePlannedSearch
+        ? searchCacheRef.current.get(searchCacheKey)
+        : null;
+
+      if (cachedSearch) {
+        setResults(cloneRouteResults(cachedSearch));
+        setIsSearchOpen(false);
+        return;
+      }
 
       setLoadingStatus('Searching routes...');
       const { filteredCandidates } = await window.routeEngine.findRoutes({
@@ -848,6 +896,14 @@ const App = () => {
         throw new Error(
           'No routes found. Try different locations or check if bus services are running.',
         );
+
+      if (canReusePlannedSearch) {
+        searchCacheRef.current.set(searchCacheKey, cloneRouteResults(filteredCandidates));
+        if (searchCacheRef.current.size > 8) {
+          const oldestKey = searchCacheRef.current.keys().next().value;
+          searchCacheRef.current.delete(oldestKey);
+        }
+      }
 
       setResults(filteredCandidates);
       setIsSearchOpen(false);
@@ -1375,9 +1431,12 @@ const App = () => {
               type="checkbox"
               checked={strictEtaOnly}
               onChange={(e) => setStrictEtaOnly(e.target.checked)}
+              disabled={timeMode !== 'now'}
               className="h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B]"
             />
-            Strict ETA filter (show only routes where every segment has active ETA now)
+            {timeMode === 'now'
+              ? 'Strict ETA filter (show only routes where every segment has active ETA now)'
+              : 'Strict ETA filter is available only for Now mode'}
           </label>
           <div className="mb-3 shrink-0">
             <button
