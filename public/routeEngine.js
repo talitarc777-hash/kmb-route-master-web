@@ -21,6 +21,7 @@ const WALK_RADIUS_KM = 0.6;   // walk from origin/dest to bus stop
 const TRANSFER_WALK_KM = 0.6;   // walk between transfer stops
 const MAX_FINAL = 100;   // results shown to user (increased for debugging)
 const RIDE_MIN_PER_STOP = 1.5;  // minutes per bus stop
+const BOARDING_BUFFER_MIN = 1; // small safety buffer before boarding each leg
 const GRID_DEG = 0.005; // spatial grid cell ??500m
 const ETA_ACTIVE_WINDOW_MIN = 120; // ETA must be within this window to be considered active
 const GCP_CACHE = new Map(); // in-memory promise cache
@@ -299,18 +300,177 @@ function buildPlannedDateTime(dateValue, timeValue, fallback = new Date()) {
     return Number.isNaN(planned.getTime()) ? fallback : planned;
 }
 
-function setRouteTimingMetadata(route, anchorTime, timeMode) {
-    if (!(anchorTime instanceof Date) || Number.isNaN(anchorTime.getTime())) return;
-    const durationMs = (route.estimatedTime || 0) * 60000;
+function getSegmentOperator(segment) {
+    return String(segment?.routeInfo?.co || 'KMB').toUpperCase();
+}
+
+async function fetchSegmentETA(segment) {
+    const operator = getSegmentOperator(segment);
+    if (!operator.includes('KMB')) return [];
+    return fetchETA(segment.fromStop, segment.route, segment.service_type);
+}
+
+function getLegApproachMinutes(route, segmentIndex) {
+    if (segmentIndex === 0) return route.walkTimeOrigin || 0;
+    if (segmentIndex === 1) return route.walkTimeTransfer || 0;
+    return route.walkTimeTransfer2 || 0;
+}
+
+function getRideDurationMinutes(segment) {
+    return (segment?.stops?.length || 0) * RIDE_MIN_PER_STOP;
+}
+
+function getNextValidBusETA(etaList, afterTime, now = new Date()) {
+    const lowerBound = afterTime instanceof Date ? afterTime : new Date(afterTime);
+    const activeEtas = getActiveEtas(etaList, now);
+    return activeEtas.find((eta) => new Date(eta.eta) >= lowerBound) || null;
+}
+
+function resetSegmentTiming(segment, defaultFrequency) {
+    segment.operator = getSegmentOperator(segment);
+    segment.nextEta = null;
+    segment.hasActiveEta = false;
+    segment.activeEtaCount = 0;
+    segment.busInterval = defaultFrequency;
+    segment.readyTime = null;
+    segment.boardTime = null;
+    segment.arrivalTime = null;
+    segment.waitMinutes = null;
+}
+
+async function applyNowTiming(route, now) {
+    let cursor = new Date(now);
+
+    for (let i = 0; i < route.segments.length; i++) {
+        const segment = route.segments[i];
+        const defaultFrequency = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
+        const etaList = await fetchSegmentETA(segment);
+        const readyTime = new Date(
+            cursor.getTime() + (getLegApproachMinutes(route, i) + BOARDING_BUFFER_MIN) * 60000
+        );
+        const nextValidEta = getNextValidBusETA(etaList, readyTime, now);
+
+        resetSegmentTiming(segment, defaultFrequency);
+        segment.readyTime = readyTime.toISOString();
+
+        if (!nextValidEta) return false;
+
+        const boardTime = new Date(nextValidEta.eta);
+        const arrivalTime = new Date(
+            boardTime.getTime() + getRideDurationMinutes(segment) * 60000
+        );
+        const validEtaCount = getActiveEtas(etaList, now).filter(
+            (eta) => new Date(eta.eta) >= readyTime
+        ).length;
+
+        segment.nextEta = nextValidEta.eta;
+        segment.hasActiveEta = true;
+        segment.activeEtaCount = validEtaCount;
+        segment.boardTime = boardTime.toISOString();
+        segment.arrivalTime = arrivalTime.toISOString();
+        segment.waitMinutes = Math.max(
+            0,
+            Math.round((boardTime.getTime() - readyTime.getTime()) / 60000)
+        );
+
+        if (i === 0) route.originWaitTime = segment.waitMinutes;
+        cursor = arrivalTime;
+    }
+
+    const finalArrival = new Date(cursor.getTime() + (route.walkTimeDest || 0) * 60000);
+    route.estimatedTime = Math.round((finalArrival.getTime() - now.getTime()) / 60000);
+    route.plannedDepartureTime = now.toISOString();
+    route.plannedArrivalTime = finalArrival.toISOString();
+    return true;
+}
+
+function applyLeaveTiming(route, departureTime) {
+    let cursor = new Date(departureTime);
+
+    for (let i = 0; i < route.segments.length; i++) {
+        const segment = route.segments[i];
+        const waitMinutes = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
+        const readyTime = new Date(
+            cursor.getTime() + (getLegApproachMinutes(route, i) + BOARDING_BUFFER_MIN) * 60000
+        );
+        const boardTime = new Date(readyTime.getTime() + waitMinutes * 60000);
+        const arrivalTime = new Date(
+            boardTime.getTime() + getRideDurationMinutes(segment) * 60000
+        );
+
+        resetSegmentTiming(segment, waitMinutes);
+        segment.readyTime = readyTime.toISOString();
+        segment.boardTime = boardTime.toISOString();
+        segment.arrivalTime = arrivalTime.toISOString();
+        segment.waitMinutes = waitMinutes;
+
+        if (i === 0) route.originWaitTime = waitMinutes;
+        cursor = arrivalTime;
+    }
+
+    const finalArrival = new Date(cursor.getTime() + (route.walkTimeDest || 0) * 60000);
+    route.estimatedTime = Math.round(
+        (finalArrival.getTime() - departureTime.getTime()) / 60000
+    );
+    route.plannedDepartureTime = departureTime.toISOString();
+    route.plannedArrivalTime = finalArrival.toISOString();
+    return true;
+}
+
+function applyArriveTiming(route, arrivalDeadline, now) {
+    let cursor = new Date(arrivalDeadline.getTime() - (route.walkTimeDest || 0) * 60000);
+    let firstLegWait = 0;
+
+    for (let i = route.segments.length - 1; i >= 0; i--) {
+        const segment = route.segments[i];
+        const waitMinutes = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
+        const arrivalTime = new Date(cursor);
+        const boardTime = new Date(
+            arrivalTime.getTime() - getRideDurationMinutes(segment) * 60000
+        );
+        const readyTime = new Date(boardTime.getTime() - waitMinutes * 60000);
+        const previousCursor = new Date(
+            readyTime.getTime() - (getLegApproachMinutes(route, i) + BOARDING_BUFFER_MIN) * 60000
+        );
+
+        resetSegmentTiming(segment, waitMinutes);
+        segment.readyTime = readyTime.toISOString();
+        segment.boardTime = boardTime.toISOString();
+        segment.arrivalTime = arrivalTime.toISOString();
+        segment.waitMinutes = waitMinutes;
+
+        if (i === 0) firstLegWait = waitMinutes;
+        cursor = previousCursor;
+    }
+
+    route.originWaitTime = firstLegWait;
+    route.estimatedTime = Math.round(
+        (arrivalDeadline.getTime() - cursor.getTime()) / 60000
+    );
+    route.plannedDepartureTime = cursor.toISOString();
+    route.plannedArrivalTime = arrivalDeadline.toISOString();
+    return cursor.getTime() >= now.getTime();
+}
+
+async function applyRouteTiming(route, options = {}) {
+    const {
+        timeMode = 'now',
+        dateValue,
+        timeValue,
+        now = new Date(),
+    } = options;
+    route.originWaitTime = 0;
+
+    if (timeMode === 'now') {
+        return applyNowTiming(route, now);
+    }
+
+    const plannedAnchorTime = buildPlannedDateTime(dateValue, timeValue, now);
     if (timeMode === 'leave') {
-        route.plannedDepartureTime = anchorTime.toISOString();
-        route.plannedArrivalTime = new Date(anchorTime.getTime() + durationMs).toISOString();
-        return;
+        return applyLeaveTiming(route, plannedAnchorTime);
     }
-    if (timeMode === 'arrive') {
-        route.plannedArrivalTime = anchorTime.toISOString();
-        route.plannedDepartureTime = new Date(anchorTime.getTime() - durationMs).toISOString();
-    }
+
+    return applyArriveTiming(route, plannedAnchorTime, now);
 }
 
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -319,10 +479,6 @@ function setRouteTimingMetadata(route, anchorTime, timeMode) {
 async function findRoutes(params) {
     const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, gcpKey, onProgress } = params;
     clearETACache();
-    const isPlannedMode = timeMode === 'leave' || timeMode === 'arrive';
-    const plannedAnchorTime = isPlannedMode
-        ? buildPlannedDateTime(dateValue, timeValue)
-        : null;
 
     // Build spatial grid once
     const grid = buildSpatialGrid(stopMap);
@@ -578,65 +734,13 @@ async function findRoutes(params) {
     const filteredCandidates = [];
 
     await Promise.all(candidates.map(async route => {
-        let waitTime;
-
-        if (timeMode === 'now') {
-            const etaResults = await Promise.all(
-                route.segments.map(seg => fetchETA(seg.fromStop, seg.route, seg.service_type))
-            );
-
-            // Real-time ETAs are only used to rank "now" searches.
-            route.segments.forEach((seg, i) => {
-                const etasForSeg = etaResults[i] || [];
-                const active = getActiveEtas(etasForSeg, now);
-                seg.nextEta = active.length > 0 ? active[0].eta : null;
-                seg.hasActiveEta = active.length > 0;
-                seg.activeEtaCount = active.length;
-                seg.busInterval = parseFrequencyMinutes(seg.routeInfo?.freq, 15);
-            });
-
-            const firstETAs = etaResults[0];
-            // Discard ONLY if the API returned an entirely empty array
-            // (route does not serve this stop in this direction at all).
-            // Records with eta=null mean the route IS scheduled but has no
-            // current real-time GPS data ??keep these.
-            if (firstETAs.length === 0) return;
-
-            const futureETAs = getActiveEtas(firstETAs, now);
-            if (futureETAs.length > 0) {
-                waitTime = Math.max(0, (new Date(futureETAs[0].eta) - now) / 60000);
-            } else {
-                // No real-time data ??use scheduled frequency as wait estimate
-                waitTime = parseFrequencyMinutes(route.segments[0].routeInfo?.freq, 15);
-            }
-        } else {
-            // Planned trips should use scheduled assumptions, not the bus that
-            // happens to be approaching right now.
-            route.segments.forEach((seg) => {
-                seg.nextEta = null;
-                seg.hasActiveEta = false;
-                seg.activeEtaCount = 0;
-                seg.busInterval = parseFrequencyMinutes(seg.routeInfo?.freq, 15);
-            });
-            waitTime = parseFrequencyMinutes(route.segments[0].routeInfo?.freq, 15);
-        }
-
-        if (waitTime < route.walkTimeOrigin) {
-            waitTime = route.walkTimeOrigin + parseFrequencyMinutes(route.segments[0].routeInfo?.freq, 15);
-        }
-
-        let totalTime = route.walkTimeOrigin + waitTime + route.segments[0].stops.length * RIDE_MIN_PER_STOP;
-        for (let i = 1; i < route.segments.length; i++) {
-            const xwalk = i === 1 ? route.walkTimeTransfer : route.walkTimeTransfer2;
-            const xwait = parseFrequencyMinutes(route.segments[i].routeInfo?.freq, 12);
-            totalTime += (xwalk || 0) + xwait + route.segments[i].stops.length * RIDE_MIN_PER_STOP;
-        }
-        totalTime += route.walkTimeDest;
-
-        route.estimatedTime = Math.round(totalTime);
-        route.originWaitTime = Math.round(waitTime);
-        if (isPlannedMode) setRouteTimingMetadata(route, plannedAnchorTime, timeMode);
-        filteredCandidates.push(route);
+        const isValid = await applyRouteTiming(route, {
+            timeMode,
+            dateValue,
+            timeValue,
+            now,
+        });
+        if (isValid) filteredCandidates.push(route);
     }));
 
     // ?€?€ Final sort: time ??transfers ??walk
@@ -662,5 +766,7 @@ window.routeEngine = {
     getEtaCallLog,
     formatEtaCallLogTxt,
     getActiveEtas,
+    getNextValidBusETA,
+    applyRouteTiming,
 };
 

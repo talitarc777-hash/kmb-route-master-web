@@ -624,103 +624,22 @@ const App = () => {
     });
   }, []);
 
-  const refreshBaseSegmentsEta = useCallback(async (segments) => {
-    const now = new Date();
-    return Promise.all(
-      (segments || []).map(async (seg) => {
-        const etaList = await window.routeEngine.fetchETA(
-          seg.fromStop,
-          seg.route,
-          seg.service_type || '1',
-        );
-        const activeEtas = window.routeEngine.getActiveEtas
-          ? window.routeEngine.getActiveEtas(etaList, now)
-          : etaList.filter((e) => e.eta && new Date(e.eta) > now);
-        const next = activeEtas[0];
-        const dynamicInterval =
-          etaList.length >= 2 && etaList[0]?.eta && etaList[1]?.eta
-            ? Math.round(
-                (new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000,
-              )
-            : null;
-        const routeFrequency = parseFloat(seg.routeInfo?.freq);
-
-        return {
-          ...seg,
-          nextEta: next?.eta ? new Date(next.eta) : null,
-          hasActiveEta: activeEtas.length > 0,
-          activeEtaCount: activeEtas.length,
-          busInterval:
-            dynamicInterval ??
-            seg.busInterval ??
-            (Number.isFinite(routeFrequency) ? routeFrequency : null),
-        };
-      }),
-    );
-  }, []);
-
-  const refreshSegmentDisplayEta = useCallback(async (segments) => {
-    const now = new Date();
-    return Promise.all(
-      (segments || []).map(async (seg) => {
-        const options =
-          seg.routeOptions && seg.routeOptions.length > 0
-            ? seg.routeOptions
-            : [
-                {
-                  route: seg.route,
-                  service_type: seg.service_type || '1',
-                  nextEta: seg.nextEta || null,
-                  hasActiveEta: Boolean(seg.hasActiveEta ?? seg.nextEta),
-                  busInterval: seg.busInterval ?? null,
-                },
-              ];
-
-        const refreshedOptions = await Promise.all(
-          options.map(async (option) => {
-            const etaList = await window.routeEngine.fetchETA(
-              seg.fromStop,
-              option.route,
-              option.service_type || '1',
-            );
-            const activeEtas = window.routeEngine.getActiveEtas
-              ? window.routeEngine.getActiveEtas(etaList, now)
-              : etaList.filter((e) => e.eta && new Date(e.eta) > now);
-            const next = activeEtas[0];
-
-            return {
-              ...option,
-              nextEta: next?.eta ? new Date(next.eta) : null,
-              hasActiveEta: activeEtas.length > 0,
-              busInterval:
-                etaList.length >= 2 && etaList[0]?.eta && etaList[1]?.eta
-                  ? Math.round(
-                      (new Date(etaList[1].eta) - new Date(etaList[0].eta)) / 60000,
-                    )
-                  : option.busInterval ?? null,
-            };
-          }),
-        );
-
-        const sortedOptions = refreshedOptions.sort((a, b) =>
-          a.route.localeCompare(b.route, undefined, {
-            numeric: true,
-            sensitivity: 'base',
-          }),
-        );
-        const earliestEta = sortedOptions
-          .map((option) => option.nextEta)
-          .filter(Boolean)
-          .sort((a, b) => a - b)[0];
-
-        return {
-          ...seg,
-          routeOptions: sortedOptions,
-          nextEta: earliestEta || null,
-        };
-      }),
-    );
-  }, []);
+  const refreshRouteTiming = useCallback(
+    async (route) => {
+      const clonedRoute = {
+        ...route,
+        segments: (route.segments || []).map((seg) => ({ ...seg })),
+      };
+      const isValid = await window.routeEngine.applyRouteTiming(clonedRoute, {
+        timeMode,
+        dateValue,
+        timeValue,
+        now: new Date(),
+      });
+      return isValid ? clonedRoute : null;
+    },
+    [dateValue, timeMode, timeValue],
+  );
 
   // Load KMB data
   useEffect(() => {
@@ -1046,7 +965,7 @@ const App = () => {
   };
 
   // Select route handler
-  const handleSelectRoute = async (cardOrRoute) => {
+  const handleSelectRoute = (cardOrRoute) => {
     const isCard = Boolean(cardOrRoute?.representative && cardOrRoute?.segmentDisplay);
     const baseRoute = isCard ? cardOrRoute.representative : cardOrRoute;
     const initialSegmentDisplay = isCard ? cardOrRoute.segmentDisplay : baseRoute.segments;
@@ -1054,10 +973,6 @@ const App = () => {
     setSelectedRoute({ ...baseRoute, segmentDisplay: initialSegmentDisplay });
     setExpandedSegments(new Set());
     drawRouteOnMap(baseRoute);
-
-    const updatedSegmentDisplay = await refreshSegmentDisplayEta(initialSegmentDisplay);
-
-    setSelectedRoute((prev) => ({ ...prev, segmentDisplay: updatedSegmentDisplay }));
   };
 
   const handleRefreshEtaSession = useCallback(async () => {
@@ -1071,27 +986,39 @@ const App = () => {
 
     try {
       window.routeEngine?.clearETACache?.();
-      const refreshedResults = await Promise.all(
-        results.map(async (route) => ({
-          ...route,
-          segments: await refreshBaseSegmentsEta(route.segments),
-        })),
-      );
+      const refreshedResults = (
+        await Promise.all(results.map((route) => refreshRouteTiming(route)))
+      ).filter(Boolean);
 
       setResults(refreshedResults);
+
+      if (refreshedResults.length === 0) {
+        setSelectedRoute(null);
+        clearMapGraphics();
+        setRefreshFeedback({
+          type: 'error',
+          message: 'No catchable routes are available right now.',
+        });
+        return;
+      }
 
       if (selectedRoute) {
         const latestBaseRoute =
           refreshedResults.find((route) => route.id === selectedRoute.id) || selectedRoute;
-        const sourceSegments =
-          selectedRoute.segmentDisplay || latestBaseRoute.segmentDisplay || latestBaseRoute.segments;
-        const refreshedSegmentDisplay = await refreshSegmentDisplayEta(sourceSegments);
+        const refreshedSelectedRoute = refreshedResults.find(
+          (route) => route.id === selectedRoute.id,
+        );
 
-        setSelectedRoute({
-          ...selectedRoute,
-          ...latestBaseRoute,
-          segmentDisplay: refreshedSegmentDisplay,
-        });
+        if (!refreshedSelectedRoute) {
+          setSelectedRoute(null);
+          clearMapGraphics();
+        } else {
+          setSelectedRoute({
+            ...selectedRoute,
+            ...latestBaseRoute,
+            segmentDisplay: latestBaseRoute.segments,
+          });
+        }
       }
 
       const refreshedAt = new Date();
@@ -1112,8 +1039,7 @@ const App = () => {
     formatRefreshTime,
     isLoading,
     isRefreshingEta,
-    refreshBaseSegmentsEta,
-    refreshSegmentDisplayEta,
+    refreshRouteTiming,
     results,
     selectedRoute,
   ]);
