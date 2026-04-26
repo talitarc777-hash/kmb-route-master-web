@@ -606,6 +606,17 @@ const App = () => {
     return 'bg-rose-50 text-rose-700 border-rose-200';
   }, []);
 
+  const formatClockTime = useCallback((timeValue) => {
+    if (!timeValue) return null;
+    const parsed = timeValue instanceof Date ? timeValue : new Date(timeValue);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleTimeString('en-HK', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }, []);
+
   const refreshStatusClass = useMemo(() => {
     if (!refreshFeedback) return '';
     if (refreshFeedback.type === 'success')
@@ -1678,6 +1689,14 @@ const App = () => {
             const displaySeg = detailSegments[si] || seg;
             const fromStop = stopMapRef.current[seg.fromStop];
             const toStop = stopMapRef.current[seg.toStop];
+            const nextSegment = detailSegments[si + 1] || selectedRoute.segments[si + 1];
+            const transferWalkMinutes = si === 0
+              ? selectedRoute.walkTimeTransfer
+              : selectedRoute.walkTimeTransfer2;
+            const transferArrivalClock = formatClockTime(displaySeg.arrivalTime || seg.arrivalTime);
+            const nextBoardClock = formatClockTime(
+              nextSegment?.boardTime || nextSegment?.nextEta,
+            );
             const color = ROUTE_COLORS[si % ROUTE_COLORS.length];
             const routesAtFromStop = (stopRoutesRef.current[seg.fromStop] || []).map((r) => ({
               route: r.route,
@@ -1782,11 +1801,23 @@ const App = () => {
                       </div>
                     )}
                   </div>
-                  <div className="text-sm font-bold">{'\u{1F3C1}'} {toStop?.name_tc || toStop?.name_en}</div>
+                  <div className="text-sm font-bold flex items-center gap-2 flex-wrap">
+                    <span>{'\u{1F3C1}'} {toStop?.name_tc || toStop?.name_en}</span>
+                    {si < detailSegments.length - 1 && transferArrivalClock && (
+                      <span className="text-[11px] font-bold px-2 py-1 rounded-full border border-red-100 bg-red-50 text-[#E1251B]">
+                        Arrive {transferArrivalClock}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {si < detailSegments.length - 1 && (
                   <div className="flex items-center gap-2 text-sm text-slate-500 my-2 pl-2 border-l-2 border-dashed border-slate-300">
-                    {'\u{1F6B6}'} Transfer ({selectedRoute.walkTimeTransfer || '?'} min walk)
+                    {'\u{1F6B6}'} Transfer ({transferWalkMinutes || '?'} min walk)
+                    {nextBoardClock && (
+                      <span className="text-[11px] font-semibold text-slate-600">
+                        {'\u00B7'} Next board {nextBoardClock}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
