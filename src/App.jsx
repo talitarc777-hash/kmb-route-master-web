@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { generateFallbackCandidates } from './data/fallbackRouteGenerator.js';
 
 // Constants
 const ROUTE_COLORS = [
@@ -183,6 +184,7 @@ function cloneRouteResults(routes) {
   return (routes || []).map((route) => ({
     ...route,
     segments: (route.segments || []).map((seg) => ({ ...seg })),
+    legs: (route.legs || []).map((leg) => ({ ...leg })),
   }));
 }
 
@@ -193,6 +195,7 @@ function buildSearchCacheKey({
   dateValue,
   timeValue,
   excludedRoutesText,
+  allowFallbackNonKmb,
 }) {
   return JSON.stringify({
     origin: [originLoc.lat.toFixed(6), originLoc.lng.toFixed(6)],
@@ -201,7 +204,69 @@ function buildSearchCacheKey({
     dateValue: timeMode === 'now' ? '' : dateValue,
     timeValue: timeMode === 'now' ? '' : timeValue,
     excludedRoutesText: (excludedRoutesText || '').trim().toUpperCase(),
+    allowFallbackNonKmb: Boolean(allowFallbackNonKmb),
   });
+}
+
+function isFallbackRoute(route) {
+  return route?.type === 'fallback_candidate' || route?.isFallback;
+}
+
+function parseMoney(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatFare(fare) {
+  if (!fare || fare.status !== 'available' || fare.amount == null) return 'Fare unavailable';
+  return `${fare.currency || 'HKD'} ${Number(fare.amount).toFixed(1)}`;
+}
+
+function estimateKmbFare(route) {
+  let total = 0;
+  for (const segment of route?.segments || []) {
+    const fare = parseMoney(segment?.routeInfo?.fare ?? segment?.routeInfo?.full_fare);
+    if (fare == null) return null;
+    total += fare;
+  }
+  return Number(total.toFixed(1));
+}
+
+function cheapestKnownKmbFare(routes) {
+  const fares = (routes || []).map(estimateKmbFare).filter((fare) => fare != null);
+  return fares.length > 0 ? Math.min(...fares) : null;
+}
+
+function routeHasActiveEta(route) {
+  return (route?.segments || []).every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta));
+}
+
+function rankFallbackCandidates(candidates) {
+  return [...(candidates || [])].sort((a, b) => {
+    const aFare = a.fare?.status === 'available' ? parseMoney(a.fare.amount) : null;
+    const bFare = b.fare?.status === 'available' ? parseMoney(b.fare.amount) : null;
+    if (aFare == null && bFare != null) return 1;
+    if (aFare != null && bFare == null) return -1;
+    if (aFare != null && bFare != null && aFare !== bFare) return aFare - bFare;
+    if ((a.estimated_time_min || 9999) !== (b.estimated_time_min || 9999)) {
+      return (a.estimated_time_min || 9999) - (b.estimated_time_min || 9999);
+    }
+    return (a.transfers || 0) - (b.transfers || 0);
+  });
+}
+
+function annotateFallbackCandidates(candidates, reason, cheapestKmbFareValue = null) {
+  return rankFallbackCandidates(candidates).map((candidate) => ({
+    ...candidate,
+    isFallback: true,
+    estimatedTime: candidate.estimated_time_min,
+    fallbackReason: reason,
+    fallbackLabel:
+      reason === 'no-kmb'
+        ? 'Fallback route — no valid KMB route found'
+        : 'Fallback route — lower-cost non-KMB option',
+    cheapestKmbFare: cheapestKmbFareValue,
+  }));
 }
 
 // Autocomplete Input Component
@@ -488,6 +553,7 @@ const App = () => {
   );
   const [excludedRoutesText, setExcludedRoutesText] = useState('');
   const [strictEtaOnly, setStrictEtaOnly] = useState(false);
+  const [allowFallbackNonKmb, setAllowFallbackNonKmb] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isResultsMinimized, setIsResultsMinimized] = useState(false);
   const [isRefreshingEta, setIsRefreshingEta] = useState(false);
@@ -513,13 +579,24 @@ const App = () => {
   const displayedResults = useMemo(() => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
     return results.filter((route) =>
+      isFallbackRoute(route) ||
       route.segments.every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta)),
     );
   }, [results, strictEtaOnly, timeMode]);
 
   const displayedResultCards = useMemo(() => {
     const groups = new Map();
+    const fallbackCards = [];
     for (const route of displayedResults) {
+      if (isFallbackRoute(route)) {
+        fallbackCards.push({
+          key: route.id,
+          type: 'fallback',
+          representative: route,
+          segmentDisplay: [],
+        });
+        continue;
+      }
       const stopPattern = route.segments
         .map((seg) => `${seg.fromStop}->${seg.toStop}`)
         .join('|');
@@ -528,7 +605,7 @@ const App = () => {
       groups.get(groupKey).push(route);
     }
 
-    return Array.from(groups.entries()).map(([groupKey, groupRoutes]) => {
+    const kmbCards = Array.from(groups.entries()).map(([groupKey, groupRoutes]) => {
       const sortedRoutes = [...groupRoutes].sort(
         (a, b) => (a.estimatedTime || 9999) - (b.estimatedTime || 9999),
       );
@@ -578,11 +655,17 @@ const App = () => {
         segmentDisplay,
       };
     });
+
+    return [...kmbCards, ...fallbackCards];
   }, [displayedResults]);
 
   const availableFilterRoutes = useMemo(() => {
     return Array.from(
-      new Set(displayedResults.flatMap((route) => route.segments.map((seg) => seg.route))),
+      new Set(
+        displayedResults
+          .filter((route) => !isFallbackRoute(route))
+          .flatMap((route) => route.segments.map((seg) => seg.route)),
+      ),
     ).sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
   }, [displayedResults]);
 
@@ -637,6 +720,7 @@ const App = () => {
 
   const refreshRouteTiming = useCallback(
     async (route) => {
+      if (isFallbackRoute(route)) return route;
       const clonedRoute = {
         ...route,
         segments: (route.segments || []).map((seg) => ({ ...seg })),
@@ -772,6 +856,59 @@ const App = () => {
 
   const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
 
+  const drawFallbackRouteOnMap = (route) => {
+    clearMapGraphics();
+    const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current;
+    const layer = graphicsLayerRef.current;
+    const view = viewRef.current;
+    if (!layer || !view || !Graphic || !Polyline || !Point || !Extent) return;
+
+    const points = [
+      route.origin,
+      ...(route.legs || []).flatMap((leg) => [leg.origin_stop, leg.destination_stop]),
+      route.destination,
+    ].filter((point) => point?.lat != null && point?.lng != null);
+
+    if (points.length < 2) return;
+
+    layer.add(
+      new Graphic({
+        geometry: new Polyline({
+          paths: [points.map((point) => [point.lng, point.lat])],
+          spatialReference: { wkid: 4326 },
+        }),
+        symbol: { type: 'simple-line', color: [37, 99, 235, 0.85], width: 5, style: 'short-dash' },
+      }),
+    );
+
+    points.forEach((point, index) => {
+      layer.add(
+        new Graphic({
+          geometry: new Point({ x: point.lng, y: point.lat, spatialReference: { wkid: 4326 } }),
+          symbol: {
+            type: 'simple-marker',
+            color: index === 0 ? [34, 197, 94] : index === points.length - 1 ? [239, 68, 68] : [255, 255, 255],
+            size: index === 0 || index === points.length - 1 ? 13 : 9,
+            outline: { color: [37, 99, 235], width: 2 },
+          },
+          popupTemplate: { title: point.name?.en || point.name || point.stop_id || 'Fallback stop' },
+        }),
+      );
+    });
+
+    const lats = points.map((point) => point.lat);
+    const lngs = points.map((point) => point.lng);
+    view.goTo(
+      new Extent({
+        xmin: Math.min(...lngs) - 0.005,
+        ymin: Math.min(...lats) - 0.005,
+        xmax: Math.max(...lngs) + 0.005,
+        ymax: Math.max(...lats) + 0.005,
+        spatialReference: { wkid: 4326 },
+      }).expand(1.15),
+    ).catch(() => {});
+  };
+
   // Search handler
   const handleSearch = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -784,6 +921,7 @@ const App = () => {
     clearMapGraphics();
 
     try {
+      let kmbSearchError = null;
       const [originLoc, destLoc] = await Promise.all([
         resolveLocation(origin),
         resolveLocation(destination),
@@ -795,6 +933,7 @@ const App = () => {
         dateValue,
         timeValue,
         excludedRoutesText,
+        allowFallbackNonKmb,
       });
       const canReusePlannedSearch = timeMode !== 'now';
       const cachedSearch = canReusePlannedSearch
@@ -808,34 +947,99 @@ const App = () => {
       }
 
       setLoadingStatus('Searching routes...');
-      const { filteredCandidates } = await window.routeEngine.findRoutes({
-        originLoc,
-        destLoc,
-        stopMap: stopMapRef.current,
-        routeMap: routeMapRef.current,
-        routeStops: routeStopsRef.current,
-        stopRoutes: stopRoutesRef.current,
-        timeMode,
-        dateValue,
-        timeValue,
-        excludedRoutesText,
-        onProgress: (msg) => setLoadingStatus(msg),
-      });
+      let filteredCandidates = [];
+      try {
+        const routeSearch = await window.routeEngine.findRoutes({
+          originLoc,
+          destLoc,
+          stopMap: stopMapRef.current,
+          routeMap: routeMapRef.current,
+          routeStops: routeStopsRef.current,
+          stopRoutes: stopRoutesRef.current,
+          timeMode,
+          dateValue,
+          timeValue,
+          excludedRoutesText,
+          onProgress: (msg) => setLoadingStatus(msg),
+        });
+        filteredCandidates = routeSearch.filteredCandidates || [];
+      } catch (err) {
+        kmbSearchError = err;
+        if (!allowFallbackNonKmb) throw err;
+      }
 
-      if (filteredCandidates.length === 0)
+      if (filteredCandidates.length === 0 && !allowFallbackNonKmb)
         throw new Error(
           'No routes found. Try different locations or check if bus services are running.',
         );
 
+      let finalResults = filteredCandidates;
+      if (allowFallbackNonKmb) {
+        const hasValidKmb = filteredCandidates.length > 0;
+        const hasActiveKmbEta = timeMode !== 'now' || filteredCandidates.some(routeHasActiveEta);
+        const cheapestKmbFareValue = cheapestKnownKmbFare(filteredCandidates);
+
+        const shouldCheckFallback =
+          !hasValidKmb || !hasActiveKmbEta || cheapestKmbFareValue != null;
+
+        if (shouldCheckFallback) {
+          setLoadingStatus('Checking non-KMB fallback options...');
+          try {
+            const fallbackPayload = await generateFallbackCandidates({
+              originLoc,
+              destLoc,
+              maxCandidates: 12,
+              includeTransfers: true,
+            });
+            const rankedFallback = rankFallbackCandidates(fallbackPayload.candidates || []);
+            const cheaperFallback = cheapestKmbFareValue == null
+              ? []
+              : rankedFallback.filter((candidate) => {
+                  const fare = candidate.fare?.status === 'available' ? parseMoney(candidate.fare.amount) : null;
+                  return fare != null && fare < cheapestKmbFareValue;
+                });
+
+            let fallbackReason = null;
+            let fallbackToShow = [];
+            if (!hasValidKmb) {
+              fallbackReason = 'no-kmb';
+              fallbackToShow = rankedFallback;
+            } else if (!hasActiveKmbEta) {
+              fallbackReason = 'no-eta';
+              fallbackToShow = rankedFallback;
+            } else if (cheaperFallback.length > 0) {
+              fallbackReason = 'cheaper';
+              fallbackToShow = cheaperFallback;
+            }
+
+            const annotatedFallback = annotateFallbackCandidates(
+              fallbackToShow.slice(0, 6),
+              fallbackReason,
+              cheapestKmbFareValue,
+            );
+            finalResults = [...filteredCandidates, ...annotatedFallback];
+          } catch (fallbackError) {
+            if (!hasValidKmb) throw fallbackError;
+            finalResults = filteredCandidates;
+          }
+        }
+      }
+
+      if (finalResults.length === 0) {
+        throw kmbSearchError || new Error(
+          'No routes found. Try different locations or check if services are running.',
+        );
+      }
+
       if (canReusePlannedSearch) {
-        searchCacheRef.current.set(searchCacheKey, cloneRouteResults(filteredCandidates));
+        searchCacheRef.current.set(searchCacheKey, cloneRouteResults(finalResults));
         if (searchCacheRef.current.size > 8) {
           const oldestKey = searchCacheRef.current.keys().next().value;
           searchCacheRef.current.delete(oldestKey);
         }
       }
 
-      setResults(filteredCandidates);
+      setResults(finalResults);
       setIsSearchOpen(false);
     } catch (err) {
       setSearchError(err.message);
@@ -847,6 +1051,10 @@ const App = () => {
 
   // Draw route on map
   const drawRouteOnMap = async (route) => {
+    if (isFallbackRoute(route)) {
+      drawFallbackRouteOnMap(route);
+      return;
+    }
     clearMapGraphics();
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current;
     const layer = graphicsLayerRef.current;
@@ -1271,6 +1479,20 @@ const App = () => {
                 Swap
               </button>
             </div>
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white/90 p-3 text-xs font-bold text-slate-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allowFallbackNonKmb}
+                onChange={(e) => setAllowFallbackNonKmb(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B]"
+              />
+              <span className="leading-snug">
+                KMB first, allow cheaper non-KMB fallback
+                <span className="block text-[11px] font-semibold text-slate-400">
+                  Optional Citybus, Tram, and MTR candidates only when KMB is unavailable, has no active ETA, or a known lower fare exists.
+                </span>
+              </span>
+            </label>
             <button
               type="submit"
               disabled={isLoading || !dataLoaded}
@@ -1553,72 +1775,113 @@ const App = () => {
               </div>
             )}
             {displayedResultCards.map((card) => (
-              <div
-                key={card.key}
-                className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
-                onClick={() => handleSelectRoute(card)}
-              >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <div className="font-black text-lg flex items-center gap-2 flex-wrap">
-                      {card.segmentDisplay.map((seg, si) => (
-                        <React.Fragment key={si}>
-                          {si > 0 && <span className="text-slate-300 text-sm">{'\u2192'}</span>}
-                          <div className="flex flex-col items-start gap-1">
-                            <span
-                              className="px-2 py-0.5 rounded-lg text-white text-sm"
-                              style={{
-                                backgroundColor: ROUTE_COLORS[si % ROUTE_COLORS.length],
-                              }}
-                            >
-                              {seg.routeLabel || seg.route}
-                            </span>
-                            {seg.routeOptions && seg.routeOptions.length > 0 ? (
-                              <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
-                                {seg.routeOptions.map((option) => (
-                                  <span
-                                    key={`${option.route}|${option.service_type || '1'}`}
-                                    className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
-                                  >
-                                    {option.route}: {getEtaText(option.nextEta)}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : seg.nextEta ? (
-                              <span className="text-[10px] text-[#E1251B] leading-none whitespace-nowrap">
-                                Next bus: {getEtaText(seg.nextEta)}
-                              </span>
-                            ) : seg.busInterval ? (
-                              <span className="text-[10px] text-slate-400 leading-none whitespace-nowrap">
-                                Next bus: ~{seg.busInterval} mins
-                              </span>
-                            ) : null}
-                          </div>
-                        </React.Fragment>
-                      ))}
+              card.type === 'fallback' ? (
+                <div
+                  key={card.key}
+                  className="p-4 bg-blue-50 rounded-2xl border-2 border-blue-100 cursor-pointer hover:border-blue-500 transition-colors"
+                  onClick={() => handleSelectRoute(card)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-blue-700">
+                        {card.representative.fallbackLabel}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-lg bg-blue-600 text-white text-xs font-black">
+                          {card.representative.operator}
+                        </span>
+                        <span className="font-black text-lg text-slate-800">
+                          {card.representative.route || card.representative.line}
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-2 flex flex-wrap gap-2">
+                        <span>
+                          {card.representative.transfers === 0
+                            ? 'Direct'
+                            : `${card.representative.transfers} transfer${card.representative.transfers > 1 ? 's' : ''}`}
+                        </span>
+                        <span>{'\u00B7'} Walk {card.representative.walk_distance_m}m</span>
+                        <span>{'\u00B7'} {formatFare(card.representative.fare)}</span>
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-2">
-                      <span>
-                        {card.representative.transfers === 0
-                          ? 'Direct'
-                          : `${card.representative.transfers} transfer${card.representative.transfers > 1 ? 's' : ''}`}
-                      </span>
-                      <span>{'\u00B7'} {card.representative.totalStops} stops</span>
-                      {card.representative.walkTimeOrigin > 0 && (
-                        <span>{'\u00B7'} {'\u{1F6B6}'} {card.representative.walkTimeOrigin}min walk</span>
-                      )}
-                      {card.representative.originWaitTime > 0 && (
-                        <span>{'\u00B7'} {'\u23F1'} {card.representative.originWaitTime}min wait</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[#E1251B] font-bold text-lg">
-                      ~{card.representative.estimatedTime}min
+                    <div className="text-right shrink-0">
+                      <div className="text-blue-700 font-bold text-lg">
+                        ~{card.representative.estimated_time_min}min
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-bold">
+                        confidence {Math.round((card.representative.confidence || 0) * 100)}%
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div
+                  key={card.key}
+                  className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
+                  onClick={() => handleSelectRoute(card)}
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <div className="font-black text-lg flex items-center gap-2 flex-wrap">
+                        {card.segmentDisplay.map((seg, si) => (
+                          <React.Fragment key={si}>
+                            {si > 0 && <span className="text-slate-300 text-sm">{'\u2192'}</span>}
+                            <div className="flex flex-col items-start gap-1">
+                              <span
+                                className="px-2 py-0.5 rounded-lg text-white text-sm"
+                                style={{
+                                  backgroundColor: ROUTE_COLORS[si % ROUTE_COLORS.length],
+                                }}
+                              >
+                                {seg.routeLabel || seg.route}
+                              </span>
+                              {seg.routeOptions && seg.routeOptions.length > 0 ? (
+                                <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
+                                  {seg.routeOptions.map((option) => (
+                                    <span
+                                      key={`${option.route}|${option.service_type || '1'}`}
+                                      className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
+                                    >
+                                      {option.route}: {getEtaText(option.nextEta)}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : seg.nextEta ? (
+                                <span className="text-[10px] text-[#E1251B] leading-none whitespace-nowrap">
+                                  Next bus: {getEtaText(seg.nextEta)}
+                                </span>
+                              ) : seg.busInterval ? (
+                                <span className="text-[10px] text-slate-400 leading-none whitespace-nowrap">
+                                  Next bus: ~{seg.busInterval} mins
+                                </span>
+                              ) : null}
+                            </div>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                      <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-2">
+                        <span>
+                          {card.representative.transfers === 0
+                            ? 'Direct'
+                            : `${card.representative.transfers} transfer${card.representative.transfers > 1 ? 's' : ''}`}
+                        </span>
+                        <span>{'\u00B7'} {card.representative.totalStops} stops</span>
+                        {card.representative.walkTimeOrigin > 0 && (
+                          <span>{'\u00B7'} {'\u{1F6B6}'} {card.representative.walkTimeOrigin}min walk</span>
+                        )}
+                        {card.representative.originWaitTime > 0 && (
+                          <span>{'\u00B7'} {'\u23F1'} {card.representative.originWaitTime}min wait</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[#E1251B] font-bold text-lg">
+                        ~{card.representative.estimatedTime}min
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )
             ))}
           </div>
             </>
@@ -1626,8 +1889,87 @@ const App = () => {
         </div>
       )}
 
+      {/* Selected fallback detail */}
+      {selectedRoute && isFallbackRoute(selectedRoute) && !showBookmarks && (
+        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[70vh] md:max-h-[55vh] overflow-y-auto scrollbar-hide slide-up">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <button
+              onClick={() => {
+                setSelectedRoute(null);
+                clearMapGraphics();
+              }}
+              className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"
+            >
+              {'\u2190'} Back
+            </button>
+            <span className="text-[11px] font-black uppercase tracking-wide text-blue-700">
+              {selectedRoute.fallbackLabel}
+            </span>
+          </div>
+
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                <span className="px-3 py-1 rounded-xl bg-blue-600 text-white font-black text-sm">
+                  {selectedRoute.operator}
+                </span>
+                <span className="font-black text-xl text-slate-800">
+                  {selectedRoute.route || selectedRoute.line}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500 font-semibold">
+                {selectedRoute.journey_type === 'direct' ? 'Direct fallback route' : 'Fallback route with transfer'}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-blue-700 font-bold text-xl">~{selectedRoute.estimated_time_min}min</div>
+              <div className="text-sm font-black text-slate-700">{formatFare(selectedRoute.fare)}</div>
+            </div>
+          </div>
+
+          <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs font-bold text-blue-800">
+            {selectedRoute.fallbackReason === 'no-kmb'
+              ? 'Shown because no valid KMB route was found for this search.'
+              : selectedRoute.fallbackReason === 'no-eta'
+                ? 'Shown because KMB options do not currently have active ETA confidence.'
+                : `Shown because its known fare is lower than the estimated KMB fare${selectedRoute.cheapestKmbFare != null ? ` (${selectedRoute.cheapestKmbFare.toFixed(1)} HKD)` : ''}.`}
+          </div>
+
+          <div className="space-y-3">
+            {(selectedRoute.legs || []).map((leg, index) => (
+              <div key={`${leg.route_variant_id}-${index}`} className="pl-3 border-l-4 border-blue-500 py-2">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className="px-2 py-0.5 rounded-lg bg-blue-600 text-white text-xs font-black">
+                    {leg.operator}
+                  </span>
+                  <span className="text-sm font-black text-slate-800">{leg.route || leg.line}</span>
+                  <span className="text-xs font-bold text-slate-500">{formatFare(leg.fare)}</span>
+                </div>
+                <div className="text-sm font-bold text-slate-700">
+                  {leg.origin_stop?.name?.tc || leg.origin_stop?.name?.en || leg.origin_stop?.stop_id}
+                  <span className="mx-2 text-slate-300">{'\u2192'}</span>
+                  {leg.destination_stop?.name?.tc || leg.destination_stop?.name?.en || leg.destination_stop?.stop_id}
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {leg.stop_count} stops {'\u00B7'} ride estimate {leg.estimated_ride_time_min} min
+                </div>
+                {index < (selectedRoute.transfer_stops || []).length && (
+                  <div className="mt-2 text-xs font-bold text-slate-500">
+                    Transfer walk: {selectedRoute.transfer_stops[index].walk_distance_m}m
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 text-xs text-slate-500 font-semibold">
+            Access walking: {selectedRoute.walk_distance_m}m {'\u00B7'} Confidence {Math.round((selectedRoute.confidence || 0) * 100)}%
+          </div>
+        </div>
+      )}
+
       {/* Selected route detail */}
-      {selectedRoute && !showBookmarks && (
+      {selectedRoute && !isFallbackRoute(selectedRoute) && !showBookmarks && (
         <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[70vh] md:max-h-[55vh] overflow-y-auto scrollbar-hide slide-up">
           <div className="flex items-center justify-between gap-3 mb-3">
             <button
