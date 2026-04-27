@@ -232,40 +232,39 @@ function estimateKmbFare(route) {
   return Number(total.toFixed(1));
 }
 
-function cheapestKnownKmbFare(routes) {
-  const fares = (routes || []).map(estimateKmbFare).filter((fare) => fare != null);
-  return fares.length > 0 ? Math.min(...fares) : null;
+function knownFareForRanking(route) {
+  if (isFallbackRoute(route)) {
+    return route.fare?.status === 'available' ? parseMoney(route.fare.amount) : null;
+  }
+  return estimateKmbFare(route);
 }
 
-function routeHasActiveEta(route) {
-  return (route?.segments || []).every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta));
+function estimatedTimeForRanking(route) {
+  return isFallbackRoute(route)
+    ? route.estimated_time_min ?? route.estimatedTime ?? 9999
+    : route.estimatedTime ?? 9999;
 }
 
-function rankFallbackCandidates(candidates) {
-  return [...(candidates || [])].sort((a, b) => {
-    const aFare = a.fare?.status === 'available' ? parseMoney(a.fare.amount) : null;
-    const bFare = b.fare?.status === 'available' ? parseMoney(b.fare.amount) : null;
+function rankCombinedTransportOptions(routes) {
+  return [...(routes || [])].sort((a, b) => {
+    const aFare = knownFareForRanking(a);
+    const bFare = knownFareForRanking(b);
     if (aFare == null && bFare != null) return 1;
     if (aFare != null && bFare == null) return -1;
     if (aFare != null && bFare != null && aFare !== bFare) return aFare - bFare;
-    if ((a.estimated_time_min || 9999) !== (b.estimated_time_min || 9999)) {
-      return (a.estimated_time_min || 9999) - (b.estimated_time_min || 9999);
+    if (estimatedTimeForRanking(a) !== estimatedTimeForRanking(b)) {
+      return estimatedTimeForRanking(a) - estimatedTimeForRanking(b);
     }
     return (a.transfers || 0) - (b.transfers || 0);
   });
 }
 
-function annotateFallbackCandidates(candidates, reason, cheapestKmbFareValue = null) {
-  return rankFallbackCandidates(candidates).map((candidate) => ({
+function annotateAlternativeCandidates(candidates) {
+  return (candidates || []).map((candidate) => ({
     ...candidate,
     isFallback: true,
+    optionLabel: 'Alternative transport option',
     estimatedTime: candidate.estimated_time_min,
-    fallbackReason: reason,
-    fallbackLabel:
-      reason === 'no-kmb'
-        ? 'Fallback route — no valid KMB route found'
-        : 'Fallback route — lower-cost non-KMB option',
-    cheapestKmbFare: cheapestKmbFareValue,
   }));
 }
 
@@ -891,7 +890,7 @@ const App = () => {
             size: index === 0 || index === points.length - 1 ? 13 : 9,
             outline: { color: [37, 99, 235], width: 2 },
           },
-          popupTemplate: { title: point.name?.en || point.name || point.stop_id || 'Fallback stop' },
+          popupTemplate: { title: point.name?.en || point.name || point.stop_id || 'Transport stop' },
         }),
       );
     });
@@ -976,52 +975,19 @@ const App = () => {
       let finalResults = filteredCandidates;
       if (allowFallbackNonKmb) {
         const hasValidKmb = filteredCandidates.length > 0;
-        const hasActiveKmbEta = timeMode !== 'now' || filteredCandidates.some(routeHasActiveEta);
-        const cheapestKmbFareValue = cheapestKnownKmbFare(filteredCandidates);
-
-        const shouldCheckFallback =
-          !hasValidKmb || !hasActiveKmbEta || cheapestKmbFareValue != null;
-
-        if (shouldCheckFallback) {
-          setLoadingStatus('Checking non-KMB fallback options...');
-          try {
-            const fallbackPayload = await generateFallbackCandidates({
-              originLoc,
-              destLoc,
-              maxCandidates: 12,
-              includeTransfers: true,
-            });
-            const rankedFallback = rankFallbackCandidates(fallbackPayload.candidates || []);
-            const cheaperFallback = cheapestKmbFareValue == null
-              ? []
-              : rankedFallback.filter((candidate) => {
-                  const fare = candidate.fare?.status === 'available' ? parseMoney(candidate.fare.amount) : null;
-                  return fare != null && fare < cheapestKmbFareValue;
-                });
-
-            let fallbackReason = null;
-            let fallbackToShow = [];
-            if (!hasValidKmb) {
-              fallbackReason = 'no-kmb';
-              fallbackToShow = rankedFallback;
-            } else if (!hasActiveKmbEta) {
-              fallbackReason = 'no-eta';
-              fallbackToShow = rankedFallback;
-            } else if (cheaperFallback.length > 0) {
-              fallbackReason = 'cheaper';
-              fallbackToShow = cheaperFallback;
-            }
-
-            const annotatedFallback = annotateFallbackCandidates(
-              fallbackToShow.slice(0, 6),
-              fallbackReason,
-              cheapestKmbFareValue,
-            );
-            finalResults = [...filteredCandidates, ...annotatedFallback];
-          } catch (fallbackError) {
-            if (!hasValidKmb) throw fallbackError;
-            finalResults = filteredCandidates;
-          }
+        setLoadingStatus('Checking other transport options...');
+        try {
+          const fallbackPayload = await generateFallbackCandidates({
+            originLoc,
+            destLoc,
+            maxCandidates: 12,
+            includeTransfers: true,
+          });
+          const alternatives = annotateAlternativeCandidates(fallbackPayload.candidates || []);
+          finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
+        } catch (fallbackError) {
+          if (!hasValidKmb) throw fallbackError;
+          finalResults = filteredCandidates;
         }
       }
 
@@ -1487,9 +1453,9 @@ const App = () => {
                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B]"
               />
               <span className="leading-snug">
-                KMB first, allow cheaper non-KMB fallback
+                Include other transport options with KMB
                 <span className="block text-[11px] font-semibold text-slate-400">
-                  Optional Citybus, Tram, and MTR candidates only when KMB is unavailable, has no active ETA, or a known lower fare exists.
+                  Compare KMB with Citybus, Tram, and MTR by known fare, estimated time, and transfers.
                 </span>
               </span>
             </label>
@@ -1784,7 +1750,7 @@ const App = () => {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-blue-700">
-                        {card.representative.fallbackLabel}
+                        {card.representative.optionLabel || 'Alternative transport option'}
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="px-2 py-0.5 rounded-lg bg-blue-600 text-white text-xs font-black">
@@ -1903,7 +1869,7 @@ const App = () => {
               {'\u2190'} Back
             </button>
             <span className="text-[11px] font-black uppercase tracking-wide text-blue-700">
-              {selectedRoute.fallbackLabel}
+              {selectedRoute.optionLabel || 'Alternative transport option'}
             </span>
           </div>
 
@@ -1918,7 +1884,7 @@ const App = () => {
                 </span>
               </div>
               <div className="text-xs text-slate-500 font-semibold">
-                {selectedRoute.journey_type === 'direct' ? 'Direct fallback route' : 'Fallback route with transfer'}
+                {selectedRoute.journey_type === 'direct' ? 'Direct other transport option' : 'Other transport option with transfer'}
               </div>
             </div>
             <div className="text-right">
@@ -1928,11 +1894,7 @@ const App = () => {
           </div>
 
           <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs font-bold text-blue-800">
-            {selectedRoute.fallbackReason === 'no-kmb'
-              ? 'Shown because no valid KMB route was found for this search.'
-              : selectedRoute.fallbackReason === 'no-eta'
-                ? 'Shown because KMB options do not currently have active ETA confidence.'
-                : `Shown because its known fare is lower than the estimated KMB fare${selectedRoute.cheapestKmbFare != null ? ` (${selectedRoute.cheapestKmbFare.toFixed(1)} HKD)` : ''}.`}
+            Shown because you chose to compare KMB with other transport options.
           </div>
 
           <div className="space-y-3">
