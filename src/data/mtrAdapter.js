@@ -1,4 +1,4 @@
-import { buildOperatorSummary, createEtaLoader, createStaticDatasetLoader } from './operatorCommon';
+import { buildOperatorSummary, createEtaLoader, createStaticDatasetLoader } from './operatorCommon.js';
 
 const loadMtrDatasetInternal = createStaticDatasetLoader('mtr', '/api/operators/mtr/dataset');
 const loadMtrEtaInternal = createEtaLoader('mtr-eta', ({ line, station }) =>

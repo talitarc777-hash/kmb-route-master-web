@@ -1,4 +1,4 @@
-import { buildGeoResolver, buildOperatorSummary, createEtaLoader, createStaticDatasetLoader } from './operatorCommon';
+import { buildGeoResolver, buildOperatorSummary, createEtaLoader, createStaticDatasetLoader } from './operatorCommon.js';
 
 const loadCitybusDatasetInternal = createStaticDatasetLoader('citybus', '/api/operators/citybus/dataset');
 const loadCitybusEtaInternal = createEtaLoader('citybus-eta', ({ stopId, route }) =>

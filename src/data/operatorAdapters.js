@@ -1,6 +1,6 @@
-import { citybusAdapter } from './citybusAdapter';
-import { tramAdapter } from './tramAdapter';
-import { mtrAdapter } from './mtrAdapter';
+import { citybusAdapter } from './citybusAdapter.js';
+import { tramAdapter } from './tramAdapter.js';
+import { mtrAdapter } from './mtrAdapter.js';
 
 export { citybusAdapter, tramAdapter, mtrAdapter };
 

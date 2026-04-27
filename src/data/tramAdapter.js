@@ -1,4 +1,4 @@
-import { buildGeoResolver, buildOperatorSummary, createStaticDatasetLoader } from './operatorCommon';
+import { buildGeoResolver, buildOperatorSummary, createStaticDatasetLoader } from './operatorCommon.js';
 
 const loadTramDatasetInternal = createStaticDatasetLoader('tram', '/api/operators/tram/dataset');
 
