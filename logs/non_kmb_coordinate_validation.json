@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-04-27T03:07:58Z",
+  "counts": {
+    "total_citybus_stops": 2606,
+    "citybus_stops_with_wgs84": 2606,
+    "total_tram_stops": 117,
+    "tram_stops_with_wgs84": 117,
+    "total_mtr_stations": 100,
+    "mtr_stations_with_wgs84": 100
+  },
+  "unresolved": {
+    "citybus": [],
+    "tram": [],
+    "mtr": []
+  },
+  "invalid": {
+    "citybus": [],
+    "tram": [],
+    "mtr": []
+  },
+  "samples": {
+    "citybus": {
+      "id": "CTB:10",
+      "stop_id": "10",
+      "station_code": null,
+      "name": {
+        "tc": "興民邨/<br>興民邨, 柴灣道",
+        "en": "HING MAN ESTATE/<br>Hing Man Estate, Chai Wan Road",
+        "sc": "兴民邨/<br>兴民邨, 柴湾道"
+      },
+      "lat": 22.267969885,
+      "lng": 114.233381219,
+      "coordinate_source": "TD HK1980 grid converted locally to WGS84"
+    },
+    "tram": {
+      "id": "TRAM:99101",
+      "stop_id": "99101",
+      "station_code": null,
+      "name": {
+        "tc": "筲箕灣道(柴灣道)(西行方向)",
+        "en": "Shau Kei Wan Road (Chai Wan Road) (West bound)",
+        "sc": "筲箕湾道(柴湾道)(西行方向)"
+      },
+      "lat": 22.2767582,
+      "lng": 114.228901956,
+      "coordinate_source": "TD HK1980 grid converted locally to WGS84"
+    },
+    "mtr": {
+      "id": "MTR:56",
+      "stop_id": "56",
+      "station_code": "AWE",
+      "name": {
+        "tc": "博覽館",
+        "en": "AsiaWorld-Expo",
+        "sc": null
+      },
+      "lat": 22.321749019,
+      "lng": 113.941235556,
+      "coordinate_source": "LandsD Location Search API (AsiaWorld-Expo)"
+    }
+  }
+}

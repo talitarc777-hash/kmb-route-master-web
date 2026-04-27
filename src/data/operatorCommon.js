@@ -1,4 +1,4 @@
-const STATIC_CACHE_PREFIX = 'kmb_operator_static_cache_v1';
+const STATIC_CACHE_PREFIX = 'kmb_operator_static_cache_v2';
 const STATIC_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const ETA_TTL_MS = 20 * 1000;
 

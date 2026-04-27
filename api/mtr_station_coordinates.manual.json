@@ -1,0 +1,4 @@
+{
+  "_comment": "Manual fallback for MTR station WGS84 coordinates. Keys can be station_id or station_code. Keep this file explicit and reviewable; automatic enrichment should come from official/open sources first.",
+  "stations": {}
+}
