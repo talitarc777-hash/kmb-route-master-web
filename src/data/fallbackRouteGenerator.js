@@ -6,8 +6,12 @@ const MAX_NEARBY_STOPS = 18;
 const MAX_ROUTE_ENTRIES = 80;
 const MAX_DIRECT_PER_OPERATOR = 8;
 const MAX_TRANSFER_PER_OPERATOR = 4;
+const MAX_TRANSFER_ROUTE_ENTRIES = 24;
+const MAX_TRANSFER_STOPS_PER_LEG = 32;
+const TRANSFER_GRID_DEG = 0.003;
 const WALK_KMH = 4.5;
 const BOARDING_BUFFER_MIN = 2;
+const INDEX_CACHE = new WeakMap();
 
 const MODE_CONFIG = {
   citybus: {
@@ -86,6 +90,36 @@ function routeKeyFor(routeStop) {
   return routeStop.route_variant_id || `${routeStop.operator}:${routeStop.route_id}:${routeStop.direction || ''}`;
 }
 
+function gridKey(lat, lng) {
+  return `${Math.floor(lat / TRANSFER_GRID_DEG)},${Math.floor(lng / TRANSFER_GRID_DEG)}`;
+}
+
+function buildStopGrid(stopsById) {
+  const grid = new Map();
+  for (const stop of stopsById.values()) {
+    const key = gridKey(stop.lat, stop.lng);
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(stop);
+  }
+  return grid;
+}
+
+function nearbyStopsFromGrid(index, stop, radiusKm) {
+  const cells = Math.ceil(radiusKm / (TRANSFER_GRID_DEG * 111)) + 1;
+  const gx = Math.floor(stop.lat / TRANSFER_GRID_DEG);
+  const gy = Math.floor(stop.lng / TRANSFER_GRID_DEG);
+  const out = [];
+  for (let dx = -cells; dx <= cells; dx++) {
+    for (let dy = -cells; dy <= cells; dy++) {
+      for (const candidate of index.stopGrid.get(`${gx + dx},${gy + dy}`) || []) {
+        const distanceKm = haversineKm(stop.lat, stop.lng, candidate.lat, candidate.lng);
+        if (distanceKm <= radiusKm) out.push({ stop: candidate, distanceKm });
+      }
+    }
+  }
+  return out.sort((a, b) => a.distanceKm - b.distanceKm);
+}
+
 function buildOperatorIndex(dataset, config) {
   const stopsById = new Map();
   for (const stop of dataset?.stops || []) {
@@ -142,10 +176,23 @@ function buildOperatorIndex(dataset, config) {
     config,
     dataset,
     stopsById,
+    stopGrid: buildStopGrid(stopsById),
     routeVariants,
     stopRouteEntries,
     fareIndex: buildFareIndex(dataset, config),
   };
+}
+
+function getOperatorIndex(dataset, config) {
+  if (!dataset || typeof dataset !== 'object') return buildOperatorIndex(dataset, config);
+  const cachedByMode = INDEX_CACHE.get(dataset);
+  const cached = cachedByMode?.get(config.mode);
+  if (cached) return cached;
+  const index = buildOperatorIndex(dataset, config);
+  const nextByMode = cachedByMode || new Map();
+  nextByMode.set(config.mode, index);
+  INDEX_CACHE.set(dataset, nextByMode);
+  return index;
 }
 
 function buildFareIndex(dataset, config) {
@@ -352,20 +399,28 @@ function generateDirectCandidates(index, originLoc, destLoc, originEntries, dest
 
 function generateTransferCandidates(index, originLoc, destLoc, originEntries, destEntries, transferRadiusKm) {
   const bestByPair = new Map();
-  for (const originEntry of originEntries) {
-    const firstLegStops = originEntry.variant.stops.slice(originEntry.index + 1);
-    for (const destEntry of destEntries) {
-      if (originEntry.routeKey === destEntry.routeKey) continue;
-      const secondLegStops = destEntry.variant.stops.slice(0, destEntry.index);
+  const destBoardEntryByStop = new Map();
+  for (const destEntry of destEntries.slice(0, MAX_TRANSFER_ROUTE_ENTRIES)) {
+    for (const secondStopEntry of destEntry.variant.stops.slice(0, destEntry.index).slice(-MAX_TRANSFER_STOPS_PER_LEG)) {
+      const existing = destBoardEntryByStop.get(secondStopEntry.stop_id);
+      if (!existing || destEntry.nearbyStop.distanceKm < existing.destEntry.nearbyStop.distanceKm) {
+        destBoardEntryByStop.set(secondStopEntry.stop_id, { secondStopEntry, destEntry });
+      }
+    }
+  }
 
-      for (const firstStopEntry of firstLegStops) {
+  for (const originEntry of originEntries.slice(0, MAX_TRANSFER_ROUTE_ENTRIES)) {
+    const firstLegStops = originEntry.variant.stops
+      .slice(originEntry.index + 1)
+      .slice(0, MAX_TRANSFER_STOPS_PER_LEG);
+    for (const firstStopEntry of firstLegStops) {
         const firstStop = index.stopsById.get(firstStopEntry.stop_id);
         if (!firstStop) continue;
-        for (const secondStopEntry of secondLegStops) {
-          const secondStop = index.stopsById.get(secondStopEntry.stop_id);
-          if (!secondStop) continue;
-          const transferWalkKm = haversineKm(firstStop.lat, firstStop.lng, secondStop.lat, secondStop.lng);
-          if (transferWalkKm > transferRadiusKm) continue;
+      for (const nearby of nearbyStopsFromGrid(index, firstStop, transferRadiusKm)) {
+        const match = destBoardEntryByStop.get(nearby.stop.stop_id);
+        if (!match) continue;
+        const { secondStopEntry, destEntry } = match;
+        if (originEntry.routeKey === destEntry.routeKey) continue;
 
           const leg1 = buildLeg(index, originEntry, {
             ...firstStopEntry,
@@ -393,13 +448,12 @@ function generateTransferCandidates(index, originLoc, destLoc, originEntries, de
             originEntry.nearbyStop,
             destEntry.nearbyStop,
             1,
-            transferWalkKm,
+            nearby.distanceKm,
           );
           const pairKey = `${originEntry.routeKey}->${destEntry.routeKey}`;
           const score = candidate.estimated_time_min + candidate.walk_distance_m / 100;
           const current = bestByPair.get(pairKey);
           if (!current || score < current.score) bestByPair.set(pairKey, { score, candidate });
-        }
       }
     }
   }
@@ -411,7 +465,7 @@ function generateTransferCandidates(index, originLoc, destLoc, originEntries, de
 }
 
 function generateForOperator({ dataset, config, originLoc, destLoc, options }) {
-  const index = buildOperatorIndex(dataset, config);
+  const index = getOperatorIndex(dataset, config);
   const walkRadiusKm = options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM;
   const transferRadiusKm = options.transferRadiusKm ?? DEFAULT_TRANSFER_RADIUS_KM;
 

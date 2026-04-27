@@ -909,9 +909,10 @@ const App = () => {
   };
 
   // Search handler
-  const handleSearch = async (e) => {
+  const handleSearch = async (e, overrides = {}) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!dataLoaded) return;
+    const searchAllowFallback = overrides.allowFallbackNonKmb ?? allowFallbackNonKmb;
     window.routeEngine?.clearEtaCallLog?.();
     setIsLoading(true);
     setSearchError(null);
@@ -932,7 +933,7 @@ const App = () => {
         dateValue,
         timeValue,
         excludedRoutesText,
-        allowFallbackNonKmb,
+        allowFallbackNonKmb: searchAllowFallback,
       });
       const canReusePlannedSearch = timeMode !== 'now';
       const cachedSearch = canReusePlannedSearch
@@ -964,16 +965,16 @@ const App = () => {
         filteredCandidates = routeSearch.filteredCandidates || [];
       } catch (err) {
         kmbSearchError = err;
-        if (!allowFallbackNonKmb) throw err;
+        if (!searchAllowFallback) throw err;
       }
 
-      if (filteredCandidates.length === 0 && !allowFallbackNonKmb)
+      if (filteredCandidates.length === 0 && !searchAllowFallback)
         throw new Error(
           'No routes found. Try different locations or check if bus services are running.',
         );
 
       let finalResults = filteredCandidates;
-      if (allowFallbackNonKmb) {
+      if (searchAllowFallback) {
         const hasValidKmb = filteredCandidates.length > 0;
         setLoadingStatus('Checking other transport options...');
         try {
@@ -981,7 +982,7 @@ const App = () => {
             originLoc,
             destLoc,
             maxCandidates: 12,
-            includeTransfers: true,
+            includeTransfers: false,
           });
           const alternatives = annotateAlternativeCandidates(fallbackPayload.candidates || []);
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
@@ -1551,6 +1552,27 @@ const App = () => {
           )}
           {!isResultsMinimized && (
             <>
+          <label className="mb-3 shrink-0 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={allowFallbackNonKmb}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setAllowFallbackNonKmb(next);
+                if (!isLoading) {
+                  setTimeout(() => handleSearch(null, { allowFallbackNonKmb: next }), 0);
+                }
+              }}
+              disabled={isLoading}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B] disabled:opacity-50"
+            />
+            <span className="leading-snug">
+              Include other transport options with KMB
+              <span className="block text-[11px] font-semibold text-slate-400">
+                Re-runs this search with Citybus, Tram, and MTR alternatives for comparison.
+              </span>
+            </span>
+          </label>
           <label className="mb-3 shrink-0 flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
             <input
               type="checkbox"
