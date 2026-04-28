@@ -188,6 +188,14 @@ function cloneRouteResults(routes) {
   }));
 }
 
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
 function buildSearchCacheKey({
   originLoc,
   destLoc,
@@ -222,6 +230,32 @@ function formatFare(fare) {
   return `${fare.currency || 'HKD'} ${Number(fare.amount).toFixed(1)}`;
 }
 
+function getOperatorDisplayName(code) {
+  const key = String(code || '').trim().toUpperCase();
+  if (key === 'KMB') return 'KMB';
+  if (key === 'CTB') return 'Citybus';
+  if (key === 'TRAM') return 'Tram';
+  if (key === 'MTR') return 'MTR';
+  return code || 'Other';
+}
+
+function getOperatorBadgeClass(code) {
+  const key = String(code || '').trim().toUpperCase();
+  if (key === 'KMB') return 'bg-red-600 text-white';
+  if (key === 'CTB') return 'bg-blue-600 text-white';
+  if (key === 'TRAM') return 'bg-emerald-600 text-white';
+  if (key === 'MTR') return 'bg-amber-500 text-slate-900';
+  return 'bg-slate-500 text-white';
+}
+
+function parseOperatorCodes(value) {
+  if (!value) return [];
+  return String(value)
+    .split('+')
+    .map((part) => part.trim().toUpperCase())
+    .filter(Boolean);
+}
+
 function estimateKmbFare(route) {
   let total = 0;
   for (const segment of route?.segments || []) {
@@ -251,9 +285,6 @@ function rankCombinedTransportOptions(routes) {
     const aFare = knownFareForRanking(a);
     const bFare = knownFareForRanking(b);
 
-    // Keep fare as the primary criterion when both options have known fare.
-    // If one side has unknown fare (common for KMB), fall back to time/transfers
-    // instead of auto-demoting that option to the bottom.
     if (aFare != null && bFare != null && aFare !== bFare) return aFare - bFare;
     if (estimatedTimeForRanking(a) !== estimatedTimeForRanking(b)) {
       return estimatedTimeForRanking(a) - estimatedTimeForRanking(b);
@@ -588,40 +619,45 @@ const App = () => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
     return results.filter((route) =>
       isFallbackRoute(route) ||
-      route.segments.every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta)),
+      (route.segments || []).every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta)),
     );
   }, [results, strictEtaOnly, timeMode]);
 
   const displayedResultCards = useMemo(() => {
     const groups = new Map();
-    const fallbackCards = [];
+    const cardsByKey = new Map();
+    const orderedKeys = [];
     for (const route of displayedResults) {
       if (isFallbackRoute(route)) {
-        fallbackCards.push({
-          key: route.id,
+        const key = route.id || `fallback-${orderedKeys.length}`;
+        cardsByKey.set(key, {
+          key,
           type: 'fallback',
           representative: route,
           segmentDisplay: [],
         });
+        orderedKeys.push(key);
         continue;
       }
-      const stopPattern = route.segments
+      const stopPattern = (route.segments || [])
         .map((seg) => `${seg.fromStop}->${seg.toStop}`)
         .join('|');
       const groupKey = `${route.transfers}|${stopPattern}`;
-      if (!groups.has(groupKey)) groups.set(groupKey, []);
+      const isNewGroup = !groups.has(groupKey);
+      if (isNewGroup) groups.set(groupKey, []);
       groups.get(groupKey).push(route);
+      if (isNewGroup) orderedKeys.push(groupKey);
     }
 
-    const kmbCards = Array.from(groups.entries()).map(([groupKey, groupRoutes]) => {
+    Array.from(groups.entries()).forEach(([groupKey, groupRoutes]) => {
       const sortedRoutes = [...groupRoutes].sort(
         (a, b) => (a.estimatedTime || 9999) - (b.estimatedTime || 9999),
       );
       const representative = sortedRoutes[0];
-      const segmentDisplay = representative.segments.map((seg, si) => {
+      const segmentDisplay = (representative.segments || []).map((seg, si) => {
         const routeOptionMap = new Map();
         sortedRoutes.forEach((routeCandidate) => {
-          const candidateSeg = routeCandidate.segments[si];
+          const candidateSeg = (routeCandidate.segments || [])[si];
           if (!candidateSeg?.route) return;
           const optionKey = `${candidateSeg.route}|${candidateSeg.service_type || '1'}`;
           const candidateEta = candidateSeg.nextEta ? new Date(candidateSeg.nextEta) : null;
@@ -657,14 +693,14 @@ const App = () => {
         };
       });
 
-      return {
+      cardsByKey.set(groupKey, {
         key: groupKey,
         representative,
         segmentDisplay,
-      };
+      });
     });
 
-    return [...kmbCards, ...fallbackCards];
+    return orderedKeys.map((key) => cardsByKey.get(key)).filter(Boolean);
   }, [displayedResults]);
 
   const availableFilterRoutes = useMemo(() => {
@@ -672,7 +708,7 @@ const App = () => {
       new Set(
         displayedResults
           .filter((route) => !isFallbackRoute(route))
-          .flatMap((route) => route.segments.map((seg) => seg.route)),
+          .flatMap((route) => (route.segments || []).map((seg) => seg.route)),
       ),
     ).sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
   }, [displayedResults]);
@@ -866,7 +902,7 @@ const App = () => {
 
   const drawFallbackRouteOnMap = (route) => {
     clearMapGraphics();
-    const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current;
+    const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = graphicsLayerRef.current;
     const view = viewRef.current;
     if (!layer || !view || !Graphic || !Polyline || !Point || !Extent) return;
@@ -922,10 +958,12 @@ const App = () => {
     if (e && e.preventDefault) e.preventDefault();
     if (!dataLoaded) return;
     const searchAllowFallback = overrides.allowFallbackNonKmb ?? allowFallbackNonKmb;
+    const preserveExistingResults = Boolean(overrides.preserveExistingResults);
     window.routeEngine?.clearEtaCallLog?.();
     setIsLoading(true);
     setSearchError(null);
-    setResults([]);
+    setRefreshFeedback(null);
+    if (!preserveExistingResults) setResults([]);
     setSelectedRoute(null);
     clearMapGraphics();
 
@@ -987,17 +1025,25 @@ const App = () => {
         const hasValidKmb = filteredCandidates.length > 0;
         setLoadingStatus('Checking other transport options...');
         try {
-          const fallbackPayload = await generateFallbackCandidates({
-            originLoc,
-            destLoc,
-            maxCandidates: 12,
-            includeTransfers: false,
-          });
+          const fallbackPayload = await withTimeout(
+            generateFallbackCandidates({
+              originLoc,
+              destLoc,
+              maxCandidates: 12,
+              includeTransfers: false,
+            }),
+            15000,
+            'Other transport data took too long to load.',
+          );
           const alternatives = annotateAlternativeCandidates(fallbackPayload.candidates || []);
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
         } catch (fallbackError) {
           if (!hasValidKmb) throw fallbackError;
           finalResults = filteredCandidates;
+          setRefreshFeedback({
+            type: 'error',
+            message: `${fallbackError.message || 'Other transport options could not load.'} Showing KMB routes only.`,
+          });
         }
       }
 
@@ -1032,7 +1078,7 @@ const App = () => {
       return;
     }
     clearMapGraphics();
-    const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current;
+    const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = graphicsLayerRef.current;
     const view = viewRef.current;
     if (!layer || !view || !Graphic) return;
@@ -1093,8 +1139,9 @@ const App = () => {
       );
     }
 
-    for (let si = 0; si < route.segments.length; si++) {
-      const seg = route.segments[si];
+    const routeSegments = route.segments || [];
+    for (let si = 0; si < routeSegments.length; si++) {
+      const seg = routeSegments[si];
       const color = ROUTE_COLORS[si % ROUTE_COLORS.length];
       const segStops = seg.stops.map((id) => stopMapRef.current[id]).filter(Boolean);
 
@@ -1116,7 +1163,7 @@ const App = () => {
         const isTerm = idx === 0 || idx === segStops.length - 1;
         addMarker(s.lat, s.lng, color, s.name_en, s.name_tc, isTerm ? 12 : 8, isTerm);
       });
-      if (si < route.segments.length - 1 && route.walkInfoTransfer?.geometry)
+      if (si < routeSegments.length - 1 && route.walkInfoTransfer?.geometry)
         drawPoly(route.walkInfoTransfer.geometry, [100, 100, 100, 0.8], 4, 'short-dot');
     }
 
@@ -1163,7 +1210,8 @@ const App = () => {
   const handleSelectRoute = (cardOrRoute) => {
     const isCard = Boolean(cardOrRoute?.representative && cardOrRoute?.segmentDisplay);
     const baseRoute = isCard ? cardOrRoute.representative : cardOrRoute;
-    const initialSegmentDisplay = isCard ? cardOrRoute.segmentDisplay : baseRoute.segments;
+    if (!baseRoute) return;
+    const initialSegmentDisplay = isCard ? cardOrRoute.segmentDisplay : baseRoute.segments || [];
 
     setSelectedRoute({ ...baseRoute, segmentDisplay: initialSegmentDisplay });
     setExpandedSegments(new Set());
@@ -1211,7 +1259,9 @@ const App = () => {
           setSelectedRoute({
             ...selectedRoute,
             ...latestBaseRoute,
-            segmentDisplay: latestBaseRoute.segments,
+            segmentDisplay: isFallbackRoute(latestBaseRoute)
+              ? selectedRoute.segmentDisplay || []
+              : latestBaseRoute.segments || [],
           });
         }
       }
@@ -1569,7 +1619,13 @@ const App = () => {
                 const next = e.target.checked;
                 setAllowFallbackNonKmb(next);
                 if (!isLoading) {
-                  setTimeout(() => handleSearch(null, { allowFallbackNonKmb: next }), 0);
+                  setTimeout(
+                    () => handleSearch(null, {
+                      allowFallbackNonKmb: next,
+                      preserveExistingResults: next,
+                    }),
+                    0,
+                  );
                 }
               }}
               disabled={isLoading}
@@ -1784,9 +1840,14 @@ const App = () => {
                         {card.representative.optionLabel || 'Alternative transport option'}
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-2 py-0.5 rounded-lg bg-blue-600 text-white text-xs font-black">
-                          {card.representative.operator}
-                        </span>
+                        {parseOperatorCodes(card.representative.operator).map((operatorCode) => (
+                          <span
+                            key={operatorCode}
+                            className={`px-2 py-0.5 rounded-lg text-xs font-black ${getOperatorBadgeClass(operatorCode)}`}
+                          >
+                            {getOperatorDisplayName(operatorCode)}
+                          </span>
+                        ))}
                         <span className="font-black text-lg text-slate-800">
                           {card.representative.route || card.representative.line}
                         </span>
@@ -1819,6 +1880,11 @@ const App = () => {
                 >
                   <div className="flex justify-between items-center">
                     <div>
+                      <div className="mb-2 flex items-center gap-2 flex-wrap">
+                        <span className={`px-2 py-0.5 rounded-lg text-xs font-black ${getOperatorBadgeClass('KMB')}`}>
+                          {getOperatorDisplayName('KMB')}
+                        </span>
+                      </div>
                       <div className="font-black text-lg flex items-center gap-2 flex-wrap">
                         {card.segmentDisplay.map((seg, si) => (
                           <React.Fragment key={si}>
@@ -2020,11 +2086,11 @@ const App = () => {
             </div>
           )}
 
-          {selectedRoute.segments.map((seg, si) => {
+          {(selectedRoute.segments || []).map((seg, si) => {
             const displaySeg = detailSegments[si] || seg;
             const fromStop = stopMapRef.current[seg.fromStop];
             const toStop = stopMapRef.current[seg.toStop];
-            const nextSegment = detailSegments[si + 1] || selectedRoute.segments[si + 1];
+            const nextSegment = detailSegments[si + 1] || (selectedRoute.segments || [])[si + 1];
             const transferWalkMinutes = si === 0
               ? selectedRoute.walkTimeTransfer
               : selectedRoute.walkTimeTransfer2;

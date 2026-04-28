@@ -210,14 +210,7 @@ function buildFareIndex(dataset, config) {
 }
 
 function findNearbyStops(index, loc, radiusKm) {
-  const out = [];
-  for (const stop of index.stopsById.values()) {
-    const distanceKm = haversineKm(loc.lat, loc.lng, stop.lat, stop.lng);
-    if (distanceKm <= radiusKm) {
-      out.push({ stop, distanceKm });
-    }
-  }
-  return out.sort((a, b) => a.distanceKm - b.distanceKm).slice(0, MAX_NEARBY_STOPS);
+  return nearbyStopsFromGrid(index, loc, radiusKm).slice(0, MAX_NEARBY_STOPS);
 }
 
 function entriesForNearbyStops(index, nearbyStops) {
@@ -336,9 +329,10 @@ function buildCandidate(index, originLoc, destLoc, legs, originNearby, destNearb
   const rideTime = legs.reduce((sum, leg) => sum + leg.estimated_ride_time_min, 0);
   const fare = combineFares(legs.map((leg) => leg.fare));
   const routeText = legs.map((leg) => leg.route).join(' -> ');
+  const lastLeg = legs[legs.length - 1];
 
   return {
-    id: `fallback-${index.config.mode}-${transfers}-${legs.map((leg) => leg.route_variant_id).join('__')}-${legs[0].origin_stop.stop_id}-${legs.at(-1).destination_stop.stop_id}`,
+    id: `fallback-${index.config.mode}-${transfers}-${legs.map((leg) => leg.route_variant_id).join('__')}-${legs[0].origin_stop.stop_id}-${lastLeg.destination_stop.stop_id}`,
     type: 'fallback_candidate',
     operator: transfers === 0 ? index.config.operator : legs.map((leg) => leg.operator).join('+'),
     mode: index.config.mode,

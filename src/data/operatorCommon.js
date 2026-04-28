@@ -3,6 +3,7 @@ const STATIC_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const ETA_TTL_MS = 20 * 1000;
 
 const memoryCache = new Map();
+const inflightCache = new Map();
 
 function getMemoryCache(key) {
   const row = memoryCache.get(key);
@@ -64,6 +65,7 @@ export function createStaticDatasetLoader(operator, url) {
   return async function loadDataset() {
     const memoryHit = getMemoryCache(memoryKey);
     if (memoryHit) return memoryHit;
+    if (inflightCache.has(memoryKey)) return inflightCache.get(memoryKey);
 
     const localHit = readLocalCache(localKey);
     if (localHit) {
@@ -71,10 +73,15 @@ export function createStaticDatasetLoader(operator, url) {
       return localHit;
     }
 
-    const payload = await fetchJson(url);
-    setMemoryCache(memoryKey, payload, STATIC_CACHE_TTL_MS);
-    writeLocalCache(localKey, payload, STATIC_CACHE_TTL_MS);
-    return payload;
+    const request = fetchJson(url)
+      .then((payload) => {
+        setMemoryCache(memoryKey, payload, STATIC_CACHE_TTL_MS);
+        writeLocalCache(localKey, payload, STATIC_CACHE_TTL_MS);
+        return payload;
+      })
+      .finally(() => inflightCache.delete(memoryKey));
+    inflightCache.set(memoryKey, request);
+    return request;
   };
 }
 
