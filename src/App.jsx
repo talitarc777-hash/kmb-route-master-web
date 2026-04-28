@@ -1840,17 +1840,17 @@ const App = () => {
                         {card.representative.optionLabel || 'Alternative transport option'}
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-lg text-slate-800">
+                          {card.representative.route || card.representative.line}
+                        </span>
                         {parseOperatorCodes(card.representative.operator).map((operatorCode) => (
                           <span
                             key={operatorCode}
-                            className={`px-2 py-0.5 rounded-lg text-xs font-black ${getOperatorBadgeClass(operatorCode)}`}
+                            className={`px-1 py-[1px] rounded text-[9px] leading-none font-black ${getOperatorBadgeClass(operatorCode)}`}
                           >
                             {getOperatorDisplayName(operatorCode)}
                           </span>
                         ))}
-                        <span className="font-black text-lg text-slate-800">
-                          {card.representative.route || card.representative.line}
-                        </span>
                       </div>
                       <div className="text-xs text-slate-500 mt-2 flex flex-wrap gap-2">
                         <span>
@@ -1880,24 +1880,24 @@ const App = () => {
                 >
                   <div className="flex justify-between items-center">
                     <div>
-                      <div className="mb-2 flex items-center gap-2 flex-wrap">
-                        <span className={`px-2 py-0.5 rounded-lg text-xs font-black ${getOperatorBadgeClass('KMB')}`}>
-                          {getOperatorDisplayName('KMB')}
-                        </span>
-                      </div>
                       <div className="font-black text-lg flex items-center gap-2 flex-wrap">
                         {card.segmentDisplay.map((seg, si) => (
                           <React.Fragment key={si}>
                             {si > 0 && <span className="text-slate-300 text-sm">{'\u2192'}</span>}
                             <div className="flex flex-col items-start gap-1">
-                              <span
-                                className="px-2 py-0.5 rounded-lg text-white text-sm"
-                                style={{
-                                  backgroundColor: ROUTE_COLORS[si % ROUTE_COLORS.length],
-                                }}
-                              >
-                                {seg.routeLabel || seg.route}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className="px-2 py-0.5 rounded-lg text-white text-sm"
+                                  style={{
+                                    backgroundColor: ROUTE_COLORS[si % ROUTE_COLORS.length],
+                                  }}
+                                >
+                                  {seg.routeLabel || seg.route}
+                                </span>
+                                <span className={`px-1 py-[1px] rounded text-[9px] leading-none font-black ${getOperatorBadgeClass('KMB')}`}>
+                                  {getOperatorDisplayName('KMB')}
+                                </span>
+                              </div>
                               {seg.routeOptions && seg.routeOptions.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
                                   {seg.routeOptions.map((option) => (
