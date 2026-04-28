@@ -338,7 +338,8 @@ function resetSegmentTiming(segment, defaultFrequency) {
     segment.waitMinutes = null;
 }
 
-async function applyNowTiming(route, now) {
+async function applyNowTiming(route, now, options = {}) {
+    const { allowNoEta = false } = options;
     let cursor = new Date(now);
 
     for (let i = 0; i < route.segments.length; i++) {
@@ -353,7 +354,22 @@ async function applyNowTiming(route, now) {
         resetSegmentTiming(segment, defaultFrequency);
         segment.readyTime = readyTime.toISOString();
 
-        if (!nextValidEta) return false;
+        if (!nextValidEta) {
+            if (!allowNoEta) return false;
+            const boardTime = new Date(readyTime.getTime() + defaultFrequency * 60000);
+            const arrivalTime = new Date(
+                boardTime.getTime() + getRideDurationMinutes(segment) * 60000
+            );
+            segment.activeEtaCount = getActiveEtas(etaList, now).filter(
+                (eta) => new Date(eta.eta) >= readyTime
+            ).length;
+            segment.boardTime = boardTime.toISOString();
+            segment.arrivalTime = arrivalTime.toISOString();
+            segment.waitMinutes = defaultFrequency;
+            if (i === 0) route.originWaitTime = segment.waitMinutes;
+            cursor = arrivalTime;
+            continue;
+        }
 
         const boardTime = new Date(nextValidEta.eta);
         const arrivalTime = new Date(
@@ -458,11 +474,12 @@ async function applyRouteTiming(route, options = {}) {
         dateValue,
         timeValue,
         now = new Date(),
+        allowNoEtaNow = false,
     } = options;
     route.originWaitTime = 0;
 
     if (timeMode === 'now') {
-        return applyNowTiming(route, now);
+        return applyNowTiming(route, now, { allowNoEta: allowNoEtaNow });
     }
 
     const plannedAnchorTime = buildPlannedDateTime(dateValue, timeValue, now);
@@ -477,7 +494,7 @@ async function applyRouteTiming(route, options = {}) {
 // MAIN ROUTE FINDER ??Bidirectional
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 async function findRoutes(params) {
-    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, gcpKey, onProgress } = params;
+    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, gcpKey, onProgress } = params;
     clearETACache();
 
     // Build spatial grid once
@@ -739,6 +756,7 @@ async function findRoutes(params) {
             dateValue,
             timeValue,
             now,
+            allowNoEtaNow: !strictEtaOnly,
         });
         if (isValid) filteredCandidates.push(route);
     }));

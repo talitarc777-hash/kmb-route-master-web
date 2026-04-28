@@ -204,6 +204,7 @@ function buildSearchCacheKey({
   timeValue,
   excludedRoutesText,
   allowFallbackNonKmb,
+  strictEtaOnly,
 }) {
   return JSON.stringify({
     origin: [originLoc.lat.toFixed(6), originLoc.lng.toFixed(6)],
@@ -213,6 +214,7 @@ function buildSearchCacheKey({
     timeValue: timeMode === 'now' ? '' : timeValue,
     excludedRoutesText: (excludedRoutesText || '').trim().toUpperCase(),
     allowFallbackNonKmb: Boolean(allowFallbackNonKmb),
+    strictEtaOnly: Boolean(strictEtaOnly),
   });
 }
 
@@ -774,10 +776,11 @@ const App = () => {
         dateValue,
         timeValue,
         now: new Date(),
+        allowNoEtaNow: !strictEtaOnly,
       });
       return isValid ? clonedRoute : null;
     },
-    [dateValue, timeMode, timeValue],
+    [dateValue, strictEtaOnly, timeMode, timeValue],
   );
 
   // Load KMB data
@@ -958,6 +961,7 @@ const App = () => {
     if (e && e.preventDefault) e.preventDefault();
     if (!dataLoaded) return;
     const searchAllowFallback = overrides.allowFallbackNonKmb ?? allowFallbackNonKmb;
+    const searchStrictEtaOnly = overrides.strictEtaOnly ?? strictEtaOnly;
     const preserveExistingResults = Boolean(overrides.preserveExistingResults);
     window.routeEngine?.clearEtaCallLog?.();
     setIsLoading(true);
@@ -981,6 +985,7 @@ const App = () => {
         timeValue,
         excludedRoutesText,
         allowFallbackNonKmb: searchAllowFallback,
+        strictEtaOnly: searchStrictEtaOnly,
       });
       const canReusePlannedSearch = timeMode !== 'now';
       const cachedSearch = canReusePlannedSearch
@@ -1007,6 +1012,7 @@ const App = () => {
           dateValue,
           timeValue,
           excludedRoutesText,
+          strictEtaOnly: searchStrictEtaOnly,
           onProgress: (msg) => setLoadingStatus(msg),
         });
         filteredCandidates = routeSearch.filteredCandidates || [];
@@ -1648,7 +1654,20 @@ const App = () => {
             <input
               type="checkbox"
               checked={strictEtaOnly}
-              onChange={(e) => setStrictEtaOnly(e.target.checked)}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setStrictEtaOnly(next);
+                if (!isLoading) {
+                  setTimeout(
+                    () => handleSearch(null, {
+                      strictEtaOnly: next,
+                      allowFallbackNonKmb,
+                      preserveExistingResults: true,
+                    }),
+                    0,
+                  );
+                }
+              }}
               disabled={timeMode !== 'now'}
               className="h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B]"
             />
