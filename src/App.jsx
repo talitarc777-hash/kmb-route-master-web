@@ -619,7 +619,7 @@ const App = () => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
     return results.filter((route) =>
       isFallbackRoute(route) ||
-      (route.segments || []).every((seg) => Boolean(seg.hasActiveEta ?? seg.nextEta)),
+      (route.segments || []).every((seg) => seg.hasActiveEta === true),
     );
   }, [results, strictEtaOnly, timeMode]);
 
