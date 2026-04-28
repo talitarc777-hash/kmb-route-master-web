@@ -1894,9 +1894,6 @@ const App = () => {
                                 >
                                   {seg.routeLabel || seg.route}
                                 </span>
-                                <span className={`px-1 py-[1px] rounded text-[9px] leading-none font-black ${getOperatorBadgeClass('KMB')}`}>
-                                  {getOperatorDisplayName('KMB')}
-                                </span>
                               </div>
                               {seg.routeOptions && seg.routeOptions.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
