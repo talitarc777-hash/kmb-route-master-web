@@ -591,7 +591,7 @@ const App = () => {
     new Date().toTimeString().substring(0, 5),
   );
   const [excludedRoutesText, setExcludedRoutesText] = useState('');
-  const [strictEtaOnly, setStrictEtaOnly] = useState(false);
+  const [strictEtaOnly, setStrictEtaOnly] = useState(true);
   const [allowFallbackNonKmb, setAllowFallbackNonKmb] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isResultsMinimized, setIsResultsMinimized] = useState(false);
@@ -1039,10 +1039,16 @@ const App = () => {
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
         } catch (fallbackError) {
           if (!hasValidKmb) throw fallbackError;
-          finalResults = filteredCandidates;
+          const previousAlternatives = preserveExistingResults
+            ? (results || []).filter((route) => isFallbackRoute(route))
+            : [];
+          finalResults = rankCombinedTransportOptions([
+            ...filteredCandidates,
+            ...previousAlternatives,
+          ]);
           setRefreshFeedback({
             type: 'error',
-            message: `${fallbackError.message || 'Other transport options could not load.'} Showing KMB routes only.`,
+            message: `${fallbackError.message || 'Other transport options could not load.'} Keeping latest available alternatives.`,
           });
         }
       }
