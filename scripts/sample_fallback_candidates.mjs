@@ -124,7 +124,7 @@ try {
   source = 'deterministic fixture datasets';
 }
 
-const sample = generateFallbackCandidatesFromDatasets({
+const sample = await generateFallbackCandidatesFromDatasets({
   datasets,
   originLoc: { lat: 22.2825, lng: 114.158, name: 'Central' },
   destLoc: { lat: 22.281, lng: 114.184, name: 'Causeway Bay' },

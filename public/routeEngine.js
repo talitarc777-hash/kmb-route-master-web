@@ -24,6 +24,7 @@ const RIDE_MIN_PER_STOP = 1.5;  // minutes per bus stop
 const BOARDING_BUFFER_MIN = 1; // small safety buffer before boarding each leg
 const GRID_DEG = 0.005; // spatial grid cell ??500m
 const ETA_ACTIVE_WINDOW_MIN = 120; // ETA must be within this window to be considered active
+const RIDE_TIME_CACHE_BUCKET_MS = 30 * 60 * 1000;
 const GCP_CACHE = new Map(); // in-memory promise cache
 const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
 const GCP_CACHE_MAX_ENTRIES = 180;
@@ -300,6 +301,11 @@ function buildPlannedDateTime(dateValue, timeValue, fallback = new Date()) {
     return Number.isNaN(planned.getTime()) ? fallback : planned;
 }
 
+function bucketTimestamp(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return 'none';
+    return String(Math.floor(date.getTime() / RIDE_TIME_CACHE_BUCKET_MS));
+}
+
 function getSegmentOperator(segment) {
     return String(segment?.routeInfo?.co || 'KMB').toUpperCase();
 }
@@ -316,8 +322,107 @@ function getLegApproachMinutes(route, segmentIndex) {
     return route.walkTimeTransfer2 || 0;
 }
 
-function getRideDurationMinutes(segment) {
+function getFallbackRideDurationMinutes(segment) {
     return (segment?.stops?.length || 0) * RIDE_MIN_PER_STOP;
+}
+
+function getRideDurationMinutes(segment) {
+    return segment?.rideDurationMinutes || getFallbackRideDurationMinutes(segment);
+}
+
+async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
+    const fromStop = stopMap?.[segment?.fromStop];
+    const toStop = stopMap?.[segment?.toStop];
+    const fallbackDuration = getFallbackRideDurationMinutes(segment);
+
+    if (!fromStop?.lat || !fromStop?.lng || !toStop?.lat || !toStop?.lng) {
+        return { duration: fallbackDuration, source: 'heuristic_per_stop' };
+    }
+
+    const routeCode = String(segment?.route || '').trim().toUpperCase();
+    const serviceType = String(segment?.service_type || '1').trim();
+    const timeMode = options.timeMode || 'now';
+    const referenceTime = timeMode === 'arrive'
+        ? options.arrivalTime
+        : options.departureTime;
+    const cacheKey = [
+        'transit-ride',
+        routeCode || 'unknown',
+        serviceType,
+        segment?.fromStop || 'unknown',
+        segment?.toStop || 'unknown',
+        timeMode,
+        bucketTimestamp(referenceTime),
+    ].join('|');
+    const cached = getGcpCachedValue(cacheKey);
+    if (cached) return cached;
+
+    const promise = (async () => {
+        try {
+            const query = new URLSearchParams({
+                origin: `${fromStop.lat},${fromStop.lng}`,
+                destination: `${toStop.lat},${toStop.lng}`,
+                mode: 'transit',
+                transit_mode: 'bus',
+            });
+            if (timeMode === 'arrive' && referenceTime instanceof Date && !Number.isNaN(referenceTime.getTime())) {
+                query.set('arrival_time', String(Math.floor(referenceTime.getTime() / 1000)));
+            } else if (referenceTime instanceof Date && !Number.isNaN(referenceTime.getTime())) {
+                query.set('departure_time', String(Math.floor(referenceTime.getTime() / 1000)));
+            }
+
+            const response = await fetch(`/api/google/directions/json?${query.toString()}`);
+            const data = await response.json();
+            if (data?.status === 'OK' && Array.isArray(data.routes) && data.routes.length > 0) {
+                const legs = data.routes[0]?.legs || [];
+                const transitSteps = legs.flatMap((leg) => leg.steps || []).filter((step) => step?.travel_mode === 'TRANSIT');
+                const matchingBusSteps = transitSteps.filter((step) => {
+                    const vehicleType = String(step?.transit_details?.line?.vehicle?.type || '').toUpperCase();
+                    const shortName = String(step?.transit_details?.line?.short_name || '').trim().toUpperCase();
+                    return vehicleType === 'BUS' && (!routeCode || shortName === routeCode);
+                });
+                const usableSteps = matchingBusSteps.length > 0
+                    ? matchingBusSteps
+                    : transitSteps.filter((step) => String(step?.transit_details?.line?.vehicle?.type || '').toUpperCase() === 'BUS');
+
+                if (usableSteps.length > 0) {
+                    const duration = Math.max(
+                        1,
+                        Math.round(
+                            usableSteps.reduce((sum, step) => sum + (step?.duration?.value || 0), 0) / 60
+                        )
+                    );
+                    const payload = { duration, source: 'google_transit_bus_duration' };
+                    setGcpCachedValue(cacheKey, payload);
+                    return payload;
+                }
+            }
+        } catch (error) {
+            console.warn('GCP transit ride duration error:', error);
+        }
+
+        const payload = { duration: fallbackDuration, source: 'heuristic_per_stop' };
+        setGcpCachedValue(cacheKey, payload, 10 * 60 * 1000);
+        return payload;
+    })();
+
+    GCP_CACHE.set(cacheKey, promise);
+    return promise;
+}
+
+async function enrichGoogleRideDurations(routes, stopMap, options = {}) {
+    const tasks = [];
+    for (const route of routes || []) {
+        for (const segment of route.segments || []) {
+            tasks.push(
+                fetchGCPTransitRideDuration(segment, stopMap, options).then((result) => {
+                    segment.rideDurationMinutes = result.duration;
+                    segment.rideDurationSource = result.source;
+                })
+            );
+        }
+    }
+    await Promise.all(tasks);
 }
 
 function getNextValidBusETA(etaList, afterTime, now = new Date()) {
@@ -762,6 +867,31 @@ async function findRoutes(params) {
     }));
 
     // ?€?€ Final sort: time ??transfers ??walk
+    if (filteredCandidates.length > 0) {
+        onProgress?.('Refining in-vehicle bus time...');
+        const plannedAnchorTime = buildPlannedDateTime(dateValue, timeValue, now);
+        await enrichGoogleRideDurations(filteredCandidates, stopMap, {
+            timeMode,
+            departureTime: timeMode === 'now' ? now : plannedAnchorTime,
+            arrivalTime: plannedAnchorTime,
+        });
+
+        const refinedCandidates = [];
+        await Promise.all(filteredCandidates.map(async route => {
+            const isValid = await applyRouteTiming(route, {
+                timeMode,
+                dateValue,
+                timeValue,
+                now,
+                allowNoEtaNow: !strictEtaOnly,
+            });
+            if (isValid) refinedCandidates.push(route);
+        }));
+
+        filteredCandidates.length = 0;
+        filteredCandidates.push(...refinedCandidates);
+    }
+
     filteredCandidates.sort((a, b) => {
         const dt = a.estimatedTime - b.estimatedTime;
         if (Math.abs(dt) > 5) return dt;

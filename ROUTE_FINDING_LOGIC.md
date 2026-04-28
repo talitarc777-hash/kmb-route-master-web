@@ -50,10 +50,14 @@ KMB candidates are then enriched with:
 - Walking times from `fetchGCPRoute(...)`
 - ETA from `fetchETA(fromStop, route, service_type)`
 - Active ETA filtering from `getActiveEtas(...)`
+- Google transit bus duration for in-vehicle ride time refinement
 
 KMB timing rules:
-- If ETA records exist, the route can still remain even if the next ETA is not currently active
-- If there are no ETA records for the first segment, the route is discarded
+- `Strict ETA ON` discards KMB routes when a valid next ETA cannot be found
+- `Strict ETA OFF` keeps the route and falls back to frequency-based waiting
+- Walking time still uses the current Google walking calls
+- Waiting time still uses ETA when available, otherwise route frequency fallback
+- In-vehicle ride time now prefers Google transit bus duration for each segment and falls back to the per-stop heuristic if Google cannot provide a usable match
 - Final time includes walk, wait, ride, transfer walk, and destination walk
 
 Final KMB sort:
@@ -85,6 +89,7 @@ Alternative transport data source notes:
 - Citybus and Tram use enriched TD stop data with cached WGS84 coordinates
 - MTR uses enriched station coordinates from official/open sources plus the manual seed file fallback
 - No Google Transit shortcut is used
+- Google Directions transit is used only to refine in-vehicle ride time after local candidates are already generated
 
 ## 5. Alternative Candidate Generation
 
@@ -110,6 +115,16 @@ Candidate metadata:
 - fare if available
 - confidence
 - data source
+
+Alternative timing model:
+- Candidate generation still starts locally from cached enriched operator datasets
+- Walking time remains local straight-line walking estimation
+- Boarding/wait handling remains the current simple buffer model (`BOARDING_BUFFER_MIN`)
+- In-vehicle ride time now prefers Google transit step duration by operator mode:
+  - Citybus: Google `transit_mode=bus`
+  - Tram: Google `transit_mode=tram`
+  - MTR: Google `transit_mode=subway`
+- If Google cannot return a usable transit step, the generator falls back to the previous per-stop heuristic
 
 Ranking when comparison mode is enabled:
 1. Known total fare

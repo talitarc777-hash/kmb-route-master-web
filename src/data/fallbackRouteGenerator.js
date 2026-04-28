@@ -12,6 +12,8 @@ const TRANSFER_GRID_DEG = 0.003;
 const WALK_KMH = 4.5;
 const BOARDING_BUFFER_MIN = 2;
 const INDEX_CACHE = new WeakMap();
+const GOOGLE_RIDE_CACHE = new Map();
+const GOOGLE_RIDE_BUCKET_MS = 30 * 60 * 1000;
 
 const MODE_CONFIG = {
   citybus: {
@@ -63,6 +65,18 @@ export function haversineKm(lat1, lng1, lat2, lng2) {
 
 function walkMinutes(distanceKm) {
   return Math.max(1, Math.ceil((distanceKm / WALK_KMH) * 60));
+}
+
+function bucketTimestamp(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return 'none';
+  return String(Math.floor(date.getTime() / GOOGLE_RIDE_BUCKET_MS));
+}
+
+function buildReferenceTime({ timeMode, dateValue, timeValue } = {}) {
+  if (timeMode === 'now') return new Date();
+  if (!dateValue || !timeValue) return new Date();
+  const planned = new Date(`${dateValue}T${timeValue}:00`);
+  return Number.isNaN(planned.getTime()) ? new Date() : planned;
 }
 
 function normalizeName(name) {
@@ -229,6 +243,89 @@ function getRouteLabel(route, fallbackRouteId) {
   return route?.display_route || route?.route || route?.line || route?.route_name?.en || fallbackRouteId;
 }
 
+function getTransitMode(config) {
+  if (config.mode === 'mtr') return 'subway';
+  if (config.mode === 'tram') return 'tram';
+  return 'bus';
+}
+
+function getHeuristicRideMinutes(index, stopCount) {
+  return Math.ceil(Math.max(0, stopCount - 1) * index.config.minutesPerStop);
+}
+
+async function fetchGoogleRideDuration(index, fromStop, toStop, routeLabel, options = {}) {
+  const heuristicDuration = getHeuristicRideMinutes(index, Math.max(1, (options.stopCount || 1)));
+  if (typeof window === 'undefined' || typeof fetch !== 'function') {
+    return { duration: heuristicDuration, source: 'heuristic_per_stop' };
+  }
+
+  const referenceTime = buildReferenceTime(options);
+  const cacheKey = [
+    index.config.mode,
+    routeLabel || 'unknown',
+    fromStop?.stop_id || 'unknown',
+    toStop?.stop_id || 'unknown',
+    options.timeMode || 'now',
+    bucketTimestamp(referenceTime),
+  ].join('|');
+  if (GOOGLE_RIDE_CACHE.has(cacheKey)) return GOOGLE_RIDE_CACHE.get(cacheKey);
+
+  const request = (async () => {
+    try {
+      const query = new URLSearchParams({
+        origin: `${fromStop.lat},${fromStop.lng}`,
+        destination: `${toStop.lat},${toStop.lng}`,
+        mode: 'transit',
+        transit_mode: getTransitMode(index.config),
+      });
+      if (options.timeMode === 'arrive') {
+        query.set('arrival_time', String(Math.floor(referenceTime.getTime() / 1000)));
+      } else {
+        query.set('departure_time', String(Math.floor(referenceTime.getTime() / 1000)));
+      }
+
+      const response = await fetch(`/api/google/directions/json?${query.toString()}`);
+      const data = await response.json();
+      if (data?.status === 'OK' && Array.isArray(data.routes) && data.routes.length > 0) {
+        const transitSteps = (data.routes[0]?.legs || [])
+          .flatMap((leg) => leg.steps || [])
+          .filter((step) => step?.travel_mode === 'TRANSIT');
+        const expectedMode = getTransitMode(index.config).toUpperCase();
+        const matchingModeSteps = transitSteps.filter((step) => {
+          const vehicleType = String(step?.transit_details?.line?.vehicle?.type || '').toUpperCase();
+          return vehicleType === expectedMode;
+        });
+        const matchingRouteSteps = matchingModeSteps.filter((step) => {
+          const shortName = String(step?.transit_details?.line?.short_name || '').trim().toUpperCase();
+          return !routeLabel || shortName === String(routeLabel).trim().toUpperCase();
+        });
+        const usableSteps = matchingRouteSteps.length > 0
+          ? matchingRouteSteps
+          : (matchingModeSteps.length > 0 ? matchingModeSteps : transitSteps);
+
+        if (usableSteps.length > 0) {
+          return {
+            duration: Math.max(
+              1,
+              Math.round(
+                usableSteps.reduce((sum, step) => sum + (step?.duration?.value || 0), 0) / 60,
+              ),
+            ),
+            source: `google_transit_${index.config.mode}_duration`,
+          };
+        }
+      }
+    } catch {
+      // Fall back quietly to the existing heuristic.
+    }
+
+    return { duration: heuristicDuration, source: 'heuristic_per_stop' };
+  })();
+
+  GOOGLE_RIDE_CACHE.set(cacheKey, request);
+  return request;
+}
+
 function getFare(index, fromStopId, toStopId, routeId, routeKey, direction, fromSequence, toSequence, route) {
   if (index.config.mode === 'mtr') {
     const fare = index.fareIndex.get(`${fromStopId}->${toStopId}`);
@@ -284,7 +381,7 @@ function combineFares(fares) {
   };
 }
 
-function buildLeg(index, fromEntry, toEntry) {
+async function buildLeg(index, fromEntry, toEntry, options = {}) {
   const route = fromEntry.route || toEntry.route;
   const routeLabel = getRouteLabel(route, fromEntry.route_id);
   const stopCount = Math.max(1, toEntry.index - fromEntry.index + 1);
@@ -299,6 +396,15 @@ function buildLeg(index, fromEntry, toEntry) {
     toEntry.sequence,
     route,
   );
+  const originStop = normalizeStop(index.stopsById.get(fromEntry.stop_id));
+  const destinationStop = normalizeStop(index.stopsById.get(toEntry.stop_id));
+  const rideTiming = await fetchGoogleRideDuration(
+    index,
+    originStop,
+    destinationStop,
+    routeLabel,
+    { ...options, stopCount },
+  );
 
   return {
     operator: index.config.operator,
@@ -308,10 +414,11 @@ function buildLeg(index, fromEntry, toEntry) {
     route_id: fromEntry.route_id,
     route_variant_id: fromEntry.routeKey,
     direction: fromEntry.direction,
-    origin_stop: normalizeStop(index.stopsById.get(fromEntry.stop_id)),
-    destination_stop: normalizeStop(index.stopsById.get(toEntry.stop_id)),
+    origin_stop: originStop,
+    destination_stop: destinationStop,
     stop_count: stopCount,
-    estimated_ride_time_min: Math.ceil(Math.max(0, stopCount - 1) * index.config.minutesPerStop),
+    estimated_ride_time_min: rideTiming.duration,
+    ride_time_source: rideTiming.source,
     fare,
     data_source: route?.source || 'operator dataset',
   };
@@ -363,14 +470,14 @@ function buildCandidate(index, originLoc, destLoc, legs, originNearby, destNearb
   };
 }
 
-function generateDirectCandidates(index, originLoc, destLoc, originEntries, destEntries) {
+async function generateDirectCandidates(index, originLoc, destLoc, originEntries, destEntries, options) {
   const bestByRoute = new Map();
   for (const originEntry of originEntries) {
     for (const destEntry of destEntries) {
       if (originEntry.routeKey !== destEntry.routeKey) continue;
       if (originEntry.index >= destEntry.index) continue;
 
-      const leg = buildLeg(index, originEntry, destEntry);
+      const leg = await buildLeg(index, originEntry, destEntry, options);
       const candidate = buildCandidate(
         index,
         originLoc,
@@ -391,7 +498,7 @@ function generateDirectCandidates(index, originLoc, destLoc, originEntries, dest
     .slice(0, MAX_DIRECT_PER_OPERATOR);
 }
 
-function generateTransferCandidates(index, originLoc, destLoc, originEntries, destEntries, transferRadiusKm) {
+async function generateTransferCandidates(index, originLoc, destLoc, originEntries, destEntries, transferRadiusKm, options) {
   const bestByPair = new Map();
   const destBoardEntryByStop = new Map();
   for (const destEntry of destEntries.slice(0, MAX_TRANSFER_ROUTE_ENTRIES)) {
@@ -416,14 +523,14 @@ function generateTransferCandidates(index, originLoc, destLoc, originEntries, de
         const { secondStopEntry, destEntry } = match;
         if (originEntry.routeKey === destEntry.routeKey) continue;
 
-          const leg1 = buildLeg(index, originEntry, {
+          const leg1 = await buildLeg(index, originEntry, {
             ...firstStopEntry,
             routeKey: originEntry.routeKey,
             route_id: originEntry.route_id,
             route: originEntry.route,
             direction: originEntry.direction,
-          });
-          const leg2 = buildLeg(
+          }, options);
+          const leg2 = await buildLeg(
             index,
             {
               ...secondStopEntry,
@@ -433,6 +540,7 @@ function generateTransferCandidates(index, originLoc, destLoc, originEntries, de
               direction: destEntry.direction,
             },
             destEntry,
+            options,
           );
           const candidate = buildCandidate(
             index,
@@ -458,7 +566,7 @@ function generateTransferCandidates(index, originLoc, destLoc, originEntries, de
     .slice(0, MAX_TRANSFER_PER_OPERATOR);
 }
 
-function generateForOperator({ dataset, config, originLoc, destLoc, options }) {
+async function generateForOperator({ dataset, config, originLoc, destLoc, options }) {
   const index = getOperatorIndex(dataset, config);
   const walkRadiusKm = options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM;
   const transferRadiusKm = options.transferRadiusKm ?? DEFAULT_TRANSFER_RADIUS_KM;
@@ -467,10 +575,10 @@ function generateForOperator({ dataset, config, originLoc, destLoc, options }) {
   const destNearby = findNearbyStops(index, destLoc, walkRadiusKm);
   const originEntries = entriesForNearbyStops(index, originNearby);
   const destEntries = entriesForNearbyStops(index, destNearby);
-  const direct = generateDirectCandidates(index, originLoc, destLoc, originEntries, destEntries);
+  const direct = await generateDirectCandidates(index, originLoc, destLoc, originEntries, destEntries, options);
   const transfers = options.includeTransfers === false
     ? []
-    : generateTransferCandidates(index, originLoc, destLoc, originEntries, destEntries, transferRadiusKm);
+    : await generateTransferCandidates(index, originLoc, destLoc, originEntries, destEntries, transferRadiusKm, options);
 
   return {
     candidates: [...direct, ...transfers],
@@ -484,7 +592,7 @@ function generateForOperator({ dataset, config, originLoc, destLoc, options }) {
   };
 }
 
-export function generateFallbackCandidatesFromDatasets({
+export async function generateFallbackCandidatesFromDatasets({
   originLoc,
   destLoc,
   datasets,
@@ -492,17 +600,20 @@ export function generateFallbackCandidatesFromDatasets({
   includeTransfers = true,
   walkRadiusKm = DEFAULT_WALK_RADIUS_KM,
   transferRadiusKm = DEFAULT_TRANSFER_RADIUS_KM,
+  timeMode = 'now',
+  dateValue,
+  timeValue,
 } = {}) {
   if (!hasWgs84(originLoc) || !hasWgs84(destLoc)) {
     throw new Error('Fallback candidate generation requires WGS84 origin and destination coordinates.');
   }
 
-  const options = { includeTransfers, walkRadiusKm, transferRadiusKm };
-  const rows = [
+  const options = { includeTransfers, walkRadiusKm, transferRadiusKm, timeMode, dateValue, timeValue };
+  const rows = await Promise.all([
     generateForOperator({ dataset: datasets?.citybus, config: MODE_CONFIG.citybus, originLoc, destLoc, options }),
     generateForOperator({ dataset: datasets?.tram, config: MODE_CONFIG.tram, originLoc, destLoc, options }),
     generateForOperator({ dataset: datasets?.mtr, config: MODE_CONFIG.mtr, originLoc, destLoc, options }),
-  ];
+  ]);
 
   const candidates = rows
     .flatMap((row) => row.candidates)
@@ -523,7 +634,7 @@ export function generateFallbackCandidatesFromDatasets({
 
 export async function generateFallbackCandidates(params) {
   const datasets = params?.datasets || await loadExternalOperatorDatasets();
-  return generateFallbackCandidatesFromDatasets({
+  return await generateFallbackCandidatesFromDatasets({
     ...params,
     datasets,
   });
