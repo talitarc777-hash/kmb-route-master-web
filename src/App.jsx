@@ -236,7 +236,8 @@ function knownFareForRanking(route) {
   if (isFallbackRoute(route)) {
     return route.fare?.status === 'available' ? parseMoney(route.fare.amount) : null;
   }
-  return estimateKmbFare(route);
+  // User-specific rule: treat KMB as zero-cost for ranking because of monthly pass.
+  return 0;
 }
 
 function estimatedTimeForRanking(route) {
@@ -249,13 +250,21 @@ function rankCombinedTransportOptions(routes) {
   return [...(routes || [])].sort((a, b) => {
     const aFare = knownFareForRanking(a);
     const bFare = knownFareForRanking(b);
-    if (aFare == null && bFare != null) return 1;
-    if (aFare != null && bFare == null) return -1;
+
+    // Keep fare as the primary criterion when both options have known fare.
+    // If one side has unknown fare (common for KMB), fall back to time/transfers
+    // instead of auto-demoting that option to the bottom.
     if (aFare != null && bFare != null && aFare !== bFare) return aFare - bFare;
     if (estimatedTimeForRanking(a) !== estimatedTimeForRanking(b)) {
       return estimatedTimeForRanking(a) - estimatedTimeForRanking(b);
     }
-    return (a.transfers || 0) - (b.transfers || 0);
+    if ((a.transfers || 0) !== (b.transfers || 0)) {
+      return (a.transfers || 0) - (b.transfers || 0);
+    }
+    // Final tie-breaker: if everything else is equal, prefer known fare.
+    if (aFare == null && bFare != null) return 1;
+    if (aFare != null && bFare == null) return -1;
+    return 0;
   });
 }
 
