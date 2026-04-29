@@ -2,8 +2,17 @@ import os
 from http.server import BaseHTTPRequestHandler
 import urllib.request
 import urllib.parse
+import json
 
 class handler(BaseHTTPRequestHandler):
+    def send_json(self, payload, status_code=200):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         parsed_path = urllib.parse.urlparse(self.path)
         query_params = urllib.parse.parse_qs(parsed_path.query)
@@ -13,6 +22,12 @@ class handler(BaseHTTPRequestHandler):
         if '/api/google/' in path:
             # 1. Get the secret key from Vercel's environment
             api_key = os.environ.get('GCP_API_KEY', '')
+            if not api_key:
+                return self.send_json({
+                    "status": "CONFIGURATION_ERROR",
+                    "error_message": "GCP_API_KEY is not configured on the API server.",
+                    "routes": [],
+                }, status_code=503)
             
             # 2. Extract the sub-path (e.g., place/autocomplete/json)
             google_subpath = path.replace('/api/google/', '')
@@ -55,6 +70,8 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         except Exception as e:
-            self.send_response(500)
-            self.end_headers()
-            self.wfile.write(str(e).encode())
+            self.send_json({
+                "status": "UPSTREAM_ERROR",
+                "error_message": str(e),
+                "routes": [],
+            }, status_code=502)

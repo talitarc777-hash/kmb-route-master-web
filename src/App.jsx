@@ -194,12 +194,23 @@ function cloneRouteResults(routes) {
   }));
 }
 
-function withTimeout(promise, timeoutMs, message) {
+function withSoftTimeout(promise, timeoutMs) {
   let timeoutId;
-  const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  return new Promise((resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      resolve({ timedOut: true, promise });
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve({ timedOut: false, value });
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 function buildSearchCacheKey({
@@ -393,7 +404,7 @@ function scoreKmbQuality(routes) {
 function fallbackSearchSettings(kmbQuality) {
   if (kmbQuality.isWeak) {
     return {
-      includeTransfers: false,
+      includeTransfers: true,
       maxCandidates: 12,
       googleRefineLimit: 5,
       timeoutMs: 20000,
@@ -1153,8 +1164,11 @@ const App = () => {
         setLoadingStatus('Checking other transport options...');
         try {
           const cachedFallback = getCachedFallback(fallbackCacheRef.current, fallbackCacheKey);
-          const fallbackPayload = cachedFallback?.payload || await withTimeout(
-            generateFallbackCandidates({
+          let fallbackPayload = cachedFallback?.payload || null;
+          let fallbackTimedOut = false;
+          let fallbackRequest = null;
+          if (!fallbackPayload) {
+            fallbackRequest = generateFallbackCandidates({
               originLoc,
               destLoc,
               maxCandidates: fallbackSettings.maxCandidates,
@@ -1163,16 +1177,43 @@ const App = () => {
               dateValue,
               timeValue,
               refineRideTimes: false,
-            }),
-            fallbackSettings.timeoutMs,
-            'Other transport data took too long to load.',
-          );
-          if (!cachedFallback) {
+            });
+            const fallbackResult = await withSoftTimeout(fallbackRequest, fallbackSettings.timeoutMs);
+            fallbackTimedOut = fallbackResult.timedOut;
+            fallbackPayload = fallbackTimedOut
+              ? {
+                  candidates: [],
+                  debug: [{ status: 'pending_operator_datasets' }],
+                  generated_at: new Date().toISOString(),
+                  source: 'operator datasets still loading',
+                }
+              : fallbackResult.value;
+          }
+          if (!cachedFallback && !fallbackTimedOut) {
             setCachedFallback(fallbackCacheRef.current, fallbackCacheKey, { payload: fallbackPayload });
           }
           const alternatives = annotateAlternativeCandidates(fallbackPayload.candidates || []);
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
-          if (finalResults.length === 0) {
+          if (fallbackTimedOut && fallbackRequest) {
+            fallbackRequest
+              .then((latePayload) => {
+                if (searchRunRef.current !== searchRunId) return;
+                setCachedFallback(fallbackCacheRef.current, fallbackCacheKey, { payload: latePayload });
+                const lateAlternatives = annotateAlternativeCandidates(latePayload.candidates || []);
+                if (lateAlternatives.length === 0) return;
+                setSearchError(null);
+                setResults((currentResults) => {
+                  const currentKmb = (currentResults || []).filter((route) => !isFallbackRoute(route));
+                  return rankCombinedTransportOptions([...currentKmb, ...lateAlternatives]);
+                });
+                setIsSearchOpen(false);
+              })
+              .catch((error) => {
+                console.warn('Other transport options could not finish loading:', error);
+              });
+          }
+
+          if (finalResults.length === 0 && !fallbackTimedOut) {
             throw kmbSearchError || new Error(
               'No routes found. Try different locations or check if services are running.',
             );
@@ -1189,7 +1230,7 @@ const App = () => {
           setResults(finalResults);
           setIsSearchOpen(false);
 
-          if (!cachedFallback?.refined && alternatives.length > 0) {
+          if (!fallbackTimedOut && !cachedFallback?.refined && alternatives.length > 0) {
             refineFallbackCandidateRideTimes(alternatives, {
               maxRefinements: fallbackSettings.googleRefineLimit,
               timeMode,
@@ -1228,14 +1269,7 @@ const App = () => {
             ...filteredCandidates,
             ...previousAlternatives,
           ]);
-          if (previousAlternatives.length > 0) {
-            setRefreshFeedback({
-              type: 'error',
-              message: 'Other transport options are still loading. Keeping latest available alternatives.',
-            });
-          } else {
-            console.warn('Other transport options could not load:', fallbackError);
-          }
+          console.warn('Other transport options could not load:', fallbackError);
         }
       }
 

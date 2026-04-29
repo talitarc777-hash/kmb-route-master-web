@@ -803,7 +803,24 @@ def build_mtr_dataset():
             "source": "MTR lines fares CSV",
         })
 
-    enriched_stops = [enrich_mtr_station(stop) for stop in stops.values()]
+    manual_seed = load_manual_mtr_coordinate_seed()
+    # Keep the route API fast: station coordinates should come from the cached/manual
+    # seed file, not from 100+ live LandsD lookups during a user search.
+    if manual_seed:
+        enriched_stops = []
+        for stop in stops.values():
+            manual = manual_seed.get(stop.get("stop_id")) or manual_seed.get(stop.get("station_code"))
+            if manual:
+                enriched = dict(stop)
+                enriched["lat"] = parse_float(manual.get("lat"))
+                enriched["lng"] = parse_float(manual.get("lng"))
+                enriched["coordinate_system"] = "WGS84" if enriched["lat"] is not None and enriched["lng"] is not None else stop.get("coordinate_system")
+                enriched["coordinate_source"] = manual.get("source") or "Manual MTR station seed"
+                enriched_stops.append(enriched)
+            else:
+                enriched_stops.append(stop)
+    else:
+        enriched_stops = list(stops.values())
 
     dataset = {
         "operator": "MTR",
@@ -818,7 +835,7 @@ def build_mtr_dataset():
         "fares": normalized_fares,
         "validation": build_coordinate_validation("mtr", enriched_stops, "stations"),
         "limitations": [
-            "The official line/station CSV does not include coordinates, so station WGS84 values are enriched from the LandsD Location Search API with a manual seed fallback file for unmatched stations.",
+            "The official line/station CSV does not include coordinates, so station WGS84 values come from the manual/open-source seed file when available.",
             "Heavy rail ETA is available through MTR's real-time schedule API, but only for supported line/station combinations.",
         ],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

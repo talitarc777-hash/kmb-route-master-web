@@ -11,15 +11,29 @@ export const operatorAdapters = {
 };
 
 export async function loadExternalOperatorDatasets() {
-  const [citybus, tram, mtr] = await Promise.all([
+  const entries = await Promise.allSettled([
     citybusAdapter.loadDataset(),
     tramAdapter.loadDataset(),
     mtrAdapter.loadDataset(),
   ]);
+  const [citybusResult, tramResult, mtrResult] = entries;
+
+  const getDataset = (result, operator) => {
+    if (result.status === 'fulfilled') return result.value;
+    console.warn(`${operator} dataset could not be loaded for alternatives:`, result.reason);
+    return {
+      operator,
+      routes: [],
+      stops: [],
+      route_stops: [],
+      fares: [],
+      error: result.reason?.message || String(result.reason || 'Dataset unavailable'),
+    };
+  };
 
   return {
-    citybus,
-    tram,
-    mtr,
+    citybus: getDataset(citybusResult, 'CTB'),
+    tram: getDataset(tramResult, 'TRAM'),
+    mtr: getDataset(mtrResult, 'MTR'),
   };
 }

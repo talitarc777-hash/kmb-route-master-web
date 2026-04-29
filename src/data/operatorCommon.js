@@ -38,6 +38,17 @@ function readLocalCache(key) {
   }
 }
 
+function readStaleLocalCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const row = JSON.parse(raw);
+    return row?.value || null;
+  } catch {
+    return null;
+  }
+}
+
 function writeLocalCache(key, value, ttlMs) {
   try {
     localStorage.setItem(key, JSON.stringify({
@@ -78,6 +89,15 @@ export function createStaticDatasetLoader(operator, url) {
         setMemoryCache(memoryKey, payload, STATIC_CACHE_TTL_MS);
         writeLocalCache(localKey, payload, STATIC_CACHE_TTL_MS);
         return payload;
+      })
+      .catch((error) => {
+        const staleHit = readStaleLocalCache(localKey);
+        if (staleHit) {
+          console.warn(`Using stale ${operator} dataset cache after live load failed:`, error);
+          setMemoryCache(memoryKey, staleHit, 5 * 60 * 1000);
+          return staleHit;
+        }
+        throw error;
       })
       .finally(() => inflightCache.delete(memoryKey));
     inflightCache.set(memoryKey, request);

@@ -83,13 +83,16 @@ When the checkbox is on:
   - Tram
   - MTR
 - It builds local indexes from the enriched WGS84 data and generates direct comparison candidates
-- The current live UI uses direct alternatives first so the comparison stays responsive
+- The live UI uses a fast local pass first, then lets slower alternative loading continue in the background
+- If one operator dataset fails, the other operators can still produce alternatives
 
 Alternative transport data source notes:
 - Citybus and Tram use enriched TD stop data with cached WGS84 coordinates
-- MTR uses enriched station coordinates from official/open sources plus the manual seed file fallback
+- MTR uses station coordinates from the manual/open-source seed file when available
+- MTR no longer performs live per-station LandsD geocoding during route search because that made alternative loading too slow
 - No Google Transit shortcut is used
 - Google Directions transit is used only to refine in-vehicle ride time after local candidates are already generated
+- If `GCP_API_KEY` is not configured, Google ride-time refinement is skipped/falls back to heuristic timing
 
 ## 5. Alternative Candidate Generation
 
@@ -102,7 +105,9 @@ Candidate types:
 - Citybus direct
 - Tram direct
 - MTR direct
-- Limited 1-transfer support remains in the generator, but the live comparison path currently keeps transfers off for speed
+- Limited 1-transfer support remains in the generator
+- The live comparison path keeps transfer search off when KMB quality is usable
+- The live comparison path enables transfer search when the KMB quality score is weak, which helps cross-harbour cases such as North Point/NPGO to Hung Hom
 
 Candidate metadata:
 - `operator`
@@ -125,6 +130,13 @@ Alternative timing model:
   - Tram: Google `transit_mode=tram`
   - MTR: Google `transit_mode=subway`
 - If Google cannot return a usable transit step, the generator falls back to the previous per-stop heuristic
+
+Alternative loading resilience:
+- Static operator dataset loaders first use memory/localStorage cache
+- If a live static dataset request fails, stale localStorage data is reused when available
+- Citybus, Tram, and MTR dataset loading is partial-success tolerant via settled promises
+- A slow alternative load no longer throws `Other transport data took too long to load` into the UI
+- If the first local alternative pass is still pending, KMB results can render first and alternatives are added after the background load completes
 
 Ranking when comparison mode is enabled:
 1. Known total fare

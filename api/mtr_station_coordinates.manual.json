@@ -1,4 +1,47 @@
 {
   "_comment": "Manual fallback for MTR station WGS84 coordinates. Keys can be station_id or station_code. Keep this file explicit and reviewable; automatic enrichment should come from official/open sources first.",
-  "stations": {}
+  "stations": {
+    "2": {
+      "station_code": "ADM",
+      "name_en": "Admiralty",
+      "lat": 22.2796,
+      "lng": 114.1649,
+      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "31": {
+      "station_code": "NOP",
+      "name_en": "North Point",
+      "lat": 22.2915,
+      "lng": 114.2006,
+      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "64": {
+      "station_code": "HUH",
+      "name_en": "Hung Hom",
+      "lat": 22.303,
+      "lng": 114.1819,
+      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "ADM": {
+      "station_code": "ADM",
+      "name_en": "Admiralty",
+      "lat": 22.2796,
+      "lng": 114.1649,
+      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "NOP": {
+      "station_code": "NOP",
+      "name_en": "North Point",
+      "lat": 22.2915,
+      "lng": 114.2006,
+      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "HUH": {
+      "station_code": "HUH",
+      "name_en": "Hung Hom",
+      "lat": 22.303,
+      "lng": 114.1819,
+      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    }
+  }
 }
