@@ -393,10 +393,10 @@ function scoreKmbQuality(routes) {
 function fallbackSearchSettings(kmbQuality) {
   if (kmbQuality.isWeak) {
     return {
-      includeTransfers: true,
+      includeTransfers: false,
       maxCandidates: 12,
       googleRefineLimit: 5,
-      timeoutMs: 10000,
+      timeoutMs: 20000,
     };
   }
 
@@ -404,7 +404,7 @@ function fallbackSearchSettings(kmbQuality) {
     includeTransfers: false,
     maxCandidates: 6,
     googleRefineLimit: 3,
-    timeoutMs: 6000,
+    timeoutMs: 12000,
   };
 }
 
@@ -1228,10 +1228,14 @@ const App = () => {
             ...filteredCandidates,
             ...previousAlternatives,
           ]);
-          setRefreshFeedback({
-            type: 'error',
-            message: `${fallbackError.message || 'Other transport options could not load.'} Keeping latest available alternatives.`,
-          });
+          if (previousAlternatives.length > 0) {
+            setRefreshFeedback({
+              type: 'error',
+              message: 'Other transport options are still loading. Keeping latest available alternatives.',
+            });
+          } else {
+            console.warn('Other transport options could not load:', fallbackError);
+          }
         }
       }
 

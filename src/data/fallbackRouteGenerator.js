@@ -2,8 +2,8 @@ import { loadExternalOperatorDatasets } from './operatorAdapters.js';
 
 const DEFAULT_WALK_RADIUS_KM = 0.75;
 const DEFAULT_TRANSFER_RADIUS_KM = 0.25;
-const MAX_NEARBY_STOPS = 18;
-const MAX_ROUTE_ENTRIES = 80;
+const MAX_NEARBY_STOPS = 12;
+const MAX_ROUTE_ENTRIES = 36;
 const MAX_DIRECT_PER_OPERATOR = 8;
 const MAX_TRANSFER_PER_OPERATOR = 4;
 const MAX_TRANSFER_ROUTE_ENTRIES = 24;
