@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { generateFallbackCandidates } from './data/fallbackRouteGenerator.js';
+import {
+  generateFallbackCandidates,
+  refineFallbackCandidateRideTimes,
+} from './data/fallbackRouteGenerator.js';
 
 // Constants
 const ROUTE_COLORS = [
@@ -18,6 +21,9 @@ const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
 const GCP_AUTOCOMPLETE_CACHE_KEY = 'kmb_gcp_autocomplete_cache_v1';
 const GCP_GEOCODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GCP_AUTOCOMPLETE_TTL_MS = 12 * 60 * 60 * 1000;
+const FALLBACK_GRID_SIZE_DEG = 0.005;
+const FALLBACK_CACHE_LIMIT = 16;
+const FALLBACK_CACHE_TTL_MS = 30 * 60 * 1000;
 
 const geocodeCacheState = {
   memory: new Map(),
@@ -218,6 +224,53 @@ function buildSearchCacheKey({
   });
 }
 
+function coarseCoord(value) {
+  return Math.round(value / FALLBACK_GRID_SIZE_DEG) * FALLBACK_GRID_SIZE_DEG;
+}
+
+function buildFallbackCacheKey({
+  originLoc,
+  destLoc,
+  timeMode,
+  dateValue,
+  timeValue,
+  includeTransfers,
+  maxCandidates,
+}) {
+  const timeKey = timeMode === 'now'
+    ? `now:${Math.floor(Date.now() / FALLBACK_CACHE_TTL_MS)}`
+    : `${dateValue || ''}:${timeValue || ''}`;
+  return JSON.stringify({
+    origin: [coarseCoord(originLoc.lat).toFixed(3), coarseCoord(originLoc.lng).toFixed(3)],
+    destination: [coarseCoord(destLoc.lat).toFixed(3), coarseCoord(destLoc.lng).toFixed(3)],
+    timeMode,
+    timeKey,
+    includeTransfers: Boolean(includeTransfers),
+    maxCandidates,
+  });
+}
+
+function getCachedFallback(cache, key) {
+  const row = cache.get(key);
+  if (!row) return null;
+  if (Date.now() - row.savedAt > FALLBACK_CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return row;
+}
+
+function setCachedFallback(cache, key, row) {
+  cache.set(key, {
+    ...row,
+    savedAt: Date.now(),
+  });
+  if (cache.size > FALLBACK_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
+}
+
 function isFallbackRoute(route) {
   return route?.type === 'fallback_candidate' || route?.isFallback;
 }
@@ -299,6 +352,60 @@ function rankCombinedTransportOptions(routes) {
     if (aFare != null && bFare == null) return -1;
     return 0;
   });
+}
+
+function scoreKmbQuality(routes) {
+  if (!routes || routes.length === 0) {
+    return { score: 0, isWeak: true, reason: 'No KMB route found' };
+  }
+
+  const best = [...routes].sort(
+    (a, b) => estimatedTimeForRanking(a) - estimatedTimeForRanking(b),
+  )[0];
+  const segments = best.segments || [];
+  const etaCoverage = segments.length > 0
+    ? segments.filter((seg) => seg.hasActiveEta === true).length / segments.length
+    : 0;
+  const wait = best.originWaitTime ?? 99;
+  const estimatedTime = best.estimatedTime ?? 9999;
+
+  let score = 0.2;
+  score += best.transfers === 0 ? 0.2 : best.transfers === 1 ? 0.1 : 0;
+  score += etaCoverage * 0.25;
+  score += wait <= 5 ? 0.15 : wait <= 12 ? 0.08 : 0;
+  score += estimatedTime <= 45 ? 0.15 : estimatedTime <= 70 ? 0.08 : 0;
+  score += routes.length >= 3 ? 0.05 : 0;
+
+  const rounded = Number(Math.min(1, score).toFixed(2));
+  const weakReasons = [];
+  if (best.transfers > 0) weakReasons.push('best KMB needs transfer');
+  if (etaCoverage < 1) weakReasons.push('missing live ETA');
+  if (wait > 12) weakReasons.push('long wait');
+  if (estimatedTime > 70) weakReasons.push('long trip time');
+
+  return {
+    score: rounded,
+    isWeak: rounded < 0.65,
+    reason: weakReasons.join(', ') || 'KMB route looks usable',
+  };
+}
+
+function fallbackSearchSettings(kmbQuality) {
+  if (kmbQuality.isWeak) {
+    return {
+      includeTransfers: true,
+      maxCandidates: 12,
+      googleRefineLimit: 5,
+      timeoutMs: 10000,
+    };
+  }
+
+  return {
+    includeTransfers: false,
+    maxCandidates: 6,
+    googleRefineLimit: 3,
+    timeoutMs: 6000,
+  };
 }
 
 function annotateAlternativeCandidates(candidates) {
@@ -616,6 +723,8 @@ const App = () => {
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
   const searchCacheRef = useRef(new Map());
+  const fallbackCacheRef = useRef(new Map());
+  const searchRunRef = useRef(0);
 
   const displayedResults = useMemo(() => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
@@ -963,6 +1072,7 @@ const App = () => {
     const searchAllowFallback = overrides.allowFallbackNonKmb ?? allowFallbackNonKmb;
     const searchStrictEtaOnly = overrides.strictEtaOnly ?? strictEtaOnly;
     const preserveExistingResults = Boolean(overrides.preserveExistingResults);
+    const searchRunId = ++searchRunRef.current;
     window.routeEngine?.clearEtaCallLog?.();
     setIsLoading(true);
     setSearchError(null);
@@ -1029,23 +1139,86 @@ const App = () => {
       let finalResults = filteredCandidates;
       if (searchAllowFallback) {
         const hasValidKmb = filteredCandidates.length > 0;
+        const kmbQuality = scoreKmbQuality(filteredCandidates);
+        const fallbackSettings = fallbackSearchSettings(kmbQuality);
+        const fallbackCacheKey = buildFallbackCacheKey({
+          originLoc,
+          destLoc,
+          timeMode,
+          dateValue,
+          timeValue,
+          includeTransfers: fallbackSettings.includeTransfers,
+          maxCandidates: fallbackSettings.maxCandidates,
+        });
         setLoadingStatus('Checking other transport options...');
         try {
-          const fallbackPayload = await withTimeout(
+          const cachedFallback = getCachedFallback(fallbackCacheRef.current, fallbackCacheKey);
+          const fallbackPayload = cachedFallback?.payload || await withTimeout(
             generateFallbackCandidates({
               originLoc,
               destLoc,
-              maxCandidates: 12,
-              includeTransfers: false,
+              maxCandidates: fallbackSettings.maxCandidates,
+              includeTransfers: fallbackSettings.includeTransfers,
               timeMode,
               dateValue,
               timeValue,
+              refineRideTimes: false,
             }),
-            15000,
+            fallbackSettings.timeoutMs,
             'Other transport data took too long to load.',
           );
+          if (!cachedFallback) {
+            setCachedFallback(fallbackCacheRef.current, fallbackCacheKey, { payload: fallbackPayload });
+          }
           const alternatives = annotateAlternativeCandidates(fallbackPayload.candidates || []);
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
+          if (finalResults.length === 0) {
+            throw kmbSearchError || new Error(
+              'No routes found. Try different locations or check if services are running.',
+            );
+          }
+
+          if (canReusePlannedSearch) {
+            searchCacheRef.current.set(searchCacheKey, cloneRouteResults(finalResults));
+            if (searchCacheRef.current.size > 8) {
+              const oldestKey = searchCacheRef.current.keys().next().value;
+              searchCacheRef.current.delete(oldestKey);
+            }
+          }
+
+          setResults(finalResults);
+          setIsSearchOpen(false);
+
+          if (!cachedFallback?.refined && alternatives.length > 0) {
+            refineFallbackCandidateRideTimes(alternatives, {
+              maxRefinements: fallbackSettings.googleRefineLimit,
+              timeMode,
+              dateValue,
+              timeValue,
+            }).then((refinedAlternatives) => {
+              if (searchRunRef.current !== searchRunId) return;
+              const refinedPayload = {
+                ...fallbackPayload,
+                candidates: refinedAlternatives,
+                refined_at: new Date().toISOString(),
+              };
+              setCachedFallback(fallbackCacheRef.current, fallbackCacheKey, {
+                payload: refinedPayload,
+                refined: true,
+              });
+              setResults((currentResults) => {
+                const currentKmb = currentResults.filter((route) => !isFallbackRoute(route));
+                return rankCombinedTransportOptions([
+                  ...currentKmb,
+                  ...annotateAlternativeCandidates(refinedAlternatives),
+                ]);
+              });
+            }).catch(() => {
+              // Keep fast local alternatives if Google ride-time refinement fails.
+            });
+          }
+
+          return;
         } catch (fallbackError) {
           if (!hasValidKmb) throw fallbackError;
           const previousAlternatives = preserveExistingResults

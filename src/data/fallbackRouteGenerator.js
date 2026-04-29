@@ -398,13 +398,18 @@ async function buildLeg(index, fromEntry, toEntry, options = {}) {
   );
   const originStop = normalizeStop(index.stopsById.get(fromEntry.stop_id));
   const destinationStop = normalizeStop(index.stopsById.get(toEntry.stop_id));
-  const rideTiming = await fetchGoogleRideDuration(
-    index,
-    originStop,
-    destinationStop,
-    routeLabel,
-    { ...options, stopCount },
-  );
+  const rideTiming = options.refineRideTimes
+    ? await fetchGoogleRideDuration(
+        index,
+        originStop,
+        destinationStop,
+        routeLabel,
+        { ...options, stopCount },
+      )
+    : {
+        duration: getHeuristicRideMinutes(index, stopCount),
+        source: 'heuristic_per_stop',
+      };
 
   return {
     operator: index.config.operator,
@@ -434,6 +439,7 @@ function buildCandidate(index, originLoc, destLoc, legs, originNearby, destNearb
   const walkDistanceKm = originNearby.distanceKm + destNearby.distanceKm + transferWalkKm;
   const walkTime = walkMinutes(originNearby.distanceKm) + walkMinutes(destNearby.distanceKm) + walkMinutes(transferWalkKm);
   const rideTime = legs.reduce((sum, leg) => sum + leg.estimated_ride_time_min, 0);
+  const boardingBufferTime = BOARDING_BUFFER_MIN * legs.length;
   const fare = combineFares(legs.map((leg) => leg.fare));
   const routeText = legs.map((leg) => leg.route).join(' -> ');
   const lastLeg = legs[legs.length - 1];
@@ -462,12 +468,72 @@ function buildCandidate(index, originLoc, destLoc, legs, originNearby, destNearb
       : [],
     legs,
     walk_distance_m: Math.round(walkDistanceKm * 1000),
-    estimated_time_min: walkTime + rideTime + BOARDING_BUFFER_MIN * legs.length,
+    walk_time_min: walkTime,
+    ride_time_min: rideTime,
+    boarding_buffer_min: boardingBufferTime,
+    estimated_time_min: walkTime + rideTime + boardingBufferTime,
     fare,
     confidence: candidateConfidence(index, walkDistanceKm, transfers),
     data_source: Array.from(new Set(legs.map((leg) => leg.data_source).filter(Boolean))),
     notes: ['Generated from cached enriched operator datasets using straight-line walking estimates.'],
   };
+}
+
+function configForMode(mode) {
+  return Object.values(MODE_CONFIG).find((config) => config.mode === mode) || null;
+}
+
+function recomputeCandidateTime(candidate, legs) {
+  const rideTime = legs.reduce((sum, leg) => sum + (leg.estimated_ride_time_min || 0), 0);
+  const walkTime = candidate.walk_time_min ?? walkMinutes((candidate.walk_distance_m || 0) / 1000);
+  const boardingBufferTime = candidate.boarding_buffer_min ?? BOARDING_BUFFER_MIN * legs.length;
+  return {
+    ...candidate,
+    legs,
+    ride_time_min: rideTime,
+    walk_time_min: walkTime,
+    boarding_buffer_min: boardingBufferTime,
+    estimated_time_min: walkTime + rideTime + boardingBufferTime,
+    estimatedTime: walkTime + rideTime + boardingBufferTime,
+  };
+}
+
+export async function refineFallbackCandidateRideTimes(candidates, options = {}) {
+  const maxRefinements = options.maxRefinements ?? 5;
+  const refined = [];
+
+  for (const [candidateIndex, candidate] of (candidates || []).entries()) {
+    if (candidateIndex >= maxRefinements) {
+      refined.push(candidate);
+      continue;
+    }
+
+    const legs = [];
+    for (const leg of candidate.legs || []) {
+      const config = configForMode(leg.mode);
+      if (!config) {
+        legs.push({ ...leg });
+        continue;
+      }
+
+      const rideTiming = await fetchGoogleRideDuration(
+        { config },
+        leg.origin_stop,
+        leg.destination_stop,
+        leg.route || leg.line,
+        { ...options, stopCount: leg.stop_count },
+      );
+      legs.push({
+        ...leg,
+        estimated_ride_time_min: rideTiming.duration,
+        ride_time_source: rideTiming.source,
+      });
+    }
+
+    refined.push(recomputeCandidateTime(candidate, legs));
+  }
+
+  return refined;
 }
 
 async function generateDirectCandidates(index, originLoc, destLoc, originEntries, destEntries, options) {
@@ -603,12 +669,21 @@ export async function generateFallbackCandidatesFromDatasets({
   timeMode = 'now',
   dateValue,
   timeValue,
+  refineRideTimes = false,
 } = {}) {
   if (!hasWgs84(originLoc) || !hasWgs84(destLoc)) {
     throw new Error('Fallback candidate generation requires WGS84 origin and destination coordinates.');
   }
 
-  const options = { includeTransfers, walkRadiusKm, transferRadiusKm, timeMode, dateValue, timeValue };
+  const options = {
+    includeTransfers,
+    walkRadiusKm,
+    transferRadiusKm,
+    timeMode,
+    dateValue,
+    timeValue,
+    refineRideTimes,
+  };
   const rows = await Promise.all([
     generateForOperator({ dataset: datasets?.citybus, config: MODE_CONFIG.citybus, originLoc, destLoc, options }),
     generateForOperator({ dataset: datasets?.tram, config: MODE_CONFIG.tram, originLoc, destLoc, options }),
@@ -643,5 +718,6 @@ export async function generateFallbackCandidates(params) {
 export const fallbackRouteGenerator = {
   generateFallbackCandidates,
   generateFallbackCandidatesFromDatasets,
+  refineFallbackCandidateRideTimes,
   haversineKm,
 };
