@@ -8,6 +8,11 @@ const MAX_DIRECT_PER_OPERATOR = 8;
 const MAX_TRANSFER_PER_OPERATOR = 4;
 const MAX_TRANSFER_ROUTE_ENTRIES = 24;
 const MAX_TRANSFER_STOPS_PER_LEG = 32;
+const MAX_MIXED_CANDIDATES = 10;
+const MAX_MIXED_ORIGIN_ENTRIES = 36;
+const MAX_MIXED_BOARD_ENTRIES = 18;
+const MAX_MIXED_STOPS_PER_LEG = 120;
+const MAX_MIXED_PATH_EXPANSIONS = 25000;
 const TRANSFER_GRID_DEG = 0.003;
 const WALK_KMH = 4.5;
 const BOARDING_BUFFER_MIN = 2;
@@ -16,6 +21,13 @@ const GOOGLE_RIDE_CACHE = new Map();
 const GOOGLE_RIDE_BUCKET_MS = 30 * 60 * 1000;
 
 const MODE_CONFIG = {
+  kmb: {
+    operator: 'KMB',
+    mode: 'kmb',
+    label: 'KMB',
+    minutesPerStop: 1.5,
+    confidenceBase: 0.76,
+  },
   citybus: {
     operator: 'CTB',
     mode: 'citybus',
@@ -258,6 +270,7 @@ function getRouteLabel(route, fallbackRouteId) {
 }
 
 function getTransitMode(config) {
+  if (config.mode === 'kmb') return 'bus';
   if (config.mode === 'mtr') return 'subway';
   if (config.mode === 'lrt') return 'tram';
   if (config.mode === 'tram') return 'tram';
@@ -342,6 +355,16 @@ async function fetchGoogleRideDuration(index, fromStop, toStop, routeLabel, opti
 }
 
 function getFare(index, fromStopId, toStopId, routeId, routeKey, direction, fromSequence, toSequence, route) {
+  if (index.config.mode === 'kmb') {
+    return {
+      status: 'available',
+      amount: 0,
+      currency: 'HKD',
+      source: 'KMB monthly pass user preference',
+      note: 'KMB treated as zero fare for this user.',
+    };
+  }
+
   if (index.config.mode === 'mtr') {
     const fare = index.fareIndex.get(`${fromStopId}->${toStopId}`);
     return fare?.fare_rule?.octopus_adult != null
@@ -491,6 +514,50 @@ function buildCandidate(index, originLoc, destLoc, legs, originNearby, destNearb
     confidence: candidateConfidence(index, walkDistanceKm, transfers),
     data_source: Array.from(new Set(legs.map((leg) => leg.data_source).filter(Boolean))),
     notes: ['Generated from cached enriched operator datasets using straight-line walking estimates.'],
+  };
+}
+
+function buildMixedCandidate(originLoc, destLoc, legs, originNearby, destNearby, transferWalks = []) {
+  const transferWalkKm = transferWalks.reduce((sum, transfer) => sum + transfer.distanceKm, 0);
+  const walkDistanceKm = originNearby.distanceKm + destNearby.distanceKm + transferWalkKm;
+  const walkTime = walkMinutes(originNearby.distanceKm)
+    + walkMinutes(destNearby.distanceKm)
+    + transferWalks.reduce((sum, transfer) => sum + walkMinutes(transfer.distanceKm), 0);
+  const rideTime = legs.reduce((sum, leg) => sum + leg.estimated_ride_time_min, 0);
+  const boardingBufferTime = BOARDING_BUFFER_MIN * legs.length;
+  const fare = combineFares(legs.map((leg) => leg.fare));
+  const routeText = legs.map((leg) => leg.route).join(' -> ');
+  const operators = Array.from(new Set(legs.map((leg) => leg.operator).filter(Boolean)));
+  const lastLeg = legs[legs.length - 1];
+
+  return {
+    id: `fallback-mixed-${legs.map((leg) => `${leg.mode}:${leg.route_variant_id}`).join('__')}-${legs[0].origin_stop.stop_id}-${lastLeg.destination_stop.stop_id}`,
+    type: 'fallback_candidate',
+    operator: operators.join('+'),
+    mode: 'mixed',
+    route: routeText,
+    line: null,
+    journey_type: legs.length === 1 ? 'direct' : 'mixed_transfer',
+    transfers: Math.max(0, legs.length - 1),
+    origin: originLoc,
+    destination: destLoc,
+    origin_stop: normalizeStop(originNearby.stop, originNearby.distanceKm),
+    destination_stop: normalizeStop(destNearby.stop, destNearby.distanceKm),
+    transfer_stops: transferWalks.map((transfer) => ({
+      alight: transfer.alight,
+      board: transfer.board,
+      walk_distance_m: Math.round(transfer.distanceKm * 1000),
+    })),
+    legs,
+    walk_distance_m: Math.round(walkDistanceKm * 1000),
+    walk_time_min: walkTime,
+    ride_time_min: rideTime,
+    boarding_buffer_min: boardingBufferTime,
+    estimated_time_min: walkTime + rideTime + boardingBufferTime,
+    fare,
+    confidence: Number(Math.max(0.38, 0.74 - walkDistanceKm * 0.06 - (legs.length - 1) * 0.08).toFixed(2)),
+    data_source: Array.from(new Set(legs.map((leg) => leg.data_source).filter(Boolean))),
+    notes: ['Generated from cached enriched operator datasets using mixed-operator transfer search.'],
   };
 }
 
@@ -647,6 +714,214 @@ async function generateTransferCandidates(index, originLoc, destLoc, originEntri
     .slice(0, MAX_TRANSFER_PER_OPERATOR);
 }
 
+function withOperatorIndex(entry, operatorIndex) {
+  return { ...entry, operatorIndex };
+}
+
+function entriesForStop(operatorIndex, nearbyStop) {
+  return (operatorIndex.stopRouteEntries.get(nearbyStop.stop.stop_id) || [])
+    .map((entry) => withOperatorIndex({ ...entry, nearbyStop }, operatorIndex));
+}
+
+function nearbyBoardEntries(operatorIndexes, stop, radiusKm, excludeRouteKeys = new Set()) {
+  const entries = [];
+  for (const operatorIndex of operatorIndexes) {
+    for (const nearbyStop of nearbyStopsFromGrid(operatorIndex, stop, radiusKm)) {
+      for (const entry of entriesForStop(operatorIndex, nearbyStop)) {
+        if (excludeRouteKeys.has(entry.routeKey)) continue;
+        entries.push(entry);
+      }
+    }
+  }
+  return entries
+    .sort((a, b) => a.nearbyStop.distanceKm - b.nearbyStop.distanceKm)
+    .slice(0, MAX_MIXED_BOARD_ENTRIES);
+}
+
+function matchingDestinationEntry(boardEntry, destEntriesByRouteKey) {
+  const matches = destEntriesByRouteKey.get(boardEntry.routeKey) || [];
+  return matches.find((destEntry) => boardEntry.index < destEntry.index) || null;
+}
+
+async function buildMixedCandidateFromEntries(originLoc, destLoc, entryPath, originNearby, destNearby, transferWalks, options) {
+  const legs = [];
+  for (const pathItem of entryPath) {
+    legs.push(await buildLeg(
+      pathItem.from.operatorIndex,
+      pathItem.from,
+      pathItem.to,
+      options,
+    ));
+  }
+  return buildMixedCandidate(originLoc, destLoc, legs, originNearby, destNearby, transferWalks);
+}
+
+async function generateMixedOperatorCandidates(operatorIndexes, originLoc, destLoc, transferRadiusKm, options) {
+  if (options.includeTransfers === false || operatorIndexes.length < 2) return { candidates: [], debug: null };
+
+  const originEntries = [];
+  const destEntriesByRouteKey = new Map();
+
+  for (const operatorIndex of operatorIndexes) {
+    for (const nearby of findNearbyStops(operatorIndex, originLoc, options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM)) {
+      originEntries.push(...entriesForStop(operatorIndex, nearby));
+    }
+    for (const nearby of findNearbyStops(operatorIndex, destLoc, options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM)) {
+      for (const entry of entriesForStop(operatorIndex, nearby)) {
+        if (!destEntriesByRouteKey.has(entry.routeKey)) destEntriesByRouteKey.set(entry.routeKey, []);
+        destEntriesByRouteKey.get(entry.routeKey).push(entry);
+      }
+    }
+  }
+
+  for (const entries of destEntriesByRouteKey.values()) {
+    entries.sort((a, b) => a.nearbyStop.distanceKm - b.nearbyStop.distanceKm);
+  }
+
+  const bestByRouteText = new Map();
+  let expansions = 0;
+  const sortedOriginEntries = originEntries
+    .sort((a, b) => a.nearbyStop.distanceKm - b.nearbyStop.distanceKm)
+    .slice(0, MAX_MIXED_ORIGIN_ENTRIES);
+
+  for (const firstEntry of sortedOriginEntries) {
+    if (expansions >= MAX_MIXED_PATH_EXPANSIONS) break;
+    const firstStops = firstEntry.variant.stops
+      .slice(firstEntry.index + 1)
+      .slice(0, MAX_MIXED_STOPS_PER_LEG);
+
+    for (const firstAlightEntry of firstStops) {
+      if (expansions >= MAX_MIXED_PATH_EXPANSIONS) break;
+      const firstAlightStop = firstEntry.operatorIndex.stopsById.get(firstAlightEntry.stop_id);
+      if (!firstAlightStop) continue;
+
+      const secondBoardEntries = nearbyBoardEntries(
+        operatorIndexes,
+        firstAlightStop,
+        transferRadiusKm,
+        new Set([firstEntry.routeKey]),
+      );
+
+      for (const secondEntry of secondBoardEntries) {
+        expansions += 1;
+        if (expansions >= MAX_MIXED_PATH_EXPANSIONS) break;
+        const secondDestEntry = matchingDestinationEntry(secondEntry, destEntriesByRouteKey);
+        if (secondDestEntry) {
+          const firstTo = {
+            ...firstAlightEntry,
+            routeKey: firstEntry.routeKey,
+            route_id: firstEntry.route_id,
+            route: firstEntry.route,
+            direction: firstEntry.direction,
+          };
+          const candidate = await buildMixedCandidateFromEntries(
+            originLoc,
+            destLoc,
+            [
+              { from: firstEntry, to: firstTo },
+              { from: secondEntry, to: secondDestEntry },
+            ],
+            firstEntry.nearbyStop,
+            secondDestEntry.nearbyStop,
+            [{
+              alight: normalizeStop(firstAlightStop),
+              board: normalizeStop(secondEntry.nearbyStop.stop),
+              distanceKm: secondEntry.nearbyStop.distanceKm,
+            }],
+            options,
+          );
+          const key = candidate.route;
+          const score = candidate.estimated_time_min + candidate.walk_distance_m / 120;
+          const current = bestByRouteText.get(key);
+          if (!current || score < current.score) bestByRouteText.set(key, { score, candidate });
+        }
+
+        const secondStops = secondEntry.variant.stops
+          .slice(secondEntry.index + 1)
+          .slice(0, MAX_MIXED_STOPS_PER_LEG);
+        for (const secondAlightEntry of secondStops) {
+          if (expansions >= MAX_MIXED_PATH_EXPANSIONS) break;
+          const secondAlightStop = secondEntry.operatorIndex.stopsById.get(secondAlightEntry.stop_id);
+          if (!secondAlightStop) continue;
+
+          const thirdBoardEntries = nearbyBoardEntries(
+            operatorIndexes,
+            secondAlightStop,
+            transferRadiusKm,
+            new Set([firstEntry.routeKey, secondEntry.routeKey]),
+          );
+
+          for (const thirdEntry of thirdBoardEntries) {
+            expansions += 1;
+            if (expansions >= MAX_MIXED_PATH_EXPANSIONS) break;
+            const thirdDestEntry = matchingDestinationEntry(thirdEntry, destEntriesByRouteKey);
+            if (!thirdDestEntry) continue;
+
+            const firstTo = {
+              ...firstAlightEntry,
+              routeKey: firstEntry.routeKey,
+              route_id: firstEntry.route_id,
+              route: firstEntry.route,
+              direction: firstEntry.direction,
+            };
+            const secondTo = {
+              ...secondAlightEntry,
+              routeKey: secondEntry.routeKey,
+              route_id: secondEntry.route_id,
+              route: secondEntry.route,
+              direction: secondEntry.direction,
+            };
+            const candidate = await buildMixedCandidateFromEntries(
+              originLoc,
+              destLoc,
+              [
+                { from: firstEntry, to: firstTo },
+                { from: secondEntry, to: secondTo },
+                { from: thirdEntry, to: thirdDestEntry },
+              ],
+              firstEntry.nearbyStop,
+              thirdDestEntry.nearbyStop,
+              [
+                {
+                  alight: normalizeStop(firstAlightStop),
+                  board: normalizeStop(secondEntry.nearbyStop.stop),
+                  distanceKm: secondEntry.nearbyStop.distanceKm,
+                },
+                {
+                  alight: normalizeStop(secondAlightStop),
+                  board: normalizeStop(thirdEntry.nearbyStop.stop),
+                  distanceKm: thirdEntry.nearbyStop.distanceKm,
+                },
+              ],
+              options,
+            );
+            const key = candidate.route;
+            const score = candidate.estimated_time_min + candidate.walk_distance_m / 120;
+            const current = bestByRouteText.get(key);
+            if (!current || score < current.score) bestByRouteText.set(key, { score, candidate });
+          }
+        }
+      }
+    }
+  }
+
+  const candidates = Array.from(bestByRouteText.values())
+    .map((row) => row.candidate)
+    .sort((a, b) => a.estimated_time_min - b.estimated_time_min)
+    .slice(0, MAX_MIXED_CANDIDATES);
+
+  return {
+    candidates,
+    debug: {
+      operator: 'MIXED',
+      origin_entry_count: sortedOriginEntries.length,
+      destination_route_count: destEntriesByRouteKey.size,
+      mixed_count: candidates.length,
+      expansion_count: expansions,
+    },
+  };
+}
+
 async function generateForOperator({ dataset, config, originLoc, destLoc, options }) {
   const index = getOperatorIndex(dataset, config);
   const walkRadiusKm = options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM;
@@ -701,27 +976,41 @@ export async function generateFallbackCandidatesFromDatasets({
     refineRideTimes,
   };
   const enabledModes = new Set(operatorModes || []);
-  const operatorJobs = [
+  const operatorSpecs = [
+    enabledModes.has('kmb') && datasets?.kmb
+      ? { dataset: datasets.kmb, config: MODE_CONFIG.kmb, mixedOnly: true }
+      : null,
     enabledModes.has('citybus')
-      ? generateForOperator({ dataset: datasets?.citybus, config: MODE_CONFIG.citybus, originLoc, destLoc, options })
+      ? { dataset: datasets?.citybus, config: MODE_CONFIG.citybus }
       : null,
     enabledModes.has('tram')
-      ? generateForOperator({ dataset: datasets?.tram, config: MODE_CONFIG.tram, originLoc, destLoc, options })
+      ? { dataset: datasets?.tram, config: MODE_CONFIG.tram }
       : null,
     enabledModes.has('mtr')
-      ? generateForOperator({ dataset: datasets?.mtr, config: MODE_CONFIG.mtr, originLoc, destLoc, options })
+      ? { dataset: datasets?.mtr, config: MODE_CONFIG.mtr }
       : null,
     enabledModes.has('mtr_bus')
-      ? generateForOperator({ dataset: datasets?.mtr_bus, config: MODE_CONFIG.mtr_bus, originLoc, destLoc, options })
+      ? { dataset: datasets?.mtr_bus, config: MODE_CONFIG.mtr_bus }
       : null,
     enabledModes.has('lrt')
-      ? generateForOperator({ dataset: datasets?.lrt, config: MODE_CONFIG.lrt, originLoc, destLoc, options })
+      ? { dataset: datasets?.lrt, config: MODE_CONFIG.lrt }
       : null,
   ].filter(Boolean);
+  const operatorJobs = operatorSpecs.filter((spec) => !spec.mixedOnly).map(({ dataset, config }) =>
+    generateForOperator({ dataset, config, originLoc, destLoc, options }),
+  );
   const rows = await Promise.all(operatorJobs);
+  const mixed = await generateMixedOperatorCandidates(
+    operatorSpecs.map(({ dataset, config }) => getOperatorIndex(dataset, config)),
+    originLoc,
+    destLoc,
+    transferRadiusKm,
+    options,
+  );
 
   const candidates = rows
     .flatMap((row) => row.candidates)
+    .concat(mixed.candidates)
     .sort((a, b) => {
       if (a.transfers !== b.transfers) return a.transfers - b.transfers;
       if (a.estimated_time_min !== b.estimated_time_min) return a.estimated_time_min - b.estimated_time_min;
@@ -731,14 +1020,17 @@ export async function generateFallbackCandidatesFromDatasets({
 
   return {
     candidates,
-    debug: rows.map((row) => row.debug),
+    debug: [...rows.map((row) => row.debug), mixed.debug].filter(Boolean),
     generated_at: new Date().toISOString(),
     source: 'cached enriched operator datasets',
   };
 }
 
 export async function generateFallbackCandidates(params) {
-  const datasets = params?.datasets || await loadExternalOperatorDatasets();
+  const externalDatasets = params?.datasets || await loadExternalOperatorDatasets();
+  const datasets = params?.kmbDataset
+    ? { ...externalDatasets, kmb: params.kmbDataset }
+    : externalDatasets;
   return await generateFallbackCandidatesFromDatasets({
     ...params,
     datasets,

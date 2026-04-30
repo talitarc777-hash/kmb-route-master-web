@@ -464,6 +464,85 @@ function kmbStopLocation(stopMap, stopId) {
   };
 }
 
+function buildKmbFallbackDataset(stopMap, routeMap, routeStops) {
+  const stops = Object.entries(stopMap || {}).map(([stopId, stop]) => ({
+    id: `KMB:${stopId}`,
+    operator: 'KMB',
+    stop_id: `KMB:${stopId}`,
+    name: {
+      tc: stop?.name_tc || null,
+      en: stop?.name_en || null,
+      sc: null,
+    },
+    lat: Number(stop?.lat),
+    lng: Number(stop?.lng),
+    coordinate_system: 'WGS84',
+    coordinate_source: 'KMB Open Data',
+    stop_type: 'stop',
+  }));
+
+  const routes = Object.entries(routeMap || {}).map(([routeKey, route]) => ({
+    id: `KMB:${routeKey}`,
+    operator: 'KMB',
+    route_id: routeKey,
+    route: route?.route || routeKey,
+    line: route?.route || routeKey,
+    display_route: route?.route || routeKey,
+    route_name: {
+      tc: route?.dest_tc || route?.orig_tc || null,
+      en: route?.dest_en || route?.orig_en || route?.route || routeKey,
+      sc: null,
+    },
+    direction: route?.bound || null,
+    service_type: route?.service_type || null,
+    route_type: 'BUS',
+    origin: {
+      tc: route?.orig_tc || null,
+      en: route?.orig_en || null,
+      sc: null,
+    },
+    destination: {
+      tc: route?.dest_tc || null,
+      en: route?.dest_en || null,
+      sc: null,
+    },
+    fare: 0,
+    full_fare: 0,
+    fare_currency: 'HKD',
+    source: 'KMB Open Data',
+  }));
+
+  const routeStopRows = [];
+  Object.entries(routeStops || {}).forEach(([routeKey, stopIds]) => {
+    (stopIds || []).forEach((stopId, index) => {
+      routeStopRows.push({
+        id: `KMB:${routeKey}:${index + 1}:${stopId}`,
+        operator: 'KMB',
+        route_id: routeKey,
+        route_variant_id: `KMB:${routeKey}`,
+        direction: routeMap?.[routeKey]?.bound || null,
+        service_type: routeMap?.[routeKey]?.service_type || null,
+        sequence: index + 1,
+        stop_id: `KMB:${stopId}`,
+        stop_name: {
+          tc: stopMap?.[stopId]?.name_tc || null,
+          en: stopMap?.[stopId]?.name_en || null,
+          sc: null,
+        },
+      });
+    });
+  });
+
+  return {
+    operator: 'KMB',
+    routes,
+    stops,
+    route_stops: routeStopRows,
+    fares: [],
+    sources: { routes: 'KMB Open Data', stops: 'KMB Open Data' },
+  };
+}
+
 function findKmbEtaGaps(routes, stopMap, limit = 3) {
   return [...(routes || [])]
     .sort((a, b) => estimatedTimeForRanking(a) - estimatedTimeForRanking(b))
@@ -509,7 +588,7 @@ function modesForGap(originLoc, destLoc) {
 }
 
 function modesForBroadAlternative(originLoc, destLoc) {
-  const modes = ['citybus', 'mtr', 'mtr_bus', 'lrt'];
+  const modes = ['kmb', 'citybus', 'mtr', 'mtr_bus', 'lrt'];
   if (isLikelyHongKongIsland(originLoc) && isLikelyHongKongIsland(destLoc)) {
     modes.push('tram');
   }
@@ -1309,6 +1388,11 @@ const App = () => {
         const kmbQuality = scoreKmbQuality(filteredCandidates);
         const fallbackSettings = fallbackSearchSettings(kmbQuality);
         const broadOperatorModes = modesForBroadAlternative(originLoc, destLoc);
+        const kmbFallbackDataset = buildKmbFallbackDataset(
+          stopMapRef.current,
+          routeMapRef.current,
+          routeStopsRef.current,
+        );
         const kmbGaps = hasValidKmb
           ? findKmbEtaGaps(filteredCandidates, stopMapRef.current, 3)
           : [];
@@ -1443,6 +1527,7 @@ const App = () => {
             fallbackRequest = generateFallbackCandidates({
               originLoc,
               destLoc,
+              kmbDataset: kmbFallbackDataset,
               maxCandidates: fallbackSettings.maxCandidates,
               includeTransfers: fallbackSettings.includeTransfers,
               timeMode,
@@ -1472,6 +1557,7 @@ const App = () => {
               generateFallbackCandidates({
                 originLoc,
                 destLoc,
+                kmbDataset: kmbFallbackDataset,
                 maxCandidates: Math.max(18, fallbackSettings.maxCandidates),
                 includeTransfers: true,
                 operatorModes: broadOperatorModes,
@@ -1494,6 +1580,7 @@ const App = () => {
               generateFallbackCandidates({
                 originLoc,
                 destLoc,
+                kmbDataset: kmbFallbackDataset,
                 maxCandidates: Math.max(40, fallbackSettings.maxCandidates),
                 includeTransfers: true,
                 operatorModes: broadOperatorModes,

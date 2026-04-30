@@ -87,6 +87,7 @@ When the checkbox is on:
   - MTR Bus (feeder / K routes)
   - Light Rail
 - It builds local indexes from the enriched WGS84 data and generates targeted gap-repair candidates first
+- It also converts the already-loaded KMB data into the same local fallback shape for mixed-operator transfer search
 - The live UI uses a fast local pass first, then lets slower alternative loading continue in the background
 - If one operator dataset fails, the other operators can still produce alternatives
 - If targeted gap repair finds useful options, broad all-origin-to-destination alternative search is skipped for speed
@@ -117,11 +118,13 @@ Candidate types:
 - MTR direct
 - MTR Bus direct
 - Light Rail direct
+- Mixed-operator journeys up to 3 legs, such as KMB -> KMB -> MTR Bus
 - Limited 1-transfer support remains in the generator
 - The live comparison path keeps transfer search off when KMB quality is usable
 - The live comparison path enables transfer search when the KMB quality score is weak, which helps cross-harbour cases such as North Point/NPGO to Hung Hom
 - Tram is considered only when both gap endpoints are likely on Hong Kong Island
 - Light Rail is considered when either endpoint is in the NW New Territories Light Rail corridor
+- KMB is included in the broad alternative generator only as a transfer-network input, so mixed routes like `110 -> 269B -> K75P` can be found without replacing the normal KMB-first search
 
 Candidate metadata:
 - `operator`
