@@ -1065,7 +1065,7 @@ export async function generateFallbackCandidatesFromDatasets({
 }
 
 export async function generateFallbackCandidates(params) {
-  const externalDatasets = params?.datasets || await loadExternalOperatorDatasets();
+  const externalDatasets = params?.datasets || await loadExternalOperatorDatasets(params?.operatorModes);
   const datasets = params?.kmbDataset
     ? { ...externalDatasets, kmb: params.kmbDataset }
     : externalDatasets;

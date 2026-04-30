@@ -1,4 +1,4 @@
-const STATIC_CACHE_PREFIX = 'kmb_operator_static_cache_v2';
+const STATIC_CACHE_PREFIX = 'kmb_operator_static_cache_v3';
 const STATIC_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const ETA_TTL_MS = 20 * 1000;
 
@@ -61,6 +61,14 @@ function writeLocalCache(key, value, ttlMs) {
   return value;
 }
 
+function isUsableStaticDataset(value) {
+  if (!value || typeof value !== 'object' || value.error) return false;
+  const routeCount = Array.isArray(value.routes) ? value.routes.length : 0;
+  const stopCount = Array.isArray(value.stops) ? value.stops.length : 0;
+  const routeStopCount = Array.isArray(value.route_stops) ? value.route_stops.length : 0;
+  return routeCount > 0 && stopCount > 0 && routeStopCount > 0;
+}
+
 async function fetchJson(url) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -79,20 +87,24 @@ export function createStaticDatasetLoader(operator, url) {
     if (inflightCache.has(memoryKey)) return inflightCache.get(memoryKey);
 
     const localHit = readLocalCache(localKey);
-    if (localHit) {
+    if (localHit && isUsableStaticDataset(localHit)) {
       setMemoryCache(memoryKey, localHit, STATIC_CACHE_TTL_MS);
       return localHit;
     }
+    if (localHit) localStorage.removeItem(localKey);
 
     const request = fetchJson(url)
       .then((payload) => {
+        if (!isUsableStaticDataset(payload)) {
+          throw new Error(`Loaded ${operator} dataset is empty or invalid`);
+        }
         setMemoryCache(memoryKey, payload, STATIC_CACHE_TTL_MS);
         writeLocalCache(localKey, payload, STATIC_CACHE_TTL_MS);
         return payload;
       })
       .catch((error) => {
         const staleHit = readStaleLocalCache(localKey);
-        if (staleHit) {
+        if (staleHit && isUsableStaticDataset(staleHit)) {
           console.warn(`Using stale ${operator} dataset cache after live load failed:`, error);
           setMemoryCache(memoryKey, staleHit, 5 * 60 * 1000);
           return staleHit;

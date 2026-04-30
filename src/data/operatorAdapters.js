@@ -14,34 +14,52 @@ export const operatorAdapters = {
   lrt: lrtAdapter,
 };
 
-export async function loadExternalOperatorDatasets() {
-  const entries = await Promise.allSettled([
-    citybusAdapter.loadDataset(),
-    tramAdapter.loadDataset(),
-    mtrAdapter.loadDataset(),
-    mtrBusAdapter.loadDataset(),
-    lrtAdapter.loadDataset(),
-  ]);
-  const [citybusResult, tramResult, mtrResult, mtrBusResult, lrtResult] = entries;
+const OPERATOR_LABELS = {
+  citybus: 'CTB',
+  tram: 'TRAM',
+  mtr: 'MTR',
+  mtr_bus: 'MTR_BUS',
+  lrt: 'LRT',
+};
 
-  const getDataset = (result, operator) => {
-    if (result.status === 'fulfilled') return result.value;
-    console.warn(`${operator} dataset could not be loaded for alternatives:`, result.reason);
-    return {
-      operator,
-      routes: [],
-      stops: [],
-      route_stops: [],
-      fares: [],
-      error: result.reason?.message || String(result.reason || 'Dataset unavailable'),
-    };
-  };
-
+function emptyDataset(operator, reason) {
   return {
-    citybus: getDataset(citybusResult, 'CTB'),
-    tram: getDataset(tramResult, 'TRAM'),
-    mtr: getDataset(mtrResult, 'MTR'),
-    mtr_bus: getDataset(mtrBusResult, 'MTR_BUS'),
-    lrt: getDataset(lrtResult, 'LRT'),
+    operator,
+    routes: [],
+    stops: [],
+    route_stops: [],
+    fares: [],
+    error: reason,
   };
+}
+
+export async function loadExternalOperatorDatasets(operatorModes) {
+  const requestedModes = new Set(operatorModes || Object.keys(operatorAdapters));
+  requestedModes.delete('kmb');
+  const loadJobs = Object.entries(operatorAdapters)
+    .filter(([mode]) => requestedModes.has(mode))
+    .map(async ([mode, adapter]) => {
+      const result = await adapter.loadDataset();
+      return [mode, result];
+    });
+  const entries = await Promise.allSettled(loadJobs);
+  const datasets = {};
+
+  for (const [mode, label] of Object.entries(OPERATOR_LABELS)) {
+    datasets[mode] = requestedModes.has(mode)
+      ? emptyDataset(label, 'Dataset was requested but did not finish loading.')
+      : emptyDataset(label, 'Dataset was not requested for this search.');
+  }
+
+  for (const entry of entries) {
+    if (entry.status === 'fulfilled') {
+      const [mode, dataset] = entry.value;
+      datasets[mode] = dataset;
+      continue;
+    }
+
+    console.warn('Operator dataset could not be loaded for alternatives:', entry.reason);
+  }
+
+  return datasets;
 }

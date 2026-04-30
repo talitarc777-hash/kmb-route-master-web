@@ -1372,6 +1372,60 @@ def build_citybus_stop(stop_id):
     return {"operator": "CTB", "stop": None, "source": "https://rt.data.gov.hk/v2/transport/citybus/stop/{stop_id}"}
 
 
+def dataset_health_row(name, builder):
+    started_at = time.time()
+    try:
+        dataset = builder()
+        stops = dataset.get("stops") or []
+        validation = dataset.get("validation") or build_coordinate_validation(name, stops, "stops")
+        return {
+            "name": name,
+            "ok": True,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+            "routes": len(dataset.get("routes") or []),
+            "stops": len(stops),
+            "route_stops": len(dataset.get("route_stops") or []),
+            "fares": len(dataset.get("fares") or []),
+            "stops_with_wgs84": validation.get("stops_with_wgs84"),
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "name": name,
+            "ok": False,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+            "routes": 0,
+            "stops": 0,
+            "route_stops": 0,
+            "fares": 0,
+            "stops_with_wgs84": 0,
+            "error": str(exc),
+        }
+
+
+def build_operator_diagnostics(mode_filter=None):
+    builders = {
+        "citybus": build_citybus_dataset,
+        "tram": build_tram_dataset,
+        "mtr": build_mtr_dataset,
+        "mtr-bus": build_mtr_bus_dataset,
+        "lrt": build_lrt_dataset,
+    }
+    requested = [
+        item.strip()
+        for item in str(mode_filter or ",".join(builders.keys())).split(",")
+        if item.strip()
+    ]
+    return {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "datasets": [
+            dataset_health_row(name, builders[name])
+            for name in requested
+            if name in builders
+        ],
+    }
+
+
 def build_mtr_eta(line, station):
     safe_line = urllib.parse.quote(str(line or "").strip())
     safe_station = urllib.parse.quote(str(station or "").strip())
@@ -1426,6 +1480,9 @@ class handler(BaseHTTPRequestHandler):
         query_params = urllib.parse.parse_qs(parsed_path.query)
 
         try:
+            if path == "/api/operators/diagnostics":
+                mode_filter = (query_params.get("modes") or [""])[0]
+                return self.send_json(build_operator_diagnostics(mode_filter or None))
             if path == "/api/operators/citybus/dataset":
                 return self.send_json(build_citybus_dataset())
             if path == "/api/operators/tram/dataset":

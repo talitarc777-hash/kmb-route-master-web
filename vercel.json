@@ -1,4 +1,12 @@
 {
+  "functions": {
+    "api/open_data.py": {
+      "maxDuration": 60
+    },
+    "api/kmb.py": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     { "source": "/api/operators/(.*)", "destination": "/api/open_data.py" },
     { "source": "/api/kmb/(.*)", "destination": "/api/kmb.py" },
