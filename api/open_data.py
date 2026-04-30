@@ -102,6 +102,17 @@ def fetch_text(url, ttl_seconds=STATIC_TTL_SECONDS):
     except Exception:
         if os.name != "nt":
             raise
+        try:
+            payload = subprocess.check_output(
+                ["curl.exe", "-L", "-s", str(url)],
+                text=True,
+                encoding="utf-8-sig",
+                timeout=40,
+            ).lstrip("\ufeff")
+            if payload.strip():
+                return set_cached_value(cache_key, payload, ttl_seconds)
+        except Exception:
+            pass
         safe_url = str(url).replace("'", "''")
         command = (
             f"$content = (Invoke-WebRequest -UseBasicParsing -Uri '{safe_url}' -TimeoutSec 30).Content; "
@@ -591,6 +602,9 @@ def enrich_lrt_stop(stop):
         enriched["coordinate_source"] = manual.get("source") or "Manual LRT stop seed"
         return enriched
 
+    if os.environ.get("ENABLE_LRT_LOCATION_SEARCH") != "1":
+        return stop
+
     location = find_lrt_stop_location(stop.get("name"))
     if not location:
         return stop
@@ -1059,8 +1073,8 @@ def normalize_mtr_bus_stop(row):
 
 def normalize_mtr_bus_fare(row):
     route_id = first_non_empty(row, ["ROUTE_ID", "LINE_ID"])
-    oct_adult = parse_float(first_non_empty(row, ["OCT_ADT_FARE", "OCTOPUS_ADULT_FARE"]))
-    single_adult = parse_float(first_non_empty(row, ["SINGLE_ADT_FARE", "SINGLE_ADULT_FARE"]))
+    oct_adult = parse_float(first_non_empty(row, ["FARE_OCTO_ADULT", "OCT_ADT_FARE", "OCTOPUS_ADULT_FARE"]))
+    single_adult = parse_float(first_non_empty(row, ["FARE_SINGLE_ADULT", "SINGLE_ADT_FARE", "SINGLE_ADULT_FARE"]))
     preferred_amount = oct_adult if oct_adult is not None else single_adult
     return {
         "id": f"MTR_BUS:{route_id}",
@@ -1073,11 +1087,11 @@ def normalize_mtr_bus_fare(row):
         "fare_rule": {
             "octopus_adult": oct_adult,
             "single_adult": single_adult,
-            "octopus_student": parse_float(first_non_empty(row, ["OCT_STD_FARE"])),
-            "octopus_child": parse_float(first_non_empty(row, ["OCT_CON_CHILD_FARE"])),
-            "octopus_elderly": parse_float(first_non_empty(row, ["OCT_CON_ELDERLY_FARE"])),
-            "single_child": parse_float(first_non_empty(row, ["SINGLE_CON_CHILD_FARE"])),
-            "single_elderly": parse_float(first_non_empty(row, ["SINGLE_CON_ELDERLY_FARE"])),
+            "octopus_student": parse_float(first_non_empty(row, ["FARE_OCTO_STUDENT", "OCT_STD_FARE"])),
+            "octopus_child": parse_float(first_non_empty(row, ["FARE_OCTO_CHILD", "OCT_CON_CHILD_FARE"])),
+            "octopus_elderly": parse_float(first_non_empty(row, ["FARE_OCTO_ELDERLY", "OCT_CON_ELDERLY_FARE"])),
+            "single_child": parse_float(first_non_empty(row, ["FARE_SINGLE_CHILD", "SINGLE_CON_CHILD_FARE"])),
+            "single_elderly": parse_float(first_non_empty(row, ["FARE_SINGLE_ELDERLY", "SINGLE_CON_ELDERLY_FARE"])),
         },
         "source": "MTR bus fares CSV",
         "source_updated_at": None,
@@ -1155,12 +1169,12 @@ def build_mtr_bus_dataset():
 
 
 def normalize_lrt_route_stop(row):
-    line_id = str(first_non_empty(row, ["LINE_ID", "ROUTE_ID"]) or "").strip()
-    direction = first_non_empty(row, ["DIRECTION", "DIR", "ROUTE_SEQ"]) or "OUTBOUND"
-    stop_seq = parse_int(first_non_empty(row, ["STOP_SEQ", "STATION_SEQNO", "SEQUENCE"]))
-    stop_id = str(first_non_empty(row, ["STOP_ID", "STATION_ID"]) or "").strip()
-    stop_name_tc = first_non_empty(row, ["STOP_NAME_CHI", "STATION_NAME_CHI"])
-    stop_name_en = first_non_empty(row, ["STOP_NAME_ENG", "STATION_NAME_ENG"])
+    line_id = str(first_non_empty(row, ["Line Code", "LINE_ID", "ROUTE_ID"]) or "").strip()
+    direction = first_non_empty(row, ["Direction", "DIRECTION", "DIR", "ROUTE_SEQ"]) or "OUTBOUND"
+    stop_seq = parse_int(first_non_empty(row, ["Sequence", "STOP_SEQ", "STATION_SEQNO", "SEQUENCE"]))
+    stop_id = str(first_non_empty(row, ["Stop ID", "STOP_ID", "STATION_ID"]) or "").strip()
+    stop_name_tc = first_non_empty(row, ["Chinese Name", "STOP_NAME_CHI", "STATION_NAME_CHI"])
+    stop_name_en = first_non_empty(row, ["English Name", "STOP_NAME_ENG", "STATION_NAME_ENG"])
     return {
         "id": f"LRT:{line_id}:{direction}:{stop_seq}:{stop_id}",
         "operator": "MTR",
@@ -1207,10 +1221,10 @@ def build_lrt_dataset():
     route_stop_groups = {}
     stops = {}
     for row in route_stop_rows:
-        line_id = str(first_non_empty(row, ["LINE_ID", "ROUTE_ID"]) or "").strip()
+        line_id = str(first_non_empty(row, ["Line Code", "LINE_ID", "ROUTE_ID"]) or "").strip()
         if not line_id:
             continue
-        direction = first_non_empty(row, ["DIRECTION", "DIR", "ROUTE_SEQ"]) or "OUTBOUND"
+        direction = first_non_empty(row, ["Direction", "DIRECTION", "DIR", "ROUTE_SEQ"]) or "OUTBOUND"
         route_variant_id = f"LRT:{line_id}:{direction}"
         route_groups.setdefault(route_variant_id, {
             "id": route_variant_id,
@@ -1238,12 +1252,12 @@ def build_lrt_dataset():
         })
         route_stop_groups.setdefault(route_variant_id, []).append(normalize_lrt_route_stop(row))
 
-        stop_id = str(first_non_empty(row, ["STOP_ID", "STATION_ID"]) or "").strip()
+        stop_id = str(first_non_empty(row, ["Stop ID", "STOP_ID", "STATION_ID"]) or "").strip()
         if stop_id and stop_id not in stops:
             stops[stop_id] = normalize_lrt_stop(
                 stop_id,
-                first_non_empty(row, ["STOP_NAME_CHI", "STATION_NAME_CHI"]),
-                first_non_empty(row, ["STOP_NAME_ENG", "STATION_NAME_ENG"]),
+                first_non_empty(row, ["Chinese Name", "STOP_NAME_CHI", "STATION_NAME_CHI"]),
+                first_non_empty(row, ["English Name", "STOP_NAME_ENG", "STATION_NAME_ENG"]),
             )
 
     enriched_stops = [enrich_lrt_stop(stop) for stop in stops.values()]
@@ -1270,7 +1284,8 @@ def build_lrt_dataset():
         "fares": [],
         "validation": build_coordinate_validation("lrt", enriched_stops, "stops"),
         "limitations": [
-            "Light Rail CSV has route-stop topology but no coordinates; stops are enriched from manual seed and LandsD Location Search.",
+            "Light Rail CSV has route-stop topology but no coordinates; stops are enriched from manual seed.",
+            "Optional LandsD Location Search enrichment is disabled by default for latency; set ENABLE_LRT_LOCATION_SEARCH=1 to refresh missing LRT coordinates.",
             "No Light Rail fare table is attached yet in this pass.",
         ],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

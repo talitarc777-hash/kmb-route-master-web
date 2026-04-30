@@ -9,10 +9,10 @@ const MAX_TRANSFER_PER_OPERATOR = 4;
 const MAX_TRANSFER_ROUTE_ENTRIES = 24;
 const MAX_TRANSFER_STOPS_PER_LEG = 32;
 const MAX_MIXED_CANDIDATES = 10;
-const MAX_MIXED_ORIGIN_ENTRIES = 36;
-const MAX_MIXED_BOARD_ENTRIES = 18;
+const MAX_MIXED_ORIGIN_ENTRIES = 120;
+const MAX_MIXED_BOARD_ENTRIES = 48;
 const MAX_MIXED_STOPS_PER_LEG = 120;
-const MAX_MIXED_PATH_EXPANSIONS = 25000;
+const MAX_MIXED_PATH_EXPANSIONS = 90000;
 const TRANSFER_GRID_DEG = 0.003;
 const WALK_KMH = 4.5;
 const BOARDING_BUFFER_MIN = 2;
@@ -114,6 +114,18 @@ function normalizeName(name) {
 }
 
 function normalizeStop(stop, distanceKm = 0) {
+  if (!stop) {
+    return {
+      id: null,
+      stop_id: null,
+      station_code: null,
+      name: normalizeName(null),
+      lat: null,
+      lng: null,
+      distance_km: Number(distanceKm.toFixed(4)),
+      coordinate_source: null,
+    };
+  }
   return {
     id: stop.id,
     stop_id: stop.stop_id,
@@ -718,6 +730,36 @@ function withOperatorIndex(entry, operatorIndex) {
   return { ...entry, operatorIndex };
 }
 
+function mixedRouteDiversityKey(entry) {
+  return `${entry.operatorIndex?.config?.mode || entry.operator || 'unknown'}:${entry.routeKey}`;
+}
+
+function selectRouteDiverseEntries(entries, limit) {
+  const sorted = [...entries].sort((a, b) => {
+    if (a.nearbyStop.distanceKm !== b.nearbyStop.distanceKm) {
+      return a.nearbyStop.distanceKm - b.nearbyStop.distanceKm;
+    }
+    return (a.index ?? 0) - (b.index ?? 0);
+  });
+  const selected = [];
+  const seen = new Set();
+
+  for (const entry of sorted) {
+    const key = mixedRouteDiversityKey(entry);
+    if (seen.has(key)) continue;
+    selected.push(entry);
+    seen.add(key);
+    if (selected.length >= limit) return selected;
+  }
+
+  for (const entry of sorted) {
+    if (selected.includes(entry)) continue;
+    selected.push(entry);
+    if (selected.length >= limit) break;
+  }
+  return selected;
+}
+
 function entriesForStop(operatorIndex, nearbyStop) {
   return (operatorIndex.stopRouteEntries.get(nearbyStop.stop.stop_id) || [])
     .map((entry) => withOperatorIndex({ ...entry, nearbyStop }, operatorIndex));
@@ -733,9 +775,7 @@ function nearbyBoardEntries(operatorIndexes, stop, radiusKm, excludeRouteKeys = 
       }
     }
   }
-  return entries
-    .sort((a, b) => a.nearbyStop.distanceKm - b.nearbyStop.distanceKm)
-    .slice(0, MAX_MIXED_BOARD_ENTRIES);
+  return selectRouteDiverseEntries(entries, MAX_MIXED_BOARD_ENTRIES);
 }
 
 function matchingDestinationEntry(boardEntry, destEntriesByRouteKey) {
@@ -780,9 +820,7 @@ async function generateMixedOperatorCandidates(operatorIndexes, originLoc, destL
 
   const bestByRouteText = new Map();
   let expansions = 0;
-  const sortedOriginEntries = originEntries
-    .sort((a, b) => a.nearbyStop.distanceKm - b.nearbyStop.distanceKm)
-    .slice(0, MAX_MIXED_ORIGIN_ENTRIES);
+  const sortedOriginEntries = selectRouteDiverseEntries(originEntries, MAX_MIXED_ORIGIN_ENTRIES);
 
   for (const firstEntry of sortedOriginEntries) {
     if (expansions >= MAX_MIXED_PATH_EXPANSIONS) break;

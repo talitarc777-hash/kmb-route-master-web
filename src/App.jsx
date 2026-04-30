@@ -1606,7 +1606,7 @@ const App = () => {
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
           if (!fallbackTimedOut && filteredCandidates.length === 0 && alternatives.length === 0) {
             throw new Error(
-              'No route found with current non-KMB coverage (Citybus, Tram, MTR rail, MTR Bus feeder, Light Rail).',
+              'No route found with current alternative coverage (KMB mixed transfers, Citybus, Tram, MTR rail, MTR Bus feeder, Light Rail).',
             );
           }
           if (fallbackTimedOut && fallbackRequest) {
