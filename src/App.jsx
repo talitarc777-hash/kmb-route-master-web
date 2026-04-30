@@ -1494,17 +1494,17 @@ const App = () => {
               generateFallbackCandidates({
                 originLoc,
                 destLoc,
-                maxCandidates: Math.max(20, fallbackSettings.maxCandidates),
+                maxCandidates: Math.max(40, fallbackSettings.maxCandidates),
                 includeTransfers: true,
                 operatorModes: broadOperatorModes,
-                walkRadiusKm: 4.5,
-                transferRadiusKm: 0.5,
+                walkRadiusKm: 8.0,
+                transferRadiusKm: 1.2,
                 timeMode,
                 dateValue,
                 timeValue,
                 refineRideTimes: false,
               }),
-              Math.min(18000, fallbackSettings.timeoutMs + 6000),
+              Math.min(24000, fallbackSettings.timeoutMs + 8000),
             );
             if (!wideRescueResult.timedOut) {
               alternatives = annotateAlternativeCandidates(wideRescueResult.value?.candidates || []).map((candidate) => ({
