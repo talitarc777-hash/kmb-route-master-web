@@ -78,13 +78,17 @@ When the checkbox is off:
 
 When the checkbox is on:
 - The app still runs normal KMB search first
+- It inspects the first 3 fastest KMB candidates for weak/no-ETA segments
+- If a KMB segment has no active ETA, the app searches non-KMB options only around that segment's start and end stops
 - It then loads cached enriched operator datasets for:
   - Citybus
   - Tram
   - MTR
-- It builds local indexes from the enriched WGS84 data and generates direct comparison candidates
+- It builds local indexes from the enriched WGS84 data and generates targeted gap-repair candidates first
 - The live UI uses a fast local pass first, then lets slower alternative loading continue in the background
 - If one operator dataset fails, the other operators can still produce alternatives
+- If targeted gap repair finds useful options, broad all-origin-to-destination alternative search is skipped for speed
+- If no KMB gap is found, the app can still run the broader comparison path
 
 Alternative transport data source notes:
 - Citybus and Tram use enriched TD stop data with cached WGS84 coordinates
@@ -102,12 +106,14 @@ The generator builds a local operator index from the cached datasets:
 - Stop-to-route lookups are prepared once and reused
 
 Candidate types:
+- KMB gap repair using Citybus, MTR, and Tram where applicable
 - Citybus direct
 - Tram direct
 - MTR direct
 - Limited 1-transfer support remains in the generator
 - The live comparison path keeps transfer search off when KMB quality is usable
 - The live comparison path enables transfer search when the KMB quality score is weak, which helps cross-harbour cases such as North Point/NPGO to Hung Hom
+- Tram is considered only when both gap endpoints are likely on Hong Kong Island
 
 Candidate metadata:
 - `operator`
@@ -120,11 +126,13 @@ Candidate metadata:
 - fare if available
 - confidence
 - data source
+- for gap repair: replaced KMB route, replaced segment index, original gap time, alternative gap time, and repair reason
 
 Alternative timing model:
 - Candidate generation still starts locally from cached enriched operator datasets
 - Walking time remains local straight-line walking estimation
 - Boarding/wait handling remains the current simple buffer model (`BOARDING_BUFFER_MIN`)
+- Gap-repair cards show a hybrid estimate: original KMB route time minus the no-ETA KMB segment estimate plus the alternative segment estimate
 - In-vehicle ride time now prefers Google transit step duration by operator mode:
   - Citybus: Google `transit_mode=bus`
   - Tram: Google `transit_mode=tram`

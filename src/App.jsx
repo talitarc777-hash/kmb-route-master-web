@@ -247,6 +247,7 @@ function buildFallbackCacheKey({
   timeValue,
   includeTransfers,
   maxCandidates,
+  operatorModes,
 }) {
   const timeKey = timeMode === 'now'
     ? `now:${Math.floor(Date.now() / FALLBACK_CACHE_TTL_MS)}`
@@ -258,6 +259,7 @@ function buildFallbackCacheKey({
     timeKey,
     includeTransfers: Boolean(includeTransfers),
     maxCandidates,
+    operatorModes: (operatorModes || ['citybus', 'tram', 'mtr']).join(','),
   });
 }
 
@@ -417,6 +419,113 @@ function fallbackSearchSettings(kmbQuality) {
     googleRefineLimit: 3,
     timeoutMs: 12000,
   };
+}
+
+function isLikelyHongKongIsland(loc) {
+  const lat = Number(loc?.lat);
+  const lng = Number(loc?.lng);
+  return Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && lat >= 22.19
+    && lat <= 22.30
+    && lng >= 114.11
+    && lng <= 114.27;
+}
+
+function stopNameFromMap(stop) {
+  return stop?.name_tc || stop?.name_en || stop?.name || stop?.id || 'KMB stop';
+}
+
+function kmbStopLocation(stopMap, stopId) {
+  const stop = stopMap?.[stopId];
+  const lat = Number(stop?.lat);
+  const lng = Number(stop?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    lat,
+    lng,
+    name: stopNameFromMap(stop),
+    stopId,
+  };
+}
+
+function findKmbEtaGaps(routes, stopMap, limit = 3) {
+  return [...(routes || [])]
+    .sort((a, b) => estimatedTimeForRanking(a) - estimatedTimeForRanking(b))
+    .slice(0, limit)
+    .flatMap((route, routeIndex) => {
+      const segments = route.segments || [];
+      return segments
+        .map((segment, segmentIndex) => ({ route, routeIndex, segment, segmentIndex }))
+        .filter(({ segment }) => !segment.hasActiveEta && !segment.nextEta)
+        .map(({ route, routeIndex, segment, segmentIndex }) => {
+          const originLoc = kmbStopLocation(stopMap, segment.fromStop);
+          const destLoc = kmbStopLocation(stopMap, segment.toStop);
+          if (!originLoc || !destLoc) return null;
+          return {
+            route,
+            routeIndex,
+            segment,
+            segmentIndex,
+            originLoc: {
+              ...originLoc,
+              name: `${originLoc.name} (KMB gap start)`,
+            },
+            destLoc: {
+              ...destLoc,
+              name: `${destLoc.name} (KMB gap end)`,
+            },
+          };
+        })
+        .filter(Boolean);
+    })
+    .slice(0, 3);
+}
+
+function modesForGap(originLoc, destLoc) {
+  const modes = ['citybus', 'mtr'];
+  if (isLikelyHongKongIsland(originLoc) && isLikelyHongKongIsland(destLoc)) {
+    modes.push('tram');
+  }
+  return modes;
+}
+
+function estimateKmbSegmentMinutes(segment) {
+  const board = segment?.boardTime ? new Date(segment.boardTime) : null;
+  const arrival = segment?.arrivalTime ? new Date(segment.arrivalTime) : null;
+  if (board && arrival && !Number.isNaN(board.getTime()) && !Number.isNaN(arrival.getTime())) {
+    return Math.max(1, Math.round((arrival.getTime() - board.getTime()) / 60000));
+  }
+  return Math.max(1, ((segment?.stops || []).length - 1) * 2);
+}
+
+function annotateGapRepairCandidates(candidates, gap) {
+  const originalSegmentMinutes = estimateKmbSegmentMinutes(gap.segment);
+  const baseRouteTime = gap.route?.estimatedTime ?? 0;
+  return (candidates || []).map((candidate) => {
+    const hybridTime = baseRouteTime > 0
+      ? Math.max(1, Math.round(baseRouteTime - originalSegmentMinutes + candidate.estimated_time_min))
+      : candidate.estimated_time_min;
+    return {
+      ...candidate,
+      id: `gap-repair-${gap.route?.id || gap.routeIndex}-${gap.segmentIndex}-${candidate.id}`,
+      isFallback: true,
+      optionLabel: 'Alternative transport option',
+      alternativeRole: 'kmb_gap_repair',
+      repairReason: `Replaces KMB ${gap.segment.route} segment with no active ETA`,
+      replacedKmbRoute: gap.segment.route,
+      replacedKmbSegmentIndex: gap.segmentIndex,
+      baseKmbRouteId: gap.route?.id || null,
+      original_gap_time_min: originalSegmentMinutes,
+      alternative_gap_time_min: candidate.estimated_time_min,
+      estimated_time_min: hybridTime,
+      estimatedTime: hybridTime,
+      notes: [
+        ...(candidate.notes || []),
+        `Hybrid estimate keeps the rest of KMB route ${gap.routeIndex + 1} and replaces only the no-ETA KMB ${gap.segment.route} gap.`,
+      ],
+    };
+  });
 }
 
 function annotateAlternativeCandidates(candidates) {
@@ -1152,6 +1261,9 @@ const App = () => {
         const hasValidKmb = filteredCandidates.length > 0;
         const kmbQuality = scoreKmbQuality(filteredCandidates);
         const fallbackSettings = fallbackSearchSettings(kmbQuality);
+        const kmbGaps = hasValidKmb
+          ? findKmbEtaGaps(filteredCandidates, stopMapRef.current, 3)
+          : [];
         const fallbackCacheKey = buildFallbackCacheKey({
           originLoc,
           destLoc,
@@ -1160,9 +1272,118 @@ const App = () => {
           timeValue,
           includeTransfers: fallbackSettings.includeTransfers,
           maxCandidates: fallbackSettings.maxCandidates,
+          operatorModes: ['citybus', 'tram', 'mtr'],
         });
         setLoadingStatus('Checking other transport options...');
         try {
+          let targetedAlternatives = [];
+          if (kmbGaps.length > 0) {
+            setLoadingStatus('Checking alternatives for KMB no-ETA gaps...');
+            const gapPayloads = await Promise.all(kmbGaps.map(async (gap) => {
+              const operatorModes = modesForGap(gap.originLoc, gap.destLoc);
+              const gapCacheKey = buildFallbackCacheKey({
+                originLoc: gap.originLoc,
+                destLoc: gap.destLoc,
+                timeMode,
+                dateValue,
+                timeValue,
+                includeTransfers: true,
+                maxCandidates: 4,
+                operatorModes,
+              });
+              const cachedGap = getCachedFallback(fallbackCacheRef.current, gapCacheKey);
+              if (cachedGap?.payload) {
+                return { gap, payload: cachedGap.payload, timedOut: false };
+              }
+
+              const gapRequest = generateFallbackCandidates({
+                originLoc: gap.originLoc,
+                destLoc: gap.destLoc,
+                maxCandidates: 4,
+                includeTransfers: true,
+                operatorModes,
+                timeMode,
+                dateValue,
+                timeValue,
+                refineRideTimes: false,
+                walkRadiusKm: 0.85,
+              });
+              const gapResult = await withSoftTimeout(gapRequest, 8000);
+              if (gapResult.timedOut) {
+                gapRequest
+                  .then((latePayload) => {
+                    if (searchRunRef.current !== searchRunId) return;
+                    setCachedFallback(fallbackCacheRef.current, gapCacheKey, { payload: latePayload });
+                    const lateAlternatives = annotateGapRepairCandidates(
+                      latePayload.candidates || [],
+                      gap,
+                    );
+                    if (lateAlternatives.length === 0) return;
+                    setResults((currentResults) => {
+                      const currentKmb = (currentResults || []).filter((route) => !isFallbackRoute(route));
+                      const currentFallback = (currentResults || []).filter((route) => isFallbackRoute(route));
+                      const merged = [...currentKmb, ...currentFallback, ...lateAlternatives];
+                      const deduped = Array.from(new Map(merged.map((route) => [route.id || route.dedupKey, route])).values());
+                      return rankCombinedTransportOptions(deduped);
+                    });
+                  })
+                  .catch((error) => console.warn('KMB gap alternative could not finish loading:', error));
+                return { gap, payload: { candidates: [] }, timedOut: true };
+              }
+
+              setCachedFallback(fallbackCacheRef.current, gapCacheKey, { payload: gapResult.value });
+              return { gap, payload: gapResult.value, timedOut: false };
+            }));
+
+            targetedAlternatives = gapPayloads.flatMap(({ gap, payload }) =>
+              annotateGapRepairCandidates(payload.candidates || [], gap),
+            );
+          }
+
+          if (targetedAlternatives.length > 0) {
+            finalResults = rankCombinedTransportOptions([
+              ...filteredCandidates,
+              ...targetedAlternatives,
+            ]);
+            if (canReusePlannedSearch) {
+              searchCacheRef.current.set(searchCacheKey, cloneRouteResults(finalResults));
+              if (searchCacheRef.current.size > 8) {
+                const oldestKey = searchCacheRef.current.keys().next().value;
+                searchCacheRef.current.delete(oldestKey);
+              }
+            }
+            setResults(finalResults);
+            setIsSearchOpen(false);
+            Promise.all(gapPayloads.map(async ({ gap, payload }) => {
+              const refinedCandidates = await refineFallbackCandidateRideTimes(
+                payload.candidates || [],
+                {
+                  maxRefinements: Math.min(3, (payload.candidates || []).length),
+                  timeMode,
+                  dateValue,
+                  timeValue,
+                },
+              );
+              return annotateGapRepairCandidates(refinedCandidates, gap);
+            }))
+              .then((refinedRows) => {
+                if (searchRunRef.current !== searchRunId) return;
+                const refinedAlternatives = refinedRows.flat();
+                if (refinedAlternatives.length === 0) return;
+                setResults((currentResults) => {
+                  const currentKmb = (currentResults || []).filter((route) => !isFallbackRoute(route));
+                  return rankCombinedTransportOptions([
+                    ...currentKmb,
+                    ...refinedAlternatives,
+                  ]);
+                });
+              })
+              .catch((error) => {
+                console.warn('KMB gap Google ride-time refinement failed:', error);
+              });
+            return;
+          }
+
           const cachedFallback = getCachedFallback(fallbackCacheRef.current, fallbackCacheKey);
           let fallbackPayload = cachedFallback?.payload || null;
           let fallbackTimedOut = false;
@@ -1177,6 +1398,7 @@ const App = () => {
               dateValue,
               timeValue,
               refineRideTimes: false,
+              operatorModes: ['citybus', 'tram', 'mtr'],
             });
             const fallbackResult = await withSoftTimeout(fallbackRequest, fallbackSettings.timeoutMs);
             fallbackTimedOut = fallbackResult.timedOut;
@@ -2100,6 +2322,11 @@ const App = () => {
                         <span>{'\u00B7'} Walk {card.representative.walk_distance_m}m</span>
                         <span>{'\u00B7'} {formatFare(card.representative.fare)}</span>
                       </div>
+                      {card.representative.repairReason && (
+                        <div className="mt-2 text-[11px] font-bold text-blue-600">
+                          {card.representative.repairReason}
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-blue-700 font-bold text-lg">
@@ -2227,7 +2454,9 @@ const App = () => {
           </div>
 
           <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs font-bold text-blue-800">
-            Shown because you chose to compare KMB with other transport options.
+            {selectedRoute.repairReason
+              ? `${selectedRoute.repairReason}. The time shown is a hybrid estimate using the original KMB route plus this replacement gap.`
+              : 'Shown because you chose to compare KMB with other transport options.'}
           </div>
 
           <div className="space-y-3">

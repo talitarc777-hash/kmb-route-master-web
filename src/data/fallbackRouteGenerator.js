@@ -664,6 +664,7 @@ export async function generateFallbackCandidatesFromDatasets({
   datasets,
   maxCandidates = 24,
   includeTransfers = true,
+  operatorModes = ['citybus', 'tram', 'mtr'],
   walkRadiusKm = DEFAULT_WALK_RADIUS_KM,
   transferRadiusKm = DEFAULT_TRANSFER_RADIUS_KM,
   timeMode = 'now',
@@ -684,11 +685,19 @@ export async function generateFallbackCandidatesFromDatasets({
     timeValue,
     refineRideTimes,
   };
-  const rows = await Promise.all([
-    generateForOperator({ dataset: datasets?.citybus, config: MODE_CONFIG.citybus, originLoc, destLoc, options }),
-    generateForOperator({ dataset: datasets?.tram, config: MODE_CONFIG.tram, originLoc, destLoc, options }),
-    generateForOperator({ dataset: datasets?.mtr, config: MODE_CONFIG.mtr, originLoc, destLoc, options }),
-  ]);
+  const enabledModes = new Set(operatorModes || []);
+  const operatorJobs = [
+    enabledModes.has('citybus')
+      ? generateForOperator({ dataset: datasets?.citybus, config: MODE_CONFIG.citybus, originLoc, destLoc, options })
+      : null,
+    enabledModes.has('tram')
+      ? generateForOperator({ dataset: datasets?.tram, config: MODE_CONFIG.tram, originLoc, destLoc, options })
+      : null,
+    enabledModes.has('mtr')
+      ? generateForOperator({ dataset: datasets?.mtr, config: MODE_CONFIG.mtr, originLoc, destLoc, options })
+      : null,
+  ].filter(Boolean);
+  const rows = await Promise.all(operatorJobs);
 
   const candidates = rows
     .flatMap((row) => row.candidates)
