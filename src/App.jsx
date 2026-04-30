@@ -499,6 +499,27 @@ function estimateKmbSegmentMinutes(segment) {
   return Math.max(1, ((segment?.stops || []).length - 1) * 2);
 }
 
+function getSegmentRideDisplay(segment) {
+  const board = segment?.boardTime ? new Date(segment.boardTime) : null;
+  const arrival = segment?.arrivalTime ? new Date(segment.arrivalTime) : null;
+  if (board && arrival && !Number.isNaN(board.getTime()) && !Number.isNaN(arrival.getTime())) {
+    const mins = Math.max(1, Math.round((arrival.getTime() - board.getTime()) / 60000));
+    return { minutes: mins, source: segment?.rideDurationSource || 'timed' };
+  }
+
+  if (Number.isFinite(segment?.rideDurationMinutes)) {
+    return {
+      minutes: Math.max(1, Math.round(segment.rideDurationMinutes)),
+      source: segment?.rideDurationSource || 'estimated',
+    };
+  }
+
+  return {
+    minutes: estimateKmbSegmentMinutes(segment),
+    source: 'heuristic',
+  };
+}
+
 function annotateGapRepairCandidates(candidates, gap) {
   const originalSegmentMinutes = estimateKmbSegmentMinutes(gap.segment);
   const baseRouteTime = gap.route?.estimatedTime ?? 0;
@@ -2476,6 +2497,9 @@ const App = () => {
                 </div>
                 <div className="text-xs text-slate-400 mt-1">
                   {leg.stop_count} stops {'\u00B7'} ride estimate {leg.estimated_ride_time_min} min
+                  {String(leg.ride_time_source || '').startsWith('google_transit_')
+                    ? ' (Google transit)'
+                    : ''}
                 </div>
                 {index < (selectedRoute.transfer_stops || []).length && (
                   <div className="mt-2 text-xs font-bold text-slate-500">
@@ -2555,6 +2579,7 @@ const App = () => {
             const displaySeg = detailSegments[si] || seg;
             const fromStop = stopMapRef.current[seg.fromStop];
             const toStop = stopMapRef.current[seg.toStop];
+            const rideInfo = getSegmentRideDisplay(displaySeg);
             const nextSegment = detailSegments[si + 1] || (selectedRoute.segments || [])[si + 1];
             const transferWalkMinutes = si === 0
               ? selectedRoute.walkTimeTransfer
@@ -2590,6 +2615,10 @@ const App = () => {
                     >
                       {'\u2B50'}
                     </button>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-500 mt-1">
+                    Ride time: ~{rideInfo.minutes} min
+                    {rideInfo.source === 'google_transit_bus_duration' ? ' (Google transit)' : ''}
                   </div>
                   <div
                     className="text-xs text-slate-400 my-1 cursor-pointer hover:text-slate-600 flex flex-col gap-1"
