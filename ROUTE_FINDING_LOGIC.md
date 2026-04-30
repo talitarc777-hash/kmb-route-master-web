@@ -84,6 +84,8 @@ When the checkbox is on:
   - Citybus
   - Tram
   - MTR
+  - MTR Bus (feeder / K routes)
+  - Light Rail
 - It builds local indexes from the enriched WGS84 data and generates targeted gap-repair candidates first
 - The live UI uses a fast local pass first, then lets slower alternative loading continue in the background
 - If one operator dataset fails, the other operators can still produce alternatives
@@ -94,6 +96,9 @@ Alternative transport data source notes:
 - Citybus and Tram use enriched TD stop data with cached WGS84 coordinates
 - MTR uses station coordinates from the manual/open-source seed file when available
 - MTR no longer performs live per-station LandsD geocoding during route search because that made alternative loading too slow
+- MTR feeder bus stops use WGS84 coordinates from MTR Open Data
+- Light Rail route-stop topology comes from MTR Open Data; stop coordinates use manual seed first, then cached LandsD lookups as fallback
+- Minibus is still not included in the current non-KMB candidate generator
 - No Google Transit shortcut is used
 - Google Directions transit is used only to refine in-vehicle ride time after local candidates are already generated
 - If `GCP_API_KEY` is not configured, Google ride-time refinement is skipped/falls back to heuristic timing
@@ -110,10 +115,13 @@ Candidate types:
 - Citybus direct
 - Tram direct
 - MTR direct
+- MTR Bus direct
+- Light Rail direct
 - Limited 1-transfer support remains in the generator
 - The live comparison path keeps transfer search off when KMB quality is usable
 - The live comparison path enables transfer search when the KMB quality score is weak, which helps cross-harbour cases such as North Point/NPGO to Hung Hom
 - Tram is considered only when both gap endpoints are likely on Hong Kong Island
+- Light Rail is considered when either endpoint is in the NW New Territories Light Rail corridor
 
 Candidate metadata:
 - `operator`
@@ -137,12 +145,14 @@ Alternative timing model:
   - Citybus: Google `transit_mode=bus`
   - Tram: Google `transit_mode=tram`
   - MTR: Google `transit_mode=subway`
+  - MTR Bus: Google `transit_mode=bus`
+  - Light Rail: Google `transit_mode=tram`
 - If Google cannot return a usable transit step, the generator falls back to the previous per-stop heuristic
 
 Alternative loading resilience:
 - Static operator dataset loaders first use memory/localStorage cache
 - If a live static dataset request fails, stale localStorage data is reused when available
-- Citybus, Tram, and MTR dataset loading is partial-success tolerant via settled promises
+- Citybus, Tram, MTR, MTR Bus, and Light Rail dataset loading is partial-success tolerant via settled promises
 - A slow alternative load no longer throws `Other transport data took too long to load` into the UI
 - If the first local alternative pass is still pending, KMB results can render first and alternatives are added after the background load completes
 
@@ -195,6 +205,6 @@ Current behavior:
 
 Current behavior is:
 - Checkbox off: KMB-only search, unchanged
-- Checkbox on: KMB plus Citybus, Tram, and MTR options for direct comparison
+- Checkbox on: KMB plus Citybus, Tram, MTR, MTR Bus, and Light Rail options for direct comparison
 - KMB remains the default path
 - Alternative transport options are local, cached, and clearly labeled

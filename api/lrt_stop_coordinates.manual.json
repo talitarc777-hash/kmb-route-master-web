@@ -1,0 +1,4 @@
+{
+  "_comment": "Manual fallback seed for Light Rail stop WGS84 coordinates. Prefer official/open-source coordinates first; use this file only for explicitly reviewed stop-level overrides.",
+  "stops": {}
+}

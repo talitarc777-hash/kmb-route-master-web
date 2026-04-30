@@ -37,6 +37,20 @@ const MODE_CONFIG = {
     minutesPerStop: 2.4,
     confidenceBase: 0.78,
   },
+  mtr_bus: {
+    operator: 'MTR_BUS',
+    mode: 'mtr_bus',
+    label: 'MTR Bus',
+    minutesPerStop: 1.7,
+    confidenceBase: 0.72,
+  },
+  lrt: {
+    operator: 'LRT',
+    mode: 'lrt',
+    label: 'Light Rail',
+    minutesPerStop: 1.35,
+    confidenceBase: 0.74,
+  },
 };
 
 function toNumber(value) {
@@ -245,6 +259,7 @@ function getRouteLabel(route, fallbackRouteId) {
 
 function getTransitMode(config) {
   if (config.mode === 'mtr') return 'subway';
+  if (config.mode === 'lrt') return 'tram';
   if (config.mode === 'tram') return 'tram';
   return 'bus';
 }
@@ -415,7 +430,7 @@ async function buildLeg(index, fromEntry, toEntry, options = {}) {
     operator: index.config.operator,
     mode: index.config.mode,
     route: routeLabel,
-    line: index.config.mode === 'mtr' ? routeLabel : null,
+    line: index.config.mode === 'mtr' || index.config.mode === 'lrt' ? routeLabel : null,
     route_id: fromEntry.route_id,
     route_variant_id: fromEntry.routeKey,
     direction: fromEntry.direction,
@@ -450,7 +465,7 @@ function buildCandidate(index, originLoc, destLoc, legs, originNearby, destNearb
     operator: transfers === 0 ? index.config.operator : legs.map((leg) => leg.operator).join('+'),
     mode: index.config.mode,
     route: routeText,
-    line: index.config.mode === 'mtr' ? routeText : null,
+    line: index.config.mode === 'mtr' || index.config.mode === 'lrt' ? routeText : null,
     journey_type: transfers === 0 ? 'direct' : 'one_transfer',
     transfers,
     origin: originLoc,
@@ -664,7 +679,7 @@ export async function generateFallbackCandidatesFromDatasets({
   datasets,
   maxCandidates = 24,
   includeTransfers = true,
-  operatorModes = ['citybus', 'tram', 'mtr'],
+  operatorModes = ['citybus', 'tram', 'mtr', 'mtr_bus', 'lrt'],
   walkRadiusKm = DEFAULT_WALK_RADIUS_KM,
   transferRadiusKm = DEFAULT_TRANSFER_RADIUS_KM,
   timeMode = 'now',
@@ -695,6 +710,12 @@ export async function generateFallbackCandidatesFromDatasets({
       : null,
     enabledModes.has('mtr')
       ? generateForOperator({ dataset: datasets?.mtr, config: MODE_CONFIG.mtr, originLoc, destLoc, options })
+      : null,
+    enabledModes.has('mtr_bus')
+      ? generateForOperator({ dataset: datasets?.mtr_bus, config: MODE_CONFIG.mtr_bus, originLoc, destLoc, options })
+      : null,
+    enabledModes.has('lrt')
+      ? generateForOperator({ dataset: datasets?.lrt, config: MODE_CONFIG.lrt, originLoc, destLoc, options })
       : null,
   ].filter(Boolean);
   const rows = await Promise.all(operatorJobs);

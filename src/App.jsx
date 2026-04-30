@@ -183,7 +183,7 @@ async function resolveLocation(inputObj) {
   if (parsed.type === 'coords') return { lat: parsed.lat, lng: parsed.lng, name: rawText };
   const result = await geocode(rawText, placeId);
   if (!result) throw new Error(`Cannot find location: "${rawText}"`);
-  return result;
+  return { ...result, name: rawText };
 }
 
 function cloneRouteResults(routes) {
@@ -259,7 +259,7 @@ function buildFallbackCacheKey({
     timeKey,
     includeTransfers: Boolean(includeTransfers),
     maxCandidates,
-    operatorModes: (operatorModes || ['citybus', 'tram', 'mtr']).join(','),
+    operatorModes: (operatorModes || ['citybus', 'tram', 'mtr', 'mtr_bus', 'lrt']).join(','),
   });
 }
 
@@ -304,6 +304,8 @@ function getOperatorDisplayName(code) {
   if (key === 'CTB') return 'Citybus';
   if (key === 'TRAM') return 'Tram';
   if (key === 'MTR') return 'MTR';
+  if (key === 'MTR_BUS') return 'MTR Bus';
+  if (key === 'LRT') return 'Light Rail';
   return code || 'Other';
 }
 
@@ -313,6 +315,8 @@ function getOperatorBadgeClass(code) {
   if (key === 'CTB') return 'bg-blue-600 text-white';
   if (key === 'TRAM') return 'bg-emerald-600 text-white';
   if (key === 'MTR') return 'bg-amber-500 text-slate-900';
+  if (key === 'MTR_BUS') return 'bg-cyan-600 text-white';
+  if (key === 'LRT') return 'bg-lime-600 text-white';
   return 'bg-slate-500 text-white';
 }
 
@@ -432,6 +436,17 @@ function isLikelyHongKongIsland(loc) {
     && lng <= 114.27;
 }
 
+function isLikelyLrtCorridor(loc) {
+  const lat = Number(loc?.lat);
+  const lng = Number(loc?.lng);
+  return Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && lat >= 22.36
+    && lat <= 22.55
+    && lng >= 113.93
+    && lng <= 114.08;
+}
+
 function stopNameFromMap(stop) {
   return stop?.name_tc || stop?.name_en || stop?.name || stop?.id || 'KMB stop';
 }
@@ -483,9 +498,23 @@ function findKmbEtaGaps(routes, stopMap, limit = 3) {
 }
 
 function modesForGap(originLoc, destLoc) {
-  const modes = ['citybus', 'mtr'];
+  const modes = ['citybus', 'mtr', 'mtr_bus'];
   if (isLikelyHongKongIsland(originLoc) && isLikelyHongKongIsland(destLoc)) {
     modes.push('tram');
+  }
+  if (isLikelyLrtCorridor(originLoc) || isLikelyLrtCorridor(destLoc)) {
+    modes.push('lrt');
+  }
+  return modes;
+}
+
+function modesForBroadAlternative(originLoc, destLoc) {
+  const modes = ['citybus', 'mtr', 'mtr_bus'];
+  if (isLikelyHongKongIsland(originLoc) && isLikelyHongKongIsland(destLoc)) {
+    modes.push('tram');
+  }
+  if (isLikelyLrtCorridor(originLoc) || isLikelyLrtCorridor(destLoc)) {
+    modes.push('lrt');
   }
   return modes;
 }
@@ -1282,6 +1311,7 @@ const App = () => {
         const hasValidKmb = filteredCandidates.length > 0;
         const kmbQuality = scoreKmbQuality(filteredCandidates);
         const fallbackSettings = fallbackSearchSettings(kmbQuality);
+        const broadOperatorModes = modesForBroadAlternative(originLoc, destLoc);
         const kmbGaps = hasValidKmb
           ? findKmbEtaGaps(filteredCandidates, stopMapRef.current, 3)
           : [];
@@ -1293,14 +1323,15 @@ const App = () => {
           timeValue,
           includeTransfers: fallbackSettings.includeTransfers,
           maxCandidates: fallbackSettings.maxCandidates,
-          operatorModes: ['citybus', 'tram', 'mtr'],
+          operatorModes: broadOperatorModes,
         });
         setLoadingStatus('Checking other transport options...');
         try {
           let targetedAlternatives = [];
+          let gapPayloads = [];
           if (kmbGaps.length > 0) {
             setLoadingStatus('Checking alternatives for KMB no-ETA gaps...');
-            const gapPayloads = await Promise.all(kmbGaps.map(async (gap) => {
+            gapPayloads = await Promise.all(kmbGaps.map(async (gap) => {
               const operatorModes = modesForGap(gap.originLoc, gap.destLoc);
               const gapCacheKey = buildFallbackCacheKey({
                 originLoc: gap.originLoc,
@@ -1419,7 +1450,7 @@ const App = () => {
               dateValue,
               timeValue,
               refineRideTimes: false,
-              operatorModes: ['citybus', 'tram', 'mtr'],
+              operatorModes: broadOperatorModes,
             });
             const fallbackResult = await withSoftTimeout(fallbackRequest, fallbackSettings.timeoutMs);
             fallbackTimedOut = fallbackResult.timedOut;
@@ -1435,8 +1466,35 @@ const App = () => {
           if (!cachedFallback && !fallbackTimedOut) {
             setCachedFallback(fallbackCacheRef.current, fallbackCacheKey, { payload: fallbackPayload });
           }
-          const alternatives = annotateAlternativeCandidates(fallbackPayload.candidates || []);
+          let alternatives = annotateAlternativeCandidates(fallbackPayload.candidates || []);
+          if (!fallbackTimedOut && alternatives.length === 0) {
+            setLoadingStatus('Expanding alternative search range...');
+            const rescueResult = await withSoftTimeout(
+              generateFallbackCandidates({
+                originLoc,
+                destLoc,
+                maxCandidates: Math.max(18, fallbackSettings.maxCandidates),
+                includeTransfers: true,
+                operatorModes: broadOperatorModes,
+                walkRadiusKm: 1.8,
+                transferRadiusKm: 0.35,
+                timeMode,
+                dateValue,
+                timeValue,
+                refineRideTimes: false,
+              }),
+              Math.min(15000, fallbackSettings.timeoutMs + 4000),
+            );
+            if (!rescueResult.timedOut) {
+              alternatives = annotateAlternativeCandidates(rescueResult.value?.candidates || []);
+            }
+          }
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
+          if (!fallbackTimedOut && filteredCandidates.length === 0 && alternatives.length === 0) {
+            throw new Error(
+              'No route found with current non-KMB coverage (Citybus, Tram, MTR rail, MTR Bus feeder, Light Rail).',
+            );
+          }
           if (fallbackTimedOut && fallbackRequest) {
             fallbackRequest
               .then((latePayload) => {
@@ -2103,7 +2161,7 @@ const App = () => {
             <span className="leading-snug">
               Include other transport options with KMB
               <span className="block text-[11px] font-semibold text-slate-400">
-                Re-runs this search with Citybus, Tram, and MTR alternatives for comparison.
+                Re-runs this search with Citybus, Tram, MTR rail, MTR Bus feeder, and Light Rail alternatives for comparison.
               </span>
             </span>
           </label>

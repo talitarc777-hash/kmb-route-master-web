@@ -30,11 +30,16 @@ CITYBUS_STOP_URL = "https://rt.data.gov.hk/v2/transport/citybus/stop/{stop_id}"
 
 MTR_LINES_URL = "https://opendata.mtr.com.hk/data/mtr_lines_and_stations.csv"
 MTR_FARES_URL = "https://opendata.mtr.com.hk/data/mtr_lines_fares.csv"
+MTR_BUS_ROUTES_URL = "https://opendata.mtr.com.hk/data/mtr_bus_routes.csv"
+MTR_BUS_STOPS_URL = "https://opendata.mtr.com.hk/data/mtr_bus_stops.csv"
+MTR_BUS_FARES_URL = "https://opendata.mtr.com.hk/data/mtr_bus_fares.csv"
+LIGHT_RAIL_ROUTES_STOPS_URL = "https://opendata.mtr.com.hk/data/light_rail_routes_and_stops.csv"
 MTR_TRAIN_ETA_URL = "https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line={line}&sta={station}"
 LOCATION_SEARCH_URL = "https://geodata.gov.hk/gs/api/v1.0.0/locationSearch?q={query}"
 
 COORD_TRANSFORM_URL = "https://www.geodetic.gov.hk/transform/v2/?inSys=hkgrid&outSys=wgsgeog&n={northing}&e={easting}"
 MTR_MANUAL_COORDINATE_FILE = os.path.join(os.path.dirname(__file__), "mtr_station_coordinates.manual.json")
+LRT_MANUAL_COORDINATE_FILE = os.path.join(os.path.dirname(__file__), "lrt_stop_coordinates.manual.json")
 
 CACHE = {}
 
@@ -161,6 +166,16 @@ def parse_int(value):
         return None
 
 
+def first_non_empty(row, keys, default=None):
+    if not isinstance(row, dict):
+        return default
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
 def canonicalize_name(value):
     if value in (None, ""):
         return ""
@@ -189,6 +204,22 @@ def load_manual_mtr_coordinate_seed():
 
     stations = payload.get("stations") or {}
     return set_cached_value(cache_key, stations, STATIC_TTL_SECONDS)
+
+
+def load_manual_lrt_coordinate_seed():
+    cache_key = "manual:lrt-coordinate-seed"
+    cached = get_cached_value(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        with open(LRT_MANUAL_COORDINATE_FILE, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        payload = {"stops": {}}
+
+    stops = payload.get("stops") or {}
+    return set_cached_value(cache_key, stops, STATIC_TTL_SECONDS)
 
 
 def meridional_arc(lat_rad):
@@ -456,6 +487,111 @@ def enrich_mtr_station(stop):
         return enriched
 
     location = find_mtr_station_location(stop.get("name"))
+    if not location:
+        return stop
+
+    grid_easting = parse_float(location["result"].get("x"))
+    grid_northing = parse_float(location["result"].get("y"))
+    coords = convert_hk80_to_wgs84(grid_easting, grid_northing)
+    if not coords:
+        return stop
+
+    enriched = dict(stop)
+    enriched["grid_easting"] = grid_easting
+    enriched["grid_northing"] = grid_northing
+    enriched["lat"] = coords["lat"]
+    enriched["lng"] = coords["lng"]
+    enriched["coordinate_system"] = "WGS84"
+    enriched["coordinate_source"] = f"LandsD Location Search API ({location['query']})"
+    return enriched
+
+
+def lrt_query_variants(name_block):
+    english = (name_block or {}).get("en")
+    chinese = (name_block or {}).get("tc")
+    variants = []
+    for candidate in (
+        f"LR {english} Light Rail Stop" if english else None,
+        f"{english} Light Rail Stop" if english else None,
+        f"{english} 輕鐵站" if english else None,
+        f"{chinese} 輕鐵站" if chinese else None,
+        chinese,
+        english,
+    ):
+        candidate = str(candidate or "").strip()
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+def score_lrt_location_result(result, name_block, query):
+    english = (name_block or {}).get("en") or ""
+    chinese = (name_block or {}).get("tc") or ""
+    name_en = result.get("nameEN") or ""
+    address_en = result.get("addressEN") or ""
+    name_zh = result.get("nameZH") or ""
+    address_zh = result.get("addressZH") or ""
+
+    score = 0
+    if english and canonicalize_name(english) == canonicalize_name(name_en):
+        score += 85
+    if english and canonicalize_name(english) == canonicalize_name(address_en):
+        score += 60
+    if chinese and chinese == name_zh:
+        score += 85
+    if chinese and chinese == address_zh:
+        score += 60
+    if "Light Rail" in name_en or "Light Rail" in address_en:
+        score += 12
+    if "\u8f15\u9435" in name_zh or "\u8f15\u9435" in address_zh:
+        score += 12
+    if "MTR" in name_en:
+        score += 6
+    if "Station" in name_en and "Light Rail" not in name_en:
+        score -= 10
+    if "Exit" in name_en or "Access" in name_en:
+        score -= 15
+    if canonicalize_name(query) and canonicalize_name(query) == canonicalize_name(name_en):
+        score += 10
+    return score
+
+
+def find_lrt_stop_location(name_block):
+    best_result = None
+    best_score = float("-inf")
+    best_query = None
+
+    for query in lrt_query_variants(name_block):
+        for result in fetch_location_search(query):
+            score = score_lrt_location_result(result, name_block, query)
+            if score > best_score:
+                best_result = result
+                best_score = score
+                best_query = query
+
+    if best_result is None or best_score < 55:
+        return None
+
+    return {"query": best_query, "result": best_result}
+
+
+def enrich_lrt_stop(stop):
+    manual_seed = load_manual_lrt_coordinate_seed()
+    manual = manual_seed.get(stop.get("stop_id"))
+    if not manual:
+        stop_code = stop.get("station_code")
+        if stop_code:
+            manual = manual_seed.get(stop_code)
+    if manual:
+        enriched = dict(stop)
+        enriched["lat"] = parse_float(manual.get("lat"))
+        enriched["lng"] = parse_float(manual.get("lng"))
+        if enriched["lat"] is not None and enriched["lng"] is not None:
+            enriched["coordinate_system"] = "WGS84"
+        enriched["coordinate_source"] = manual.get("source") or "Manual LRT stop seed"
+        return enriched
+
+    location = find_lrt_stop_location(stop.get("name"))
     if not location:
         return stop
 
@@ -843,6 +979,305 @@ def build_mtr_dataset():
     return set_cached_value(cache_key, dataset, STATIC_TTL_SECONDS)
 
 
+def normalize_mtr_bus_route(row):
+    route_id = first_non_empty(row, ["ROUTE_ID", "LINE_ID"])
+    route_name_en = first_non_empty(row, ["ROUTE_NAME_ENG", "ROUTE_NAME_EN", "ROUTE_NAMEE", "ROUTE_NAME"])
+    route_name_tc = first_non_empty(row, ["ROUTE_NAME_CHI", "ROUTE_NAME_TC", "ROUTE_NAMEC"])
+    line_up = first_non_empty(row, ["LINE_UP", "UP_TERM_ENG", "UP_TERMINUS_ENG", "UP_DESC_ENG"])
+    line_down = first_non_empty(row, ["LINE_DOWN", "DOWN_TERM_ENG", "DOWN_TERMINUS_ENG", "DOWN_DESC_ENG"])
+    fare = parse_float(first_non_empty(row, ["OCT_ADT_FARE", "SINGLE_ADT_FARE", "FULL_FARE", "FARE"]))
+    return {
+        "id": f"MTR_BUS:{route_id}",
+        "operator": "MTR",
+        "route_id": route_id,
+        "route": route_id,
+        "line": route_id,
+        "display_route": route_id,
+        "route_name": build_name_block(route_name_tc, route_name_en, None),
+        "direction": None,
+        "service_type": "BUS_FEEDER",
+        "route_type": "BUS",
+        "special_type": "MTR_FEEDER",
+        "journey_time_minutes": parse_int(first_non_empty(row, ["JOURNEY_TIME", "JOURNEY_TIME_MIN"])),
+        "origin": build_name_block(None, line_up, None) if line_up else None,
+        "destination": build_name_block(None, line_down, None) if line_down else None,
+        "full_fare": fare,
+        "fare": fare,
+        "fare_currency": "HKD" if fare is not None else None,
+        "source": "MTR bus routes CSV",
+        "source_updated_at": None,
+    }
+
+
+def normalize_mtr_bus_route_stop(row):
+    route_id = first_non_empty(row, ["ROUTE_ID", "LINE_ID"])
+    direction = first_non_empty(row, ["DIRECTION", "DIR", "ROUTE_SEQ"]) or "OUTBOUND"
+    station_seq = parse_int(first_non_empty(row, ["STATION_SEQNO", "STOP_SEQ", "SEQUENCE"]))
+    station_id = str(first_non_empty(row, ["STATION_ID", "STOP_ID", "STATION_CODE"]) or "").strip()
+    return {
+        "id": f"MTR_BUS:{route_id}:{direction}:{station_seq}:{station_id}",
+        "operator": "MTR",
+        "route_id": route_id,
+        "route_variant_id": f"MTR_BUS:{route_id}:{direction}",
+        "direction": direction,
+        "service_type": "BUS_FEEDER",
+        "sequence": station_seq,
+        "stop_id": station_id,
+        "station_code": first_non_empty(row, ["STATION_CODE", "STOP_CODE"]),
+        "stop_name": build_name_block(
+            first_non_empty(row, ["STATION_NAME_CHI", "STOP_NAME_CHI", "NAME_CHI"]),
+            first_non_empty(row, ["STATION_NAME_ENG", "STOP_NAME_ENG", "NAME_ENG"]),
+            None,
+        ),
+        "pickup_dropoff": None,
+        "source_updated_at": None,
+    }
+
+
+def normalize_mtr_bus_stop(row):
+    station_id = str(first_non_empty(row, ["STATION_ID", "STOP_ID", "STATION_CODE"]) or "").strip()
+    return {
+        "id": f"MTR_BUS:{station_id}",
+        "operator": "MTR",
+        "stop_id": station_id,
+        "station_code": first_non_empty(row, ["STATION_CODE", "STOP_CODE"]),
+        "name": build_name_block(
+            first_non_empty(row, ["STATION_NAME_CHI", "STOP_NAME_CHI", "NAME_CHI"]),
+            first_non_empty(row, ["STATION_NAME_ENG", "STOP_NAME_ENG", "NAME_ENG"]),
+            None,
+        ),
+        "lat": parse_float(first_non_empty(row, ["STATION_LATITUDE", "STOP_LATITUDE", "LATITUDE"])),
+        "lng": parse_float(first_non_empty(row, ["STATION_LONGITUDE", "STOP_LONGITUDE", "LONGITUDE"])),
+        "grid_northing": None,
+        "grid_easting": None,
+        "coordinate_system": "WGS84",
+        "coordinate_source": "MTR Bus & Feeder Bus Stops CSV",
+        "stop_type": "stop",
+        "source_updated_at": None,
+    }
+
+
+def normalize_mtr_bus_fare(row):
+    route_id = first_non_empty(row, ["ROUTE_ID", "LINE_ID"])
+    oct_adult = parse_float(first_non_empty(row, ["OCT_ADT_FARE", "OCTOPUS_ADULT_FARE"]))
+    single_adult = parse_float(first_non_empty(row, ["SINGLE_ADT_FARE", "SINGLE_ADULT_FARE"]))
+    preferred_amount = oct_adult if oct_adult is not None else single_adult
+    return {
+        "id": f"MTR_BUS:{route_id}",
+        "operator": "MTR",
+        "route_id": route_id,
+        "route_variant_id": None,
+        "direction": None,
+        "amount": preferred_amount,
+        "currency": "HKD" if preferred_amount is not None else None,
+        "fare_rule": {
+            "octopus_adult": oct_adult,
+            "single_adult": single_adult,
+            "octopus_student": parse_float(first_non_empty(row, ["OCT_STD_FARE"])),
+            "octopus_child": parse_float(first_non_empty(row, ["OCT_CON_CHILD_FARE"])),
+            "octopus_elderly": parse_float(first_non_empty(row, ["OCT_CON_ELDERLY_FARE"])),
+            "single_child": parse_float(first_non_empty(row, ["SINGLE_CON_CHILD_FARE"])),
+            "single_elderly": parse_float(first_non_empty(row, ["SINGLE_CON_ELDERLY_FARE"])),
+        },
+        "source": "MTR bus fares CSV",
+        "source_updated_at": None,
+    }
+
+
+def build_mtr_bus_dataset():
+    cache_key = "dataset:mtr_bus"
+    cached = get_cached_value(cache_key)
+    if cached is not None:
+        return cached
+
+    route_rows = fetch_csv_rows(MTR_BUS_ROUTES_URL)
+    route_ids = {
+        str(first_non_empty(row, ["ROUTE_ID", "LINE_ID"]) or "").strip()
+        for row in route_rows
+        if str(first_non_empty(row, ["ROUTE_ID", "LINE_ID"]) or "").strip()
+    }
+    stop_rows = [
+        row for row in fetch_csv_rows(MTR_BUS_STOPS_URL)
+        if str(first_non_empty(row, ["ROUTE_ID", "LINE_ID"]) or "").strip() in route_ids
+    ]
+    fare_rows = [
+        row for row in fetch_csv_rows(MTR_BUS_FARES_URL)
+        if str(first_non_empty(row, ["ROUTE_ID", "LINE_ID"]) or "").strip() in route_ids
+    ]
+
+    routes = []
+    seen_routes = set()
+    for row in route_rows:
+        route_id = str(first_non_empty(row, ["ROUTE_ID", "LINE_ID"]) or "").strip()
+        if not route_id or route_id in seen_routes:
+            continue
+        routes.append(normalize_mtr_bus_route(row))
+        seen_routes.add(route_id)
+
+    route_stops = [normalize_mtr_bus_route_stop(row) for row in stop_rows]
+
+    stops_by_id = {}
+    for row in stop_rows:
+        stop = normalize_mtr_bus_stop(row)
+        stop_id = stop.get("stop_id")
+        if not stop_id:
+            continue
+        current = stops_by_id.get(stop_id)
+        if current is None:
+            stops_by_id[stop_id] = stop
+        else:
+            # Keep whichever row has coordinates.
+            if (current.get("lat") is None or current.get("lng") is None) and stop.get("lat") is not None and stop.get("lng") is not None:
+                stops_by_id[stop_id] = stop
+
+    fares = [normalize_mtr_bus_fare(row) for row in fare_rows]
+
+    dataset = {
+        "operator": "MTR",
+        "sources": {
+            "routes": MTR_BUS_ROUTES_URL,
+            "route_stops": MTR_BUS_STOPS_URL,
+            "stops": MTR_BUS_STOPS_URL,
+            "fares": MTR_BUS_FARES_URL,
+        },
+        "routes": routes,
+        "route_stops": route_stops,
+        "stops": list(stops_by_id.values()),
+        "fares": fares,
+        "validation": build_coordinate_validation("mtr_bus", list(stops_by_id.values()), "stops"),
+        "limitations": [
+            "MTR feeder bus stops use WGS84 coordinates from MTR's public CSV.",
+            "MTR bus fares are route-level; section fare differences are not modeled.",
+        ],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    return set_cached_value(cache_key, dataset, STATIC_TTL_SECONDS)
+
+
+def normalize_lrt_route_stop(row):
+    line_id = str(first_non_empty(row, ["LINE_ID", "ROUTE_ID"]) or "").strip()
+    direction = first_non_empty(row, ["DIRECTION", "DIR", "ROUTE_SEQ"]) or "OUTBOUND"
+    stop_seq = parse_int(first_non_empty(row, ["STOP_SEQ", "STATION_SEQNO", "SEQUENCE"]))
+    stop_id = str(first_non_empty(row, ["STOP_ID", "STATION_ID"]) or "").strip()
+    stop_name_tc = first_non_empty(row, ["STOP_NAME_CHI", "STATION_NAME_CHI"])
+    stop_name_en = first_non_empty(row, ["STOP_NAME_ENG", "STATION_NAME_ENG"])
+    return {
+        "id": f"LRT:{line_id}:{direction}:{stop_seq}:{stop_id}",
+        "operator": "MTR",
+        "route_id": line_id,
+        "route_variant_id": f"LRT:{line_id}:{direction}",
+        "direction": direction,
+        "service_type": "LIGHT_RAIL",
+        "sequence": stop_seq,
+        "stop_id": stop_id,
+        "station_code": stop_id,
+        "stop_name": build_name_block(stop_name_tc, stop_name_en, None),
+        "pickup_dropoff": None,
+        "source_updated_at": None,
+    }
+
+
+def normalize_lrt_stop(stop_id, name_tc=None, name_en=None):
+    return {
+        "id": f"LRT:{stop_id}",
+        "operator": "MTR",
+        "stop_id": stop_id,
+        "station_code": stop_id,
+        "name": build_name_block(name_tc, name_en, None),
+        "lat": None,
+        "lng": None,
+        "grid_northing": None,
+        "grid_easting": None,
+        "coordinate_system": None,
+        "stop_type": "station",
+        "source_updated_at": None,
+    }
+
+
+def build_lrt_dataset():
+    cache_key = "dataset:lrt"
+    cached = get_cached_value(cache_key)
+    if cached is not None:
+        return cached
+
+    route_stop_rows = fetch_csv_rows(LIGHT_RAIL_ROUTES_STOPS_URL)
+    route_stops = [normalize_lrt_route_stop(row) for row in route_stop_rows]
+
+    route_groups = {}
+    route_stop_groups = {}
+    stops = {}
+    for row in route_stop_rows:
+        line_id = str(first_non_empty(row, ["LINE_ID", "ROUTE_ID"]) or "").strip()
+        if not line_id:
+            continue
+        direction = first_non_empty(row, ["DIRECTION", "DIR", "ROUTE_SEQ"]) or "OUTBOUND"
+        route_variant_id = f"LRT:{line_id}:{direction}"
+        route_groups.setdefault(route_variant_id, {
+            "id": route_variant_id,
+            "operator": "MTR",
+            "route_id": line_id,
+            "route": line_id,
+            "line": line_id,
+            "display_route": line_id,
+            "route_name": build_name_block(
+                first_non_empty(row, ["LINE_NAME_CHI", "ROUTE_NAME_CHI", "LINE_DESC_CHI"]),
+                first_non_empty(row, ["LINE_NAME_ENG", "ROUTE_NAME_ENG", "LINE_DESC_ENG"]),
+                None,
+            ),
+            "direction": direction,
+            "service_type": "LIGHT_RAIL",
+            "route_type": "LIGHT_RAIL",
+            "special_type": None,
+            "journey_time_minutes": None,
+            "origin": None,
+            "destination": None,
+            "fare": None,
+            "fare_currency": None,
+            "source": "MTR light rail routes and stops CSV",
+            "source_updated_at": None,
+        })
+        route_stop_groups.setdefault(route_variant_id, []).append(normalize_lrt_route_stop(row))
+
+        stop_id = str(first_non_empty(row, ["STOP_ID", "STATION_ID"]) or "").strip()
+        if stop_id and stop_id not in stops:
+            stops[stop_id] = normalize_lrt_stop(
+                stop_id,
+                first_non_empty(row, ["STOP_NAME_CHI", "STATION_NAME_CHI"]),
+                first_non_empty(row, ["STOP_NAME_ENG", "STATION_NAME_ENG"]),
+            )
+
+    enriched_stops = [enrich_lrt_stop(stop) for stop in stops.values()]
+    stop_by_id = {stop.get("stop_id"): stop for stop in enriched_stops}
+
+    for route_variant_id, route in route_groups.items():
+        ordered = sorted(route_stop_groups.get(route_variant_id, []), key=lambda item: item.get("sequence") or 0)
+        if ordered:
+            origin = stop_by_id.get(ordered[0].get("stop_id"))
+            destination = stop_by_id.get(ordered[-1].get("stop_id"))
+            route["origin"] = origin.get("name") if origin else ordered[0].get("stop_name")
+            route["destination"] = destination.get("name") if destination else ordered[-1].get("stop_name")
+
+    dataset = {
+        "operator": "MTR",
+        "sources": {
+            "routes": LIGHT_RAIL_ROUTES_STOPS_URL,
+            "route_stops": LIGHT_RAIL_ROUTES_STOPS_URL,
+            "stops": LIGHT_RAIL_ROUTES_STOPS_URL,
+        },
+        "routes": list(route_groups.values()),
+        "route_stops": route_stops,
+        "stops": enriched_stops,
+        "fares": [],
+        "validation": build_coordinate_validation("lrt", enriched_stops, "stops"),
+        "limitations": [
+            "Light Rail CSV has route-stop topology but no coordinates; stops are enriched from manual seed and LandsD Location Search.",
+            "No Light Rail fare table is attached yet in this pass.",
+        ],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    return set_cached_value(cache_key, dataset, STATIC_TTL_SECONDS)
+
+
 def citybus_stop_id_candidates(stop_id):
     raw = str(stop_id or "").strip()
     values = []
@@ -982,6 +1417,10 @@ class handler(BaseHTTPRequestHandler):
                 return self.send_json(build_tram_dataset())
             if path == "/api/operators/mtr/dataset":
                 return self.send_json(build_mtr_dataset())
+            if path == "/api/operators/mtr-bus/dataset":
+                return self.send_json(build_mtr_bus_dataset())
+            if path == "/api/operators/lrt/dataset":
+                return self.send_json(build_lrt_dataset())
             if path.startswith("/api/operators/citybus/eta/"):
                 eta_path = path.replace("/api/operators/citybus/eta/", "", 1)
                 stop_id, _, route = eta_path.partition("/")
