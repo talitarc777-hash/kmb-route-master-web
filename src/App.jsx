@@ -412,7 +412,7 @@ function fallbackSearchSettings(kmbQuality) {
     return {
       includeTransfers: true,
       maxCandidates: 12,
-      googleRefineLimit: 5,
+      googleRefineLimit: 1,
       timeoutMs: 20000,
     };
   }
@@ -420,7 +420,7 @@ function fallbackSearchSettings(kmbQuality) {
   return {
     includeTransfers: false,
     maxCandidates: 6,
-    googleRefineLimit: 3,
+    googleRefineLimit: 0,
     timeoutMs: 12000,
   };
 }
@@ -509,12 +509,9 @@ function modesForGap(originLoc, destLoc) {
 }
 
 function modesForBroadAlternative(originLoc, destLoc) {
-  const modes = ['citybus', 'mtr', 'mtr_bus'];
+  const modes = ['citybus', 'mtr', 'mtr_bus', 'lrt'];
   if (isLikelyHongKongIsland(originLoc) && isLikelyHongKongIsland(destLoc)) {
     modes.push('tram');
-  }
-  if (isLikelyLrtCorridor(originLoc) || isLikelyLrtCorridor(destLoc)) {
-    modes.push('lrt');
   }
   return modes;
 }
@@ -1406,33 +1403,35 @@ const App = () => {
             }
             setResults(finalResults);
             setIsSearchOpen(false);
-            Promise.all(gapPayloads.map(async ({ gap, payload }) => {
-              const refinedCandidates = await refineFallbackCandidateRideTimes(
-                payload.candidates || [],
-                {
-                  maxRefinements: Math.min(3, (payload.candidates || []).length),
-                  timeMode,
-                  dateValue,
-                  timeValue,
-                },
-              );
-              return annotateGapRepairCandidates(refinedCandidates, gap);
-            }))
-              .then((refinedRows) => {
-                if (searchRunRef.current !== searchRunId) return;
-                const refinedAlternatives = refinedRows.flat();
-                if (refinedAlternatives.length === 0) return;
-                setResults((currentResults) => {
-                  const currentKmb = (currentResults || []).filter((route) => !isFallbackRoute(route));
-                  return rankCombinedTransportOptions([
-                    ...currentKmb,
-                    ...refinedAlternatives,
-                  ]);
+            if (fallbackSettings.googleRefineLimit > 0) {
+              Promise.all(gapPayloads.map(async ({ gap, payload }) => {
+                const refinedCandidates = await refineFallbackCandidateRideTimes(
+                  payload.candidates || [],
+                  {
+                    maxRefinements: Math.min(fallbackSettings.googleRefineLimit, (payload.candidates || []).length),
+                    timeMode,
+                    dateValue,
+                    timeValue,
+                  },
+                );
+                return annotateGapRepairCandidates(refinedCandidates, gap);
+              }))
+                .then((refinedRows) => {
+                  if (searchRunRef.current !== searchRunId) return;
+                  const refinedAlternatives = refinedRows.flat();
+                  if (refinedAlternatives.length === 0) return;
+                  setResults((currentResults) => {
+                    const currentKmb = (currentResults || []).filter((route) => !isFallbackRoute(route));
+                    return rankCombinedTransportOptions([
+                      ...currentKmb,
+                      ...refinedAlternatives,
+                    ]);
+                  });
+                })
+                .catch((error) => {
+                  console.warn('KMB gap Google ride-time refinement failed:', error);
                 });
-              })
-              .catch((error) => {
-                console.warn('KMB gap Google ride-time refinement failed:', error);
-              });
+            }
             return;
           }
 
@@ -1489,6 +1488,34 @@ const App = () => {
               alternatives = annotateAlternativeCandidates(rescueResult.value?.candidates || []);
             }
           }
+          if (!fallbackTimedOut && alternatives.length === 0) {
+            setLoadingStatus('Trying wider non-KMB coverage...');
+            const wideRescueResult = await withSoftTimeout(
+              generateFallbackCandidates({
+                originLoc,
+                destLoc,
+                maxCandidates: Math.max(20, fallbackSettings.maxCandidates),
+                includeTransfers: true,
+                operatorModes: broadOperatorModes,
+                walkRadiusKm: 4.5,
+                transferRadiusKm: 0.5,
+                timeMode,
+                dateValue,
+                timeValue,
+                refineRideTimes: false,
+              }),
+              Math.min(18000, fallbackSettings.timeoutMs + 6000),
+            );
+            if (!wideRescueResult.timedOut) {
+              alternatives = annotateAlternativeCandidates(wideRescueResult.value?.candidates || []).map((candidate) => ({
+                ...candidate,
+                notes: [
+                  ...(candidate.notes || []),
+                  'Expanded search radius was used because nearby non-KMB stops were limited.',
+                ],
+              }));
+            }
+          }
           finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
           if (!fallbackTimedOut && filteredCandidates.length === 0 && alternatives.length === 0) {
             throw new Error(
@@ -1531,7 +1558,7 @@ const App = () => {
           setResults(finalResults);
           setIsSearchOpen(false);
 
-          if (!fallbackTimedOut && !cachedFallback?.refined && alternatives.length > 0) {
+          if (!fallbackTimedOut && !cachedFallback?.refined && alternatives.length > 0 && fallbackSettings.googleRefineLimit > 0) {
             refineFallbackCandidateRideTimes(alternatives, {
               maxRefinements: fallbackSettings.googleRefineLimit,
               timeMode,
