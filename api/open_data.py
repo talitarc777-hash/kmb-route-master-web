@@ -752,8 +752,8 @@ def normalize_td_fare(row, operator):
     }
 
 
-def build_citybus_dataset():
-    cache_key = "dataset:citybus"
+def build_citybus_dataset(include_fares=True):
+    cache_key = "dataset:citybus:full" if include_fares else "dataset:citybus:nofares"
     cached = get_cached_value(cache_key)
     if cached is not None:
         return cached
@@ -773,8 +773,10 @@ def build_citybus_dataset():
     stop_rows = [row for row in stop_rows if row.get("STOP_ID") in stop_ids]
     stop_map = {row.get("STOP_ID"): row for row in stop_rows}
 
-    fare_rows = fetch_xml_rows(TD_FARE_BUS_XML, "FARE")
-    fare_rows = [row for row in fare_rows if row.get("ROUTE_ID") in route_ids]
+    fare_rows = []
+    if include_fares:
+        fare_rows = fetch_xml_rows(TD_FARE_BUS_XML, "FARE")
+        fare_rows = [row for row in fare_rows if row.get("ROUTE_ID") in route_ids]
     normalized_stops = [normalize_td_stop(stop_id, "CTB", stop_map.get(stop_id), stop_name_rows.get(stop_id)) for stop_id in sorted(stop_ids)]
 
     dataset = {
@@ -783,7 +785,7 @@ def build_citybus_dataset():
             "routes": TD_ROUTE_BUS_XML,
             "route_stops": TD_RSTOP_BUS_XML,
             "stops": TD_STOP_BUS_XML,
-            "fares": TD_FARE_BUS_XML,
+            "fares": TD_FARE_BUS_XML if include_fares else None,
             "eta": "https://rt.data.gov.hk/v2/transport/citybus/eta/ctb/{stop_id}/{route}",
         },
         "routes": [normalize_td_route(row, "CTB") for row in route_rows],
@@ -800,8 +802,8 @@ def build_citybus_dataset():
     return set_cached_value(cache_key, dataset, STATIC_TTL_SECONDS)
 
 
-def build_tram_dataset():
-    cache_key = "dataset:tram"
+def build_tram_dataset(include_fares=True):
+    cache_key = "dataset:tram:full" if include_fares else "dataset:tram:nofares"
     cached = get_cached_value(cache_key)
     if cached is not None:
         return cached
@@ -820,8 +822,10 @@ def build_tram_dataset():
     stop_rows = [row for row in stop_rows if row.get("STOP_ID") in stop_ids]
     stop_map = {row.get("STOP_ID"): row for row in stop_rows}
 
-    fare_rows = fetch_xml_rows(TD_FARE_TRAM_XML, "FARE")
-    fare_rows = [row for row in fare_rows if row.get("ROUTE_ID") in route_ids]
+    fare_rows = []
+    if include_fares:
+        fare_rows = fetch_xml_rows(TD_FARE_TRAM_XML, "FARE")
+        fare_rows = [row for row in fare_rows if row.get("ROUTE_ID") in route_ids]
 
     normalized_stops = [normalize_td_stop(stop_id, "TRAM", stop_map.get(stop_id), stop_name_rows.get(stop_id)) for stop_id in sorted(stop_ids)]
 
@@ -831,7 +835,7 @@ def build_tram_dataset():
             "routes": TD_ROUTE_TRAM_XML,
             "route_stops": TD_RSTOP_TRAM_XML,
             "stops": TD_STOP_TRAM_XML,
-            "fares": TD_FARE_TRAM_XML,
+            "fares": TD_FARE_TRAM_XML if include_fares else None,
         },
         "routes": [normalize_td_route(row, "TRAM") for row in route_rows],
         "route_stops": [normalize_td_route_stop(row, "TRAM") for row in route_stop_rows],
@@ -1541,10 +1545,10 @@ class handler(BaseHTTPRequestHandler):
                 mode_filter = (query_params.get("modes") or [""])[0]
                 return self.send_json(build_operator_diagnostics(mode_filter or None))
             if path == "/api/operators/citybus/dataset":
-                payload = build_citybus_dataset()
+                payload = build_citybus_dataset(include_fares=not compact_requested)
                 return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path == "/api/operators/tram/dataset":
-                payload = build_tram_dataset()
+                payload = build_tram_dataset(include_fares=not compact_requested)
                 return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path == "/api/operators/mtr/dataset":
                 payload = build_mtr_dataset()
