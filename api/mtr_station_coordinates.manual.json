@@ -1,12 +1,362 @@
 {
-  "_comment": "Manual fallback for MTR station WGS84 coordinates. Keys can be station_id or station_code. Keep this file explicit and reviewable; automatic enrichment should come from official/open sources first.",
+  "_comment": "Offline WGS84 seed for MTR station coordinates. Generated from MTR station CSV names matched against the official LandsD Location Search API; keys include station_id and station_code where available.",
   "stations": {
+    "1": {
+      "station_code": "CEN",
+      "name_tc": "中環",
+      "name_en": "Central",
+      "lat": 22.28167452,
+      "lng": 114.158781092,
+      "grid_easting": 834403.36232351,
+      "grid_northing": 815866.59093451,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Central Station)"
+    },
+    "10": {
+      "station_code": "WTS",
+      "name_tc": "黃大仙",
+      "name_en": "Wong Tai Sin",
+      "lat": 22.341662471,
+      "lng": 114.193850843,
+      "grid_easting": 838016.79829377,
+      "grid_northing": 822509.31922162,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wong Tai Sin Station)"
+    },
+    "100": {
+      "station_code": "TSH",
+      "name_tc": "大水坑",
+      "name_en": "Tai Shui Hang",
+      "lat": 22.280600591,
+      "lng": 114.019496852,
+      "grid_easting": 820049.0,
+      "grid_northing": 815756.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Shui Hang)"
+    },
+    "101": {
+      "station_code": "HEO",
+      "name_tc": "恆安",
+      "name_en": "Heng On",
+      "lat": 22.417861662,
+      "lng": 114.225875444,
+      "grid_easting": 841313.0,
+      "grid_northing": 830948.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Heng On)"
+    },
+    "102": {
+      "station_code": "MOS",
+      "name_tc": "馬鞍山",
+      "name_en": "Ma On Shan",
+      "lat": 22.41919645,
+      "lng": 114.231256949,
+      "grid_easting": 841867.01,
+      "grid_northing": 831096.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ma On Shan)"
+    },
+    "103": {
+      "station_code": "WKS",
+      "name_tc": "烏溪沙",
+      "name_en": "Wu Kai Sha",
+      "lat": 22.432187646,
+      "lng": 114.241199122,
+      "grid_easting": 842890.0,
+      "grid_northing": 832535.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wu Kai Sha)"
+    },
+    "11": {
+      "station_code": "DIH",
+      "name_tc": "鑽石山",
+      "name_en": "Diamond Hill",
+      "lat": 22.340017001,
+      "lng": 114.201698001,
+      "grid_easting": 838825.18797331,
+      "grid_northing": 822327.22041561,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Diamond Hill Station)"
+    },
+    "111": {
+      "station_code": "AUS",
+      "name_tc": "柯士甸",
+      "name_en": "Austin",
+      "lat": 22.305292701,
+      "lng": 114.166102701,
+      "grid_easting": 835158.09152384,
+      "grid_northing": 818481.86255238,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Austin Station)"
+    },
+    "114": {
+      "station_code": "TWW",
+      "name_tc": "荃灣西",
+      "name_en": "Tsuen Wan West",
+      "lat": 22.368429179,
+      "lng": 114.109716139,
+      "grid_easting": 829351.14640861,
+      "grid_northing": 825474.77701785,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsuen Wan West Station)"
+    },
+    "115": {
+      "station_code": "KSR",
+      "name_tc": "錦上路",
+      "name_en": "Kam Sheung Road",
+      "lat": 22.435131498,
+      "lng": 114.063181818,
+      "grid_easting": 824564.0,
+      "grid_northing": 832864.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kam Sheung Road)"
+    },
+    "116": {
+      "station_code": "YUL",
+      "name_tc": "元朗",
+      "name_en": "Yuen Long",
+      "lat": 22.446087601,
+      "lng": 114.034770201,
+      "grid_easting": 821640.33112624,
+      "grid_northing": 834079.73257628,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Yuen Long Station)"
+    },
+    "117": {
+      "station_code": "LOP",
+      "name_tc": "朗屏",
+      "name_en": "Long Ping",
+      "lat": 22.447625747,
+      "lng": 114.025448882,
+      "grid_easting": 820681.0,
+      "grid_northing": 834251.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Long Ping)"
+    },
+    "118": {
+      "station_code": "TIS",
+      "name_tc": "天水圍",
+      "name_en": "Tin Shui Wai",
+      "lat": 22.454302356,
+      "lng": 114.001755722,
+      "grid_easting": 818243.0,
+      "grid_northing": 834993.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tin Shui Wai)"
+    },
+    "119": {
+      "station_code": "SIH",
+      "name_tc": "兆康",
+      "name_en": "Siu Hong",
+      "lat": 22.411525768,
+      "lng": 113.97880089,
+      "grid_easting": 815874.0,
+      "grid_northing": 830259.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Siu Hong)"
+    },
+    "12": {
+      "station_code": "CHH",
+      "name_tc": "彩虹",
+      "name_en": "Choi Hung",
+      "lat": 22.334890801,
+      "lng": 114.208989101,
+      "grid_easting": 839576.39628231,
+      "grid_northing": 821759.7130518,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Choi Hung Station)"
+    },
+    "120": {
+      "station_code": "TUM",
+      "name_tc": "屯門",
+      "name_en": "Tuen Mun",
+      "lat": 22.397766722,
+      "lng": 113.974236623,
+      "grid_easting": 815402.0,
+      "grid_northing": 828736.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tuen Mun)"
+    },
+    "13": {
+      "station_code": "KOB",
+      "name_tc": "九龍灣",
+      "name_en": "Kowloon Bay",
+      "lat": 22.308976001,
+      "lng": 114.206882984,
+      "grid_easting": 839360.0,
+      "grid_northing": 818890.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kowloon Bay)"
+    },
+    "14": {
+      "station_code": "NTK",
+      "name_tc": "牛頭角",
+      "name_en": "Ngau Tau Kok",
+      "lat": 22.321724572,
+      "lng": 114.218746602,
+      "grid_easting": 840582.0,
+      "grid_northing": 820302.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ngau Tau Kok)"
+    },
+    "15": {
+      "station_code": "KWT",
+      "name_tc": "觀塘",
+      "name_en": "Kwun Tong",
+      "lat": 22.311329367,
+      "lng": 114.222412143,
+      "grid_easting": 840960.0,
+      "grid_northing": 819151.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kwun Tong)"
+    },
+    "16": {
+      "station_code": "PRE",
+      "name_tc": "太子",
+      "name_en": "Prince Edward",
+      "lat": 22.325078501,
+      "lng": 114.168363101,
+      "grid_easting": 835391.12548595,
+      "grid_northing": 820672.82089493,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Prince Edward Station)"
+    },
+    "17": {
+      "station_code": "SSP",
+      "name_tc": "深水埗",
+      "name_en": "Sham Shui Po",
+      "lat": 22.329179495,
+      "lng": 114.161440798,
+      "grid_easting": 834678.0,
+      "grid_northing": 821127.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sham Shui Po)"
+    },
+    "18": {
+      "station_code": "CSW",
+      "name_tc": "長沙灣",
+      "name_en": "Cheung Sha Wan",
+      "lat": 22.335614357,
+      "lng": 114.155994709,
+      "grid_easting": 834117.03039612,
+      "grid_northing": 821839.63102716,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Cheung Sha Wan Station)"
+    },
+    "19": {
+      "station_code": "LCK",
+      "name_tc": "茘枝角",
+      "name_en": "Lai Chi Kok",
+      "lat": 22.336874801,
+      "lng": 114.148310801,
+      "grid_easting": 833325.47991955,
+      "grid_northing": 821979.33571856,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lai Chi Kok Station)"
+    },
     "2": {
       "station_code": "ADM",
       "name_en": "Admiralty",
       "lat": 22.2796,
       "lng": 114.1649,
       "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "20": {
+      "station_code": "MEF",
+      "name_tc": "美孚",
+      "name_en": "Mei Foo",
+      "lat": 22.337584801,
+      "lng": 114.137983601,
+      "grid_easting": 832261.62748874,
+      "grid_northing": 822058.19524533,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Mei Foo Station)"
+    },
+    "21": {
+      "station_code": "LAK",
+      "name_tc": "茘景",
+      "name_en": "Lai King",
+      "lat": 22.348344215,
+      "lng": 114.126189053,
+      "grid_easting": 831047.0,
+      "grid_northing": 823250.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lai King)"
+    },
+    "22": {
+      "station_code": "KWF",
+      "name_tc": "葵芳",
+      "name_en": "Kwai Fong",
+      "lat": 22.356797307,
+      "lng": 114.12778791,
+      "grid_easting": 831212.0,
+      "grid_northing": 824186.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kwai Fong)"
+    },
+    "23": {
+      "station_code": "KWH",
+      "name_tc": "葵興",
+      "name_en": "Kwai Hing",
+      "lat": 22.363074541,
+      "lng": 114.131222694,
+      "grid_easting": 831566.0,
+      "grid_northing": 824881.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kwai Hing)"
+    },
+    "24": {
+      "station_code": "TWH",
+      "name_tc": "大窩口",
+      "name_en": "Tai Wo Hau",
+      "lat": 22.370778401,
+      "lng": 114.125066801,
+      "grid_easting": 830932.25281062,
+      "grid_northing": 825734.29475938,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Wo Hau Station)"
+    },
+    "25": {
+      "station_code": "TSW",
+      "name_tc": "荃灣",
+      "name_en": "Tsuen Wan",
+      "lat": 22.373133135,
+      "lng": 114.118671668,
+      "grid_easting": 830273.7080955,
+      "grid_northing": 825995.28776313,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsuen Wan Station)"
+    },
+    "26": {
+      "station_code": "SHW",
+      "name_tc": "上環",
+      "name_en": "Sheung Wan",
+      "lat": 22.286276916,
+      "lng": 114.153556544,
+      "grid_easting": 833865.01425136,
+      "grid_northing": 816376.30723457,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sheung Wan Station)"
+    },
+    "27": {
+      "station_code": "WAC",
+      "name_tc": "灣仔",
+      "name_en": "Wan Chai",
+      "lat": 22.277541201,
+      "lng": 114.173152701,
+      "grid_easting": 835884.44689252,
+      "grid_northing": 815408.78493788,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wan Chai Station)"
+    },
+    "28": {
+      "station_code": "CAB",
+      "name_tc": "銅鑼灣",
+      "name_en": "Causeway Bay",
+      "lat": 22.280379665,
+      "lng": 114.185047466,
+      "grid_easting": 837110.30519105,
+      "grid_northing": 815723.11821089,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Causeway Bay Station)"
+    },
+    "29": {
+      "station_code": "TIH",
+      "name_tc": "天后",
+      "name_en": "Tin Hau",
+      "lat": 22.282421501,
+      "lng": 114.191725801,
+      "grid_easting": 837798.53882656,
+      "grid_northing": 815949.27187642,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tin Hau Station)"
+    },
+    "3": {
+      "station_code": "TST",
+      "name_tc": "尖沙咀",
+      "name_en": "Tsim Sha Tsui",
+      "lat": 22.297571901,
+      "lng": 114.172204901,
+      "grid_easting": 835786.83442387,
+      "grid_northing": 817626.87213715,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsim Sha Tsui Station)"
+    },
+    "30": {
+      "station_code": "FOH",
+      "name_tc": "炮台山",
+      "name_en": "Fortress Hill",
+      "lat": 22.28801241,
+      "lng": 114.19356584,
+      "grid_easting": 837988.09825239,
+      "grid_northing": 816568.3967122,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Fortress Hill Station)"
     },
     "31": {
       "station_code": "NOP",
@@ -15,12 +365,632 @@
       "lng": 114.2006,
       "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
     },
+    "32": {
+      "station_code": "QUB",
+      "name_tc": "鰂魚涌",
+      "name_en": "Quarry Bay",
+      "lat": 22.290521288,
+      "lng": 114.207924299,
+      "grid_easting": 839467.7148767,
+      "grid_northing": 816846.44976775,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Quarry Bay Station)"
+    },
+    "33": {
+      "station_code": "TAK",
+      "name_tc": "太古",
+      "name_en": "Tai Koo",
+      "lat": 22.284662753,
+      "lng": 114.216360953,
+      "grid_easting": 840337.28677846,
+      "grid_northing": 816197.91238327,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Koo Station)"
+    },
+    "34": {
+      "station_code": "SWH",
+      "name_tc": "西灣河",
+      "name_en": "Sai Wan Ho",
+      "lat": 22.282098401,
+      "lng": 114.222099701,
+      "grid_easting": 840928.7778384,
+      "grid_northing": 815914.11691283,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sai Wan Ho Station)"
+    },
+    "35": {
+      "station_code": "SKW",
+      "name_tc": "筲箕灣",
+      "name_en": "Shau Kei Wan",
+      "lat": 22.279242801,
+      "lng": 114.228879401,
+      "grid_easting": 841627.58072523,
+      "grid_northing": 815598.12938765,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Shau Kei Wan Station)"
+    },
+    "36": {
+      "station_code": "HFC",
+      "name_tc": "杏花邨",
+      "name_en": "Heng Fa Chuen",
+      "lat": 22.276627964,
+      "lng": 114.239662548,
+      "grid_easting": 842739.0,
+      "grid_northing": 815309.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Heng Fa Chuen Station)"
+    },
+    "37": {
+      "station_code": "CHW",
+      "name_tc": "柴灣",
+      "name_en": "Chai Wan",
+      "lat": 22.264960534,
+      "lng": 114.239240143,
+      "grid_easting": 842696.0,
+      "grid_northing": 814017.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Chai Wan)"
+    },
+    "38": {
+      "station_code": "LAT",
+      "name_tc": "藍田",
+      "name_en": "Lam Tin",
+      "lat": 22.306855001,
+      "lng": 114.232733001,
+      "grid_easting": 842023.59657552,
+      "grid_northing": 818655.89048981,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lam Tin Station)"
+    },
+    "39": {
+      "station_code": "HOK",
+      "name_tc": "香港",
+      "name_en": "Hong Kong",
+      "lat": 22.28467979,
+      "lng": 114.158179383,
+      "grid_easting": 834341.3929947,
+      "grid_northing": 816199.38464767,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Hong Kong Station)"
+    },
+    "4": {
+      "station_code": "JOR",
+      "name_tc": "佐敦",
+      "name_en": "Jordan",
+      "lat": 22.304790001,
+      "lng": 114.171660001,
+      "grid_easting": 835730.71234942,
+      "grid_northing": 818426.16617666,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Jordan Station)"
+    },
+    "40": {
+      "station_code": "KOW",
+      "name_tc": "九龍",
+      "name_en": "Kowloon",
+      "lat": 22.304306001,
+      "lng": 114.161475001,
+      "grid_easting": 834681.24341202,
+      "grid_northing": 818372.64202728,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kowloon Station)"
+    },
+    "41": {
+      "station_code": "OLY",
+      "name_tc": "奧運",
+      "name_en": "Olympic",
+      "lat": 22.317791804,
+      "lng": 114.160248226,
+      "grid_easting": 834555.0,
+      "grid_northing": 819866.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Olympic)"
+    },
+    "42": {
+      "station_code": "TSY",
+      "name_tc": "青衣",
+      "name_en": "Tsing Yi",
+      "lat": 22.358497801,
+      "lng": 114.107672001,
+      "grid_easting": 829140.10860014,
+      "grid_northing": 824375.11771502,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsing Yi Station)"
+    },
+    "43": {
+      "station_code": "TUC",
+      "name_tc": "東涌",
+      "name_en": "Tung Chung",
+      "lat": 22.282965439,
+      "lng": 113.938871664,
+      "grid_easting": 811740.318,
+      "grid_northing": 816028.739,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tung Chung)"
+    },
+    "44": {
+      "station_code": "HOK",
+      "name_tc": "香港",
+      "name_en": "Hong Kong",
+      "lat": 22.28467979,
+      "lng": 114.158179383,
+      "grid_easting": 834341.3929947,
+      "grid_northing": 816199.38464767,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Hong Kong Station)"
+    },
+    "45": {
+      "station_code": "KOW",
+      "name_tc": "九龍",
+      "name_en": "Kowloon",
+      "lat": 22.304306001,
+      "lng": 114.161475001,
+      "grid_easting": 834681.24341202,
+      "grid_northing": 818372.64202728,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kowloon Station)"
+    },
+    "46": {
+      "station_code": "TSY",
+      "name_tc": "青衣",
+      "name_en": "Tsing Yi",
+      "lat": 22.358497801,
+      "lng": 114.107672001,
+      "grid_easting": 829140.10860014,
+      "grid_northing": 824375.11771502,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsing Yi Station)"
+    },
+    "47": {
+      "station_code": "AIR",
+      "name_tc": "機場",
+      "name_en": "Airport",
+      "lat": 22.315916787,
+      "lng": 113.936483404,
+      "grid_easting": 811500.0,
+      "grid_northing": 819678.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Airport)"
+    },
+    "48": {
+      "station_code": "YAT",
+      "name_tc": "油塘",
+      "name_en": "Yau Tong",
+      "lat": 22.295782662,
+      "lng": 114.237730242,
+      "grid_easting": 842539.0,
+      "grid_northing": 817430.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Yau Tong)"
+    },
+    "49": {
+      "station_code": "TIK",
+      "name_tc": "調景嶺",
+      "name_en": "Tiu Keng Leng",
+      "lat": 22.302757966,
+      "lng": 114.250640669,
+      "grid_easting": 843869.0,
+      "grid_northing": 818203.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tiu Keng Leng)"
+    },
+    "5": {
+      "station_code": "YMT",
+      "name_tc": "油麻地",
+      "name_en": "Yau Ma Tei",
+      "lat": 22.312832204,
+      "lng": 114.170680367,
+      "grid_easting": 835629.80697293,
+      "grid_northing": 819316.71960308,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Yau Ma Tei Station)"
+    },
+    "50": {
+      "station_code": "TKO",
+      "name_tc": "將軍澳",
+      "name_en": "Tseung Kwan O",
+      "lat": 22.307516852,
+      "lng": 114.259211491,
+      "grid_easting": 844751.86414884,
+      "grid_northing": 818730.43005315,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tseung Kwan O Station)"
+    },
+    "51": {
+      "station_code": "HAH",
+      "name_tc": "坑口",
+      "name_en": "Hang Hau",
+      "lat": 22.315596001,
+      "lng": 114.264393001,
+      "grid_easting": 845285.23848184,
+      "grid_northing": 819625.37247121,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Hang Hau Station)"
+    },
+    "52": {
+      "station_code": "POA",
+      "name_tc": "寶琳",
+      "name_en": "Po Lam",
+      "lat": 22.322558611,
+      "lng": 114.257872477,
+      "grid_easting": 844613.0,
+      "grid_northing": 820396.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Po Lam)"
+    },
+    "53": {
+      "station_code": "NAC",
+      "name_tc": "南昌",
+      "name_en": "Nam Cheong",
+      "lat": 22.326777201,
+      "lng": 114.153679901,
+      "grid_easting": 833878.41445838,
+      "grid_northing": 820861.08462278,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Nam Cheong Station)"
+    },
+    "54": {
+      "station_code": "SUN",
+      "name_tc": "欣澳",
+      "name_en": "Sunny Bay",
+      "lat": 22.331731001,
+      "lng": 114.028960701,
+      "grid_easting": 821029.87289638,
+      "grid_northing": 821416.92941775,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sunny Bay Station)"
+    },
+    "55": {
+      "station_code": "DIS",
+      "name_tc": "迪士尼",
+      "name_en": "Disneyland Resort",
+      "lat": 22.31536404,
+      "lng": 114.045190817,
+      "grid_easting": 822700.32666674,
+      "grid_northing": 819602.98504502,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Disneyland Resort Station)"
+    },
+    "56": {
+      "station_code": "AWE",
+      "name_tc": "博覽館",
+      "name_en": "AsiaWorld-Expo",
+      "lat": 22.321749019,
+      "lng": 113.941235556,
+      "grid_easting": 811990.635,
+      "grid_northing": 820323.062,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (AsiaWorld-Expo)"
+    },
+    "57": {
+      "station_code": "LHP",
+      "name_tc": "康城",
+      "name_en": "LOHAS Park",
+      "lat": 22.296317501,
+      "lng": 114.269613201,
+      "grid_easting": 845824.39971533,
+      "grid_northing": 817490.89695294,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (LOHAS Park Station)"
+    },
+    "6": {
+      "station_code": "MOK",
+      "name_tc": "旺角",
+      "name_en": "Mong Kok",
+      "lat": 22.319253001,
+      "lng": 114.169355001,
+      "grid_easting": 835493.28423067,
+      "grid_northing": 820027.73038246,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Mong Kok Station)"
+    },
     "64": {
       "station_code": "HUH",
       "name_en": "Hung Hom",
       "lat": 22.303,
       "lng": 114.1819,
       "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "65": {
+      "station_code": "MKK",
+      "name_tc": "旺角東",
+      "name_en": "Mong Kok East",
+      "lat": 22.322018914,
+      "lng": 114.172593949,
+      "grid_easting": 835827.0,
+      "grid_northing": 820334.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Mong Kok East)"
+    },
+    "67": {
+      "station_code": "TAW",
+      "name_tc": "大圍",
+      "name_en": "Tai Wai",
+      "lat": 22.373325001,
+      "lng": 114.179493001,
+      "grid_easting": 836537.69148539,
+      "grid_northing": 826015.37920561,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Wai Station)"
+    },
+    "68": {
+      "station_code": "SHT",
+      "name_tc": "沙田",
+      "name_en": "Sha Tin",
+      "lat": 22.381823601,
+      "lng": 114.186987401,
+      "grid_easting": 837309.47442762,
+      "grid_northing": 826956.50856003,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sha Tin Station)"
+    },
+    "69": {
+      "station_code": "FOT",
+      "name_tc": "火炭",
+      "name_en": "Fo Tan",
+      "lat": 22.395071912,
+      "lng": 114.198127989,
+      "grid_easting": 838456.56353004,
+      "grid_northing": 828423.68843419,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Fo Tan Station)"
+    },
+    "7": {
+      "station_code": "SKM",
+      "name_tc": "石硤尾",
+      "name_en": "Shek Kip Mei",
+      "lat": 22.332117801,
+      "lng": 114.168801001,
+      "grid_easting": 835436.2817335,
+      "grid_northing": 821452.31395934,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Shek Kip Mei Station)"
+    },
+    "71": {
+      "station_code": "UNI",
+      "name_tc": "大學",
+      "name_en": "University",
+      "lat": 22.413142401,
+      "lng": 114.209944801,
+      "grid_easting": 839672.94435311,
+      "grid_northing": 830424.95948212,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (University Station)"
+    },
+    "72": {
+      "station_code": "TAP",
+      "name_tc": "大埔墟",
+      "name_en": "Tai Po Market",
+      "lat": 22.444547001,
+      "lng": 114.170482001,
+      "grid_easting": 835609.98423725,
+      "grid_northing": 833902.22302991,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Po Market Station)"
+    },
+    "73": {
+      "station_code": "TWO",
+      "name_tc": "太和",
+      "name_en": "Tai Wo",
+      "lat": 22.451006368,
+      "lng": 114.161231984,
+      "grid_easting": 834657.88701489,
+      "grid_northing": 834617.58004069,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Wo Station)"
+    },
+    "74": {
+      "station_code": "FAN",
+      "name_tc": "粉嶺",
+      "name_en": "Fanling",
+      "lat": 22.496935981,
+      "lng": 114.142481321,
+      "grid_easting": 832729.0,
+      "grid_northing": 839704.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Fanling)"
+    },
+    "75": {
+      "station_code": "SHS",
+      "name_tc": "上水",
+      "name_en": "Sheung Shui",
+      "lat": 22.504391043,
+      "lng": 114.127016827,
+      "grid_easting": 831138.0,
+      "grid_northing": 840530.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sheung Shui)"
+    },
+    "76": {
+      "station_code": "LOW",
+      "name_tc": "羅湖",
+      "name_en": "Lo Wu",
+      "lat": 22.528172201,
+      "lng": 114.113375601,
+      "grid_easting": 829735.52913181,
+      "grid_northing": 843163.99525914,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lo Wu Station)"
+    },
+    "78": {
+      "station_code": "LMC",
+      "name_tc": "落馬洲",
+      "name_en": "Lok Ma Chau",
+      "lat": 22.514465388,
+      "lng": 114.065692735,
+      "grid_easting": 824829.0,
+      "grid_northing": 841649.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lok Ma Chau)"
+    },
+    "8": {
+      "station_code": "KOT",
+      "name_tc": "九龍塘",
+      "name_en": "Kowloon Tong",
+      "lat": 22.337156172,
+      "lng": 114.176096082,
+      "grid_easting": 836187.82404415,
+      "grid_northing": 822010.21556236,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kowloon Tong Station)"
+    },
+    "80": {
+      "station_code": "ETS",
+      "name_tc": "尖東",
+      "name_en": "East Tsim Sha Tsui",
+      "lat": 22.294860967,
+      "lng": 114.17344338,
+      "grid_easting": 835914.4472538,
+      "grid_northing": 817326.67515461,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (East Tsim Sha Tsui Station)"
+    },
+    "81": {
+      "station_code": "SYP",
+      "name_tc": "西營盤",
+      "name_en": "Sai Ying Pun",
+      "lat": 22.287807289,
+      "lng": 114.142037759,
+      "grid_easting": 832678.0,
+      "grid_northing": 816546.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sai Ying Pun)"
+    },
+    "82": {
+      "station_code": "HKU",
+      "name_tc": "香港大學",
+      "name_en": "HKU",
+      "lat": 22.283984001,
+      "lng": 114.135042001,
+      "grid_easting": 831956.95200067,
+      "grid_northing": 816122.81382799,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (HKU Station)"
+    },
+    "83": {
+      "station_code": "KET",
+      "name_tc": "堅尼地城",
+      "name_en": "Kennedy Town",
+      "lat": 22.281246701,
+      "lng": 114.128882501,
+      "grid_easting": 831322.08617447,
+      "grid_northing": 815819.88956426,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kennedy Town Station)"
+    },
+    "84": {
+      "station_code": "HOM",
+      "name_tc": "何文田",
+      "name_en": "Ho Man Tin",
+      "lat": 22.309359401,
+      "lng": 114.182729401,
+      "grid_easting": 836871.28470864,
+      "grid_northing": 818932.15922632,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ho Man Tin Station)"
+    },
+    "85": {
+      "station_code": "WHA",
+      "name_tc": "黃埔",
+      "name_en": "Whampoa",
+      "lat": 22.305031077,
+      "lng": 114.189550067,
+      "grid_easting": 837574.10434521,
+      "grid_northing": 818452.9077514,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Whampoa Station)"
+    },
+    "86": {
+      "station_code": "OCP",
+      "name_tc": "海洋公園",
+      "name_en": "Ocean Park",
+      "lat": 22.248705912,
+      "lng": 114.174323639,
+      "grid_easting": 836005.071,
+      "grid_northing": 812215.738,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ocean Park)"
+    },
+    "87": {
+      "station_code": "WCH",
+      "name_tc": "黃竹坑",
+      "name_en": "Wong Chuk Hang",
+      "lat": 22.247832161,
+      "lng": 114.169598564,
+      "grid_easting": 835518.0,
+      "grid_northing": 812119.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wong Chuk Hang)"
+    },
+    "88": {
+      "station_code": "LET",
+      "name_tc": "利東",
+      "name_en": "Lei Tung",
+      "lat": 22.241943558,
+      "lng": 114.156102831,
+      "grid_easting": 834126.74577047,
+      "grid_northing": 811467.06174794,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lei Tung Station)"
+    },
+    "89": {
+      "station_code": "SOH",
+      "name_tc": "海怡半島",
+      "name_en": "South Horizons",
+      "lat": 22.242860301,
+      "lng": 114.148744401,
+      "grid_easting": 833368.21235052,
+      "grid_northing": 811568.69834885,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (South Horizons Station)"
+    },
+    "9": {
+      "station_code": "LOF",
+      "name_tc": "樂富",
+      "name_en": "Lok Fu",
+      "lat": 22.338026001,
+      "lng": 114.187022001,
+      "grid_easting": 837313.36578495,
+      "grid_northing": 822106.57131951,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lok Fu Station)"
+    },
+    "90": {
+      "station_code": "HIK",
+      "name_tc": "顯徑",
+      "name_en": "Hin Keng",
+      "lat": 22.363725515,
+      "lng": 114.170743525,
+      "grid_easting": 835636.542,
+      "grid_northing": 824952.387,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Hin Keng)"
+    },
+    "91": {
+      "station_code": "KAT",
+      "name_tc": "啟德",
+      "name_en": "Kai Tak",
+      "lat": 22.330570001,
+      "lng": 114.199549001,
+      "grid_easting": 838603.96798856,
+      "grid_northing": 821281.07284543,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kai Tak Station)"
+    },
+    "92": {
+      "station_code": "SUW",
+      "name_tc": "宋皇臺",
+      "name_en": "Sung Wong Toi",
+      "lat": 22.325910001,
+      "lng": 114.191300001,
+      "grid_easting": 837754.19573237,
+      "grid_northing": 820764.94387164,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sung Wong Toi Station)"
+    },
+    "93": {
+      "station_code": "TKW",
+      "name_tc": "土瓜灣",
+      "name_en": "To Kwa Wan",
+      "lat": 22.317310001,
+      "lng": 114.187600001,
+      "grid_easting": 837373.07267989,
+      "grid_northing": 819812.59345079,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (To Kwa Wan Station)"
+    },
+    "94": {
+      "station_code": "EXC",
+      "name_tc": "會展",
+      "name_en": "Exhibition Centre",
+      "lat": 22.281361001,
+      "lng": 114.176244001,
+      "grid_easting": 836203.03815646,
+      "grid_northing": 815831.76271134,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Exhibition Centre Station)"
+    },
+    "96": {
+      "station_code": "CKT",
+      "name_tc": "車公廟",
+      "name_en": "Che Kung Temple",
+      "lat": 22.374766231,
+      "lng": 114.185885075,
+      "grid_easting": 837196.0,
+      "grid_northing": 826175.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Che Kung Temple)"
+    },
+    "97": {
+      "station_code": "STW",
+      "name_tc": "沙田圍",
+      "name_en": "Sha Tin Wai",
+      "lat": 22.377736223,
+      "lng": 114.197391628,
+      "grid_easting": 838381.0,
+      "grid_northing": 826504.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sha Tin Wai)"
+    },
+    "98": {
+      "station_code": "CIO",
+      "name_tc": "第一城",
+      "name_en": "City One",
+      "lat": 22.382871683,
+      "lng": 114.203719993,
+      "grid_easting": 839032.63462821,
+      "grid_northing": 827072.78059666,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (City One Station)"
+    },
+    "99": {
+      "station_code": "SHM",
+      "name_tc": "石門",
+      "name_en": "Shek Mun",
+      "lat": 22.390855206,
+      "lng": 114.211299592,
+      "grid_easting": 839813.0,
+      "grid_northing": 827957.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Shek Mun)"
     },
     "ADM": {
       "station_code": "ADM",
@@ -29,12 +999,245 @@
       "lng": 114.1649,
       "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
     },
-    "NOP": {
-      "station_code": "NOP",
-      "name_en": "North Point",
-      "lat": 22.2915,
-      "lng": 114.2006,
-      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    "AIR": {
+      "station_code": "AIR",
+      "name_tc": "機場",
+      "name_en": "Airport",
+      "lat": 22.315916787,
+      "lng": 113.936483404,
+      "grid_easting": 811500.0,
+      "grid_northing": 819678.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Airport)"
+    },
+    "AUS": {
+      "station_code": "AUS",
+      "name_tc": "柯士甸",
+      "name_en": "Austin",
+      "lat": 22.305292701,
+      "lng": 114.166102701,
+      "grid_easting": 835158.09152384,
+      "grid_northing": 818481.86255238,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Austin Station)"
+    },
+    "AWE": {
+      "station_code": "AWE",
+      "name_tc": "博覽館",
+      "name_en": "AsiaWorld-Expo",
+      "lat": 22.321749019,
+      "lng": 113.941235556,
+      "grid_easting": 811990.635,
+      "grid_northing": 820323.062,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (AsiaWorld-Expo)"
+    },
+    "CAB": {
+      "station_code": "CAB",
+      "name_tc": "銅鑼灣",
+      "name_en": "Causeway Bay",
+      "lat": 22.280379665,
+      "lng": 114.185047466,
+      "grid_easting": 837110.30519105,
+      "grid_northing": 815723.11821089,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Causeway Bay Station)"
+    },
+    "CEN": {
+      "station_code": "CEN",
+      "name_tc": "中環",
+      "name_en": "Central",
+      "lat": 22.28167452,
+      "lng": 114.158781092,
+      "grid_easting": 834403.36232351,
+      "grid_northing": 815866.59093451,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Central Station)"
+    },
+    "CHH": {
+      "station_code": "CHH",
+      "name_tc": "彩虹",
+      "name_en": "Choi Hung",
+      "lat": 22.334890801,
+      "lng": 114.208989101,
+      "grid_easting": 839576.39628231,
+      "grid_northing": 821759.7130518,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Choi Hung Station)"
+    },
+    "CHW": {
+      "station_code": "CHW",
+      "name_tc": "柴灣",
+      "name_en": "Chai Wan",
+      "lat": 22.264960534,
+      "lng": 114.239240143,
+      "grid_easting": 842696.0,
+      "grid_northing": 814017.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Chai Wan)"
+    },
+    "CIO": {
+      "station_code": "CIO",
+      "name_tc": "第一城",
+      "name_en": "City One",
+      "lat": 22.382871683,
+      "lng": 114.203719993,
+      "grid_easting": 839032.63462821,
+      "grid_northing": 827072.78059666,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (City One Station)"
+    },
+    "CKT": {
+      "station_code": "CKT",
+      "name_tc": "車公廟",
+      "name_en": "Che Kung Temple",
+      "lat": 22.374766231,
+      "lng": 114.185885075,
+      "grid_easting": 837196.0,
+      "grid_northing": 826175.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Che Kung Temple)"
+    },
+    "CSW": {
+      "station_code": "CSW",
+      "name_tc": "長沙灣",
+      "name_en": "Cheung Sha Wan",
+      "lat": 22.335614357,
+      "lng": 114.155994709,
+      "grid_easting": 834117.03039612,
+      "grid_northing": 821839.63102716,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Cheung Sha Wan Station)"
+    },
+    "DIH": {
+      "station_code": "DIH",
+      "name_tc": "鑽石山",
+      "name_en": "Diamond Hill",
+      "lat": 22.340017001,
+      "lng": 114.201698001,
+      "grid_easting": 838825.18797331,
+      "grid_northing": 822327.22041561,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Diamond Hill Station)"
+    },
+    "DIS": {
+      "station_code": "DIS",
+      "name_tc": "迪士尼",
+      "name_en": "Disneyland Resort",
+      "lat": 22.31536404,
+      "lng": 114.045190817,
+      "grid_easting": 822700.32666674,
+      "grid_northing": 819602.98504502,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Disneyland Resort Station)"
+    },
+    "ETS": {
+      "station_code": "ETS",
+      "name_tc": "尖東",
+      "name_en": "East Tsim Sha Tsui",
+      "lat": 22.294860967,
+      "lng": 114.17344338,
+      "grid_easting": 835914.4472538,
+      "grid_northing": 817326.67515461,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (East Tsim Sha Tsui Station)"
+    },
+    "EXC": {
+      "station_code": "EXC",
+      "name_tc": "會展",
+      "name_en": "Exhibition Centre",
+      "lat": 22.281361001,
+      "lng": 114.176244001,
+      "grid_easting": 836203.03815646,
+      "grid_northing": 815831.76271134,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Exhibition Centre Station)"
+    },
+    "FAN": {
+      "station_code": "FAN",
+      "name_tc": "粉嶺",
+      "name_en": "Fanling",
+      "lat": 22.496935981,
+      "lng": 114.142481321,
+      "grid_easting": 832729.0,
+      "grid_northing": 839704.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Fanling)"
+    },
+    "FOH": {
+      "station_code": "FOH",
+      "name_tc": "炮台山",
+      "name_en": "Fortress Hill",
+      "lat": 22.28801241,
+      "lng": 114.19356584,
+      "grid_easting": 837988.09825239,
+      "grid_northing": 816568.3967122,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Fortress Hill Station)"
+    },
+    "FOT": {
+      "station_code": "FOT",
+      "name_tc": "火炭",
+      "name_en": "Fo Tan",
+      "lat": 22.395071912,
+      "lng": 114.198127989,
+      "grid_easting": 838456.56353004,
+      "grid_northing": 828423.68843419,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Fo Tan Station)"
+    },
+    "HAH": {
+      "station_code": "HAH",
+      "name_tc": "坑口",
+      "name_en": "Hang Hau",
+      "lat": 22.315596001,
+      "lng": 114.264393001,
+      "grid_easting": 845285.23848184,
+      "grid_northing": 819625.37247121,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Hang Hau Station)"
+    },
+    "HEO": {
+      "station_code": "HEO",
+      "name_tc": "恆安",
+      "name_en": "Heng On",
+      "lat": 22.417861662,
+      "lng": 114.225875444,
+      "grid_easting": 841313.0,
+      "grid_northing": 830948.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Heng On)"
+    },
+    "HFC": {
+      "station_code": "HFC",
+      "name_tc": "杏花邨",
+      "name_en": "Heng Fa Chuen",
+      "lat": 22.276627964,
+      "lng": 114.239662548,
+      "grid_easting": 842739.0,
+      "grid_northing": 815309.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Heng Fa Chuen Station)"
+    },
+    "HIK": {
+      "station_code": "HIK",
+      "name_tc": "顯徑",
+      "name_en": "Hin Keng",
+      "lat": 22.363725515,
+      "lng": 114.170743525,
+      "grid_easting": 835636.542,
+      "grid_northing": 824952.387,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Hin Keng)"
+    },
+    "HKU": {
+      "station_code": "HKU",
+      "name_tc": "香港大學",
+      "name_en": "HKU",
+      "lat": 22.283984001,
+      "lng": 114.135042001,
+      "grid_easting": 831956.95200067,
+      "grid_northing": 816122.81382799,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (HKU Station)"
+    },
+    "HOK": {
+      "station_code": "HOK",
+      "name_tc": "香港",
+      "name_en": "Hong Kong",
+      "lat": 22.28467979,
+      "lng": 114.158179383,
+      "grid_easting": 834341.3929947,
+      "grid_northing": 816199.38464767,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Hong Kong Station)"
+    },
+    "HOM": {
+      "station_code": "HOM",
+      "name_tc": "何文田",
+      "name_en": "Ho Man Tin",
+      "lat": 22.309359401,
+      "lng": 114.182729401,
+      "grid_easting": 836871.28470864,
+      "grid_northing": 818932.15922632,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ho Man Tin Station)"
     },
     "HUH": {
       "station_code": "HUH",
@@ -42,6 +1245,715 @@
       "lat": 22.303,
       "lng": 114.1819,
       "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "JOR": {
+      "station_code": "JOR",
+      "name_tc": "佐敦",
+      "name_en": "Jordan",
+      "lat": 22.304790001,
+      "lng": 114.171660001,
+      "grid_easting": 835730.71234942,
+      "grid_northing": 818426.16617666,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Jordan Station)"
+    },
+    "KAT": {
+      "station_code": "KAT",
+      "name_tc": "啟德",
+      "name_en": "Kai Tak",
+      "lat": 22.330570001,
+      "lng": 114.199549001,
+      "grid_easting": 838603.96798856,
+      "grid_northing": 821281.07284543,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kai Tak Station)"
+    },
+    "KET": {
+      "station_code": "KET",
+      "name_tc": "堅尼地城",
+      "name_en": "Kennedy Town",
+      "lat": 22.281246701,
+      "lng": 114.128882501,
+      "grid_easting": 831322.08617447,
+      "grid_northing": 815819.88956426,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kennedy Town Station)"
+    },
+    "KOB": {
+      "station_code": "KOB",
+      "name_tc": "九龍灣",
+      "name_en": "Kowloon Bay",
+      "lat": 22.308976001,
+      "lng": 114.206882984,
+      "grid_easting": 839360.0,
+      "grid_northing": 818890.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kowloon Bay)"
+    },
+    "KOT": {
+      "station_code": "KOT",
+      "name_tc": "九龍塘",
+      "name_en": "Kowloon Tong",
+      "lat": 22.337156172,
+      "lng": 114.176096082,
+      "grid_easting": 836187.82404415,
+      "grid_northing": 822010.21556236,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kowloon Tong Station)"
+    },
+    "KOW": {
+      "station_code": "KOW",
+      "name_tc": "九龍",
+      "name_en": "Kowloon",
+      "lat": 22.304306001,
+      "lng": 114.161475001,
+      "grid_easting": 834681.24341202,
+      "grid_northing": 818372.64202728,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kowloon Station)"
+    },
+    "KSR": {
+      "station_code": "KSR",
+      "name_tc": "錦上路",
+      "name_en": "Kam Sheung Road",
+      "lat": 22.435131498,
+      "lng": 114.063181818,
+      "grid_easting": 824564.0,
+      "grid_northing": 832864.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kam Sheung Road)"
+    },
+    "KWF": {
+      "station_code": "KWF",
+      "name_tc": "葵芳",
+      "name_en": "Kwai Fong",
+      "lat": 22.356797307,
+      "lng": 114.12778791,
+      "grid_easting": 831212.0,
+      "grid_northing": 824186.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kwai Fong)"
+    },
+    "KWH": {
+      "station_code": "KWH",
+      "name_tc": "葵興",
+      "name_en": "Kwai Hing",
+      "lat": 22.363074541,
+      "lng": 114.131222694,
+      "grid_easting": 831566.0,
+      "grid_northing": 824881.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kwai Hing)"
+    },
+    "KWT": {
+      "station_code": "KWT",
+      "name_tc": "觀塘",
+      "name_en": "Kwun Tong",
+      "lat": 22.311329367,
+      "lng": 114.222412143,
+      "grid_easting": 840960.0,
+      "grid_northing": 819151.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Kwun Tong)"
+    },
+    "LAK": {
+      "station_code": "LAK",
+      "name_tc": "茘景",
+      "name_en": "Lai King",
+      "lat": 22.348344215,
+      "lng": 114.126189053,
+      "grid_easting": 831047.0,
+      "grid_northing": 823250.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lai King)"
+    },
+    "LAT": {
+      "station_code": "LAT",
+      "name_tc": "藍田",
+      "name_en": "Lam Tin",
+      "lat": 22.306855001,
+      "lng": 114.232733001,
+      "grid_easting": 842023.59657552,
+      "grid_northing": 818655.89048981,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lam Tin Station)"
+    },
+    "LCK": {
+      "station_code": "LCK",
+      "name_tc": "茘枝角",
+      "name_en": "Lai Chi Kok",
+      "lat": 22.336874801,
+      "lng": 114.148310801,
+      "grid_easting": 833325.47991955,
+      "grid_northing": 821979.33571856,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lai Chi Kok Station)"
+    },
+    "LET": {
+      "station_code": "LET",
+      "name_tc": "利東",
+      "name_en": "Lei Tung",
+      "lat": 22.241943558,
+      "lng": 114.156102831,
+      "grid_easting": 834126.74577047,
+      "grid_northing": 811467.06174794,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lei Tung Station)"
+    },
+    "LHP": {
+      "station_code": "LHP",
+      "name_tc": "康城",
+      "name_en": "LOHAS Park",
+      "lat": 22.296317501,
+      "lng": 114.269613201,
+      "grid_easting": 845824.39971533,
+      "grid_northing": 817490.89695294,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (LOHAS Park Station)"
+    },
+    "LMC": {
+      "station_code": "LMC",
+      "name_tc": "落馬洲",
+      "name_en": "Lok Ma Chau",
+      "lat": 22.514465388,
+      "lng": 114.065692735,
+      "grid_easting": 824829.0,
+      "grid_northing": 841649.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lok Ma Chau)"
+    },
+    "LOF": {
+      "station_code": "LOF",
+      "name_tc": "樂富",
+      "name_en": "Lok Fu",
+      "lat": 22.338026001,
+      "lng": 114.187022001,
+      "grid_easting": 837313.36578495,
+      "grid_northing": 822106.57131951,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lok Fu Station)"
+    },
+    "LOP": {
+      "station_code": "LOP",
+      "name_tc": "朗屏",
+      "name_en": "Long Ping",
+      "lat": 22.447625747,
+      "lng": 114.025448882,
+      "grid_easting": 820681.0,
+      "grid_northing": 834251.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Long Ping)"
+    },
+    "LOW": {
+      "station_code": "LOW",
+      "name_tc": "羅湖",
+      "name_en": "Lo Wu",
+      "lat": 22.528172201,
+      "lng": 114.113375601,
+      "grid_easting": 829735.52913181,
+      "grid_northing": 843163.99525914,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Lo Wu Station)"
+    },
+    "MEF": {
+      "station_code": "MEF",
+      "name_tc": "美孚",
+      "name_en": "Mei Foo",
+      "lat": 22.337584801,
+      "lng": 114.137983601,
+      "grid_easting": 832261.62748874,
+      "grid_northing": 822058.19524533,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Mei Foo Station)"
+    },
+    "MKK": {
+      "station_code": "MKK",
+      "name_tc": "旺角東",
+      "name_en": "Mong Kok East",
+      "lat": 22.322018914,
+      "lng": 114.172593949,
+      "grid_easting": 835827.0,
+      "grid_northing": 820334.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Mong Kok East)"
+    },
+    "MOK": {
+      "station_code": "MOK",
+      "name_tc": "旺角",
+      "name_en": "Mong Kok",
+      "lat": 22.319253001,
+      "lng": 114.169355001,
+      "grid_easting": 835493.28423067,
+      "grid_northing": 820027.73038246,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Mong Kok Station)"
+    },
+    "MOS": {
+      "station_code": "MOS",
+      "name_tc": "馬鞍山",
+      "name_en": "Ma On Shan",
+      "lat": 22.41919645,
+      "lng": 114.231256949,
+      "grid_easting": 841867.01,
+      "grid_northing": 831096.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ma On Shan)"
+    },
+    "NAC": {
+      "station_code": "NAC",
+      "name_tc": "南昌",
+      "name_en": "Nam Cheong",
+      "lat": 22.326777201,
+      "lng": 114.153679901,
+      "grid_easting": 833878.41445838,
+      "grid_northing": 820861.08462278,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Nam Cheong Station)"
+    },
+    "NOP": {
+      "station_code": "NOP",
+      "name_en": "North Point",
+      "lat": 22.2915,
+      "lng": 114.2006,
+      "source": "Manual WGS84 seed from public map reference; verify against official source before production use"
+    },
+    "NTK": {
+      "station_code": "NTK",
+      "name_tc": "牛頭角",
+      "name_en": "Ngau Tau Kok",
+      "lat": 22.321724572,
+      "lng": 114.218746602,
+      "grid_easting": 840582.0,
+      "grid_northing": 820302.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ngau Tau Kok)"
+    },
+    "OCP": {
+      "station_code": "OCP",
+      "name_tc": "海洋公園",
+      "name_en": "Ocean Park",
+      "lat": 22.248705912,
+      "lng": 114.174323639,
+      "grid_easting": 836005.071,
+      "grid_northing": 812215.738,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Ocean Park)"
+    },
+    "OLY": {
+      "station_code": "OLY",
+      "name_tc": "奧運",
+      "name_en": "Olympic",
+      "lat": 22.317791804,
+      "lng": 114.160248226,
+      "grid_easting": 834555.0,
+      "grid_northing": 819866.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Olympic)"
+    },
+    "POA": {
+      "station_code": "POA",
+      "name_tc": "寶琳",
+      "name_en": "Po Lam",
+      "lat": 22.322558611,
+      "lng": 114.257872477,
+      "grid_easting": 844613.0,
+      "grid_northing": 820396.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Po Lam)"
+    },
+    "PRE": {
+      "station_code": "PRE",
+      "name_tc": "太子",
+      "name_en": "Prince Edward",
+      "lat": 22.325078501,
+      "lng": 114.168363101,
+      "grid_easting": 835391.12548595,
+      "grid_northing": 820672.82089493,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Prince Edward Station)"
+    },
+    "QUB": {
+      "station_code": "QUB",
+      "name_tc": "鰂魚涌",
+      "name_en": "Quarry Bay",
+      "lat": 22.290521288,
+      "lng": 114.207924299,
+      "grid_easting": 839467.7148767,
+      "grid_northing": 816846.44976775,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Quarry Bay Station)"
+    },
+    "SHM": {
+      "station_code": "SHM",
+      "name_tc": "石門",
+      "name_en": "Shek Mun",
+      "lat": 22.390855206,
+      "lng": 114.211299592,
+      "grid_easting": 839813.0,
+      "grid_northing": 827957.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Shek Mun)"
+    },
+    "SHS": {
+      "station_code": "SHS",
+      "name_tc": "上水",
+      "name_en": "Sheung Shui",
+      "lat": 22.504391043,
+      "lng": 114.127016827,
+      "grid_easting": 831138.0,
+      "grid_northing": 840530.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sheung Shui)"
+    },
+    "SHT": {
+      "station_code": "SHT",
+      "name_tc": "沙田",
+      "name_en": "Sha Tin",
+      "lat": 22.381823601,
+      "lng": 114.186987401,
+      "grid_easting": 837309.47442762,
+      "grid_northing": 826956.50856003,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sha Tin Station)"
+    },
+    "SHW": {
+      "station_code": "SHW",
+      "name_tc": "上環",
+      "name_en": "Sheung Wan",
+      "lat": 22.286276916,
+      "lng": 114.153556544,
+      "grid_easting": 833865.01425136,
+      "grid_northing": 816376.30723457,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sheung Wan Station)"
+    },
+    "SIH": {
+      "station_code": "SIH",
+      "name_tc": "兆康",
+      "name_en": "Siu Hong",
+      "lat": 22.411525768,
+      "lng": 113.97880089,
+      "grid_easting": 815874.0,
+      "grid_northing": 830259.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Siu Hong)"
+    },
+    "SKM": {
+      "station_code": "SKM",
+      "name_tc": "石硤尾",
+      "name_en": "Shek Kip Mei",
+      "lat": 22.332117801,
+      "lng": 114.168801001,
+      "grid_easting": 835436.2817335,
+      "grid_northing": 821452.31395934,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Shek Kip Mei Station)"
+    },
+    "SKW": {
+      "station_code": "SKW",
+      "name_tc": "筲箕灣",
+      "name_en": "Shau Kei Wan",
+      "lat": 22.279242801,
+      "lng": 114.228879401,
+      "grid_easting": 841627.58072523,
+      "grid_northing": 815598.12938765,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Shau Kei Wan Station)"
+    },
+    "SOH": {
+      "station_code": "SOH",
+      "name_tc": "海怡半島",
+      "name_en": "South Horizons",
+      "lat": 22.242860301,
+      "lng": 114.148744401,
+      "grid_easting": 833368.21235052,
+      "grid_northing": 811568.69834885,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (South Horizons Station)"
+    },
+    "SSP": {
+      "station_code": "SSP",
+      "name_tc": "深水埗",
+      "name_en": "Sham Shui Po",
+      "lat": 22.329179495,
+      "lng": 114.161440798,
+      "grid_easting": 834678.0,
+      "grid_northing": 821127.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sham Shui Po)"
+    },
+    "STW": {
+      "station_code": "STW",
+      "name_tc": "沙田圍",
+      "name_en": "Sha Tin Wai",
+      "lat": 22.377736223,
+      "lng": 114.197391628,
+      "grid_easting": 838381.0,
+      "grid_northing": 826504.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sha Tin Wai)"
+    },
+    "SUN": {
+      "station_code": "SUN",
+      "name_tc": "欣澳",
+      "name_en": "Sunny Bay",
+      "lat": 22.331731001,
+      "lng": 114.028960701,
+      "grid_easting": 821029.87289638,
+      "grid_northing": 821416.92941775,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sunny Bay Station)"
+    },
+    "SUW": {
+      "station_code": "SUW",
+      "name_tc": "宋皇臺",
+      "name_en": "Sung Wong Toi",
+      "lat": 22.325910001,
+      "lng": 114.191300001,
+      "grid_easting": 837754.19573237,
+      "grid_northing": 820764.94387164,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sung Wong Toi Station)"
+    },
+    "SWH": {
+      "station_code": "SWH",
+      "name_tc": "西灣河",
+      "name_en": "Sai Wan Ho",
+      "lat": 22.282098401,
+      "lng": 114.222099701,
+      "grid_easting": 840928.7778384,
+      "grid_northing": 815914.11691283,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sai Wan Ho Station)"
+    },
+    "SYP": {
+      "station_code": "SYP",
+      "name_tc": "西營盤",
+      "name_en": "Sai Ying Pun",
+      "lat": 22.287807289,
+      "lng": 114.142037759,
+      "grid_easting": 832678.0,
+      "grid_northing": 816546.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Sai Ying Pun)"
+    },
+    "TAK": {
+      "station_code": "TAK",
+      "name_tc": "太古",
+      "name_en": "Tai Koo",
+      "lat": 22.284662753,
+      "lng": 114.216360953,
+      "grid_easting": 840337.28677846,
+      "grid_northing": 816197.91238327,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Koo Station)"
+    },
+    "TAP": {
+      "station_code": "TAP",
+      "name_tc": "大埔墟",
+      "name_en": "Tai Po Market",
+      "lat": 22.444547001,
+      "lng": 114.170482001,
+      "grid_easting": 835609.98423725,
+      "grid_northing": 833902.22302991,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Po Market Station)"
+    },
+    "TAW": {
+      "station_code": "TAW",
+      "name_tc": "大圍",
+      "name_en": "Tai Wai",
+      "lat": 22.373325001,
+      "lng": 114.179493001,
+      "grid_easting": 836537.69148539,
+      "grid_northing": 826015.37920561,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Wai Station)"
+    },
+    "TIH": {
+      "station_code": "TIH",
+      "name_tc": "天后",
+      "name_en": "Tin Hau",
+      "lat": 22.282421501,
+      "lng": 114.191725801,
+      "grid_easting": 837798.53882656,
+      "grid_northing": 815949.27187642,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tin Hau Station)"
+    },
+    "TIK": {
+      "station_code": "TIK",
+      "name_tc": "調景嶺",
+      "name_en": "Tiu Keng Leng",
+      "lat": 22.302757966,
+      "lng": 114.250640669,
+      "grid_easting": 843869.0,
+      "grid_northing": 818203.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tiu Keng Leng)"
+    },
+    "TIS": {
+      "station_code": "TIS",
+      "name_tc": "天水圍",
+      "name_en": "Tin Shui Wai",
+      "lat": 22.454302356,
+      "lng": 114.001755722,
+      "grid_easting": 818243.0,
+      "grid_northing": 834993.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tin Shui Wai)"
+    },
+    "TKO": {
+      "station_code": "TKO",
+      "name_tc": "將軍澳",
+      "name_en": "Tseung Kwan O",
+      "lat": 22.307516852,
+      "lng": 114.259211491,
+      "grid_easting": 844751.86414884,
+      "grid_northing": 818730.43005315,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tseung Kwan O Station)"
+    },
+    "TKW": {
+      "station_code": "TKW",
+      "name_tc": "土瓜灣",
+      "name_en": "To Kwa Wan",
+      "lat": 22.317310001,
+      "lng": 114.187600001,
+      "grid_easting": 837373.07267989,
+      "grid_northing": 819812.59345079,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (To Kwa Wan Station)"
+    },
+    "TSH": {
+      "station_code": "TSH",
+      "name_tc": "大水坑",
+      "name_en": "Tai Shui Hang",
+      "lat": 22.280600591,
+      "lng": 114.019496852,
+      "grid_easting": 820049.0,
+      "grid_northing": 815756.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Shui Hang)"
+    },
+    "TST": {
+      "station_code": "TST",
+      "name_tc": "尖沙咀",
+      "name_en": "Tsim Sha Tsui",
+      "lat": 22.297571901,
+      "lng": 114.172204901,
+      "grid_easting": 835786.83442387,
+      "grid_northing": 817626.87213715,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsim Sha Tsui Station)"
+    },
+    "TSW": {
+      "station_code": "TSW",
+      "name_tc": "荃灣",
+      "name_en": "Tsuen Wan",
+      "lat": 22.373133135,
+      "lng": 114.118671668,
+      "grid_easting": 830273.7080955,
+      "grid_northing": 825995.28776313,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsuen Wan Station)"
+    },
+    "TSY": {
+      "station_code": "TSY",
+      "name_tc": "青衣",
+      "name_en": "Tsing Yi",
+      "lat": 22.358497801,
+      "lng": 114.107672001,
+      "grid_easting": 829140.10860014,
+      "grid_northing": 824375.11771502,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsing Yi Station)"
+    },
+    "TUC": {
+      "station_code": "TUC",
+      "name_tc": "東涌",
+      "name_en": "Tung Chung",
+      "lat": 22.282965439,
+      "lng": 113.938871664,
+      "grid_easting": 811740.318,
+      "grid_northing": 816028.739,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tung Chung)"
+    },
+    "TUM": {
+      "station_code": "TUM",
+      "name_tc": "屯門",
+      "name_en": "Tuen Mun",
+      "lat": 22.397766722,
+      "lng": 113.974236623,
+      "grid_easting": 815402.0,
+      "grid_northing": 828736.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tuen Mun)"
+    },
+    "TWH": {
+      "station_code": "TWH",
+      "name_tc": "大窩口",
+      "name_en": "Tai Wo Hau",
+      "lat": 22.370778401,
+      "lng": 114.125066801,
+      "grid_easting": 830932.25281062,
+      "grid_northing": 825734.29475938,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Wo Hau Station)"
+    },
+    "TWO": {
+      "station_code": "TWO",
+      "name_tc": "太和",
+      "name_en": "Tai Wo",
+      "lat": 22.451006368,
+      "lng": 114.161231984,
+      "grid_easting": 834657.88701489,
+      "grid_northing": 834617.58004069,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tai Wo Station)"
+    },
+    "TWW": {
+      "station_code": "TWW",
+      "name_tc": "荃灣西",
+      "name_en": "Tsuen Wan West",
+      "lat": 22.368429179,
+      "lng": 114.109716139,
+      "grid_easting": 829351.14640861,
+      "grid_northing": 825474.77701785,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Tsuen Wan West Station)"
+    },
+    "UNI": {
+      "station_code": "UNI",
+      "name_tc": "大學",
+      "name_en": "University",
+      "lat": 22.413142401,
+      "lng": 114.209944801,
+      "grid_easting": 839672.94435311,
+      "grid_northing": 830424.95948212,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (University Station)"
+    },
+    "WAC": {
+      "station_code": "WAC",
+      "name_tc": "灣仔",
+      "name_en": "Wan Chai",
+      "lat": 22.277541201,
+      "lng": 114.173152701,
+      "grid_easting": 835884.44689252,
+      "grid_northing": 815408.78493788,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wan Chai Station)"
+    },
+    "WCH": {
+      "station_code": "WCH",
+      "name_tc": "黃竹坑",
+      "name_en": "Wong Chuk Hang",
+      "lat": 22.247832161,
+      "lng": 114.169598564,
+      "grid_easting": 835518.0,
+      "grid_northing": 812119.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wong Chuk Hang)"
+    },
+    "WHA": {
+      "station_code": "WHA",
+      "name_tc": "黃埔",
+      "name_en": "Whampoa",
+      "lat": 22.305031077,
+      "lng": 114.189550067,
+      "grid_easting": 837574.10434521,
+      "grid_northing": 818452.9077514,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Whampoa Station)"
+    },
+    "WKS": {
+      "station_code": "WKS",
+      "name_tc": "烏溪沙",
+      "name_en": "Wu Kai Sha",
+      "lat": 22.432187646,
+      "lng": 114.241199122,
+      "grid_easting": 842890.0,
+      "grid_northing": 832535.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wu Kai Sha)"
+    },
+    "WTS": {
+      "station_code": "WTS",
+      "name_tc": "黃大仙",
+      "name_en": "Wong Tai Sin",
+      "lat": 22.341662471,
+      "lng": 114.193850843,
+      "grid_easting": 838016.79829377,
+      "grid_northing": 822509.31922162,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Wong Tai Sin Station)"
+    },
+    "YAT": {
+      "station_code": "YAT",
+      "name_tc": "油塘",
+      "name_en": "Yau Tong",
+      "lat": 22.295782662,
+      "lng": 114.237730242,
+      "grid_easting": 842539.0,
+      "grid_northing": 817430.0,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Yau Tong)"
+    },
+    "YMT": {
+      "station_code": "YMT",
+      "name_tc": "油麻地",
+      "name_en": "Yau Ma Tei",
+      "lat": 22.312832204,
+      "lng": 114.170680367,
+      "grid_easting": 835629.80697293,
+      "grid_northing": 819316.71960308,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Yau Ma Tei Station)"
+    },
+    "YUL": {
+      "station_code": "YUL",
+      "name_tc": "元朗",
+      "name_en": "Yuen Long",
+      "lat": 22.446087601,
+      "lng": 114.034770201,
+      "grid_easting": 821640.33112624,
+      "grid_northing": 834079.73257628,
+      "source": "Offline MTR coordinate seed: LandsD Location Search API (Yuen Long Station)"
     }
-  }
+  },
+  "unresolved": [],
+  "generated_at": "2026-05-04T08:44:18Z"
 }

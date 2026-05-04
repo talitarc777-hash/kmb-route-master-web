@@ -1,4 +1,1367 @@
 {
-  "_comment": "Manual fallback seed for Light Rail stop WGS84 coordinates. Prefer official/open-source coordinates first; use this file only for explicitly reviewed stop-level overrides.",
-  "stops": {}
+  "_comment": "Offline WGS84 seed for Light Rail stop coordinates. Generated from MTR Light Rail CSV names matched against the official LandsD Location Search API; keys include stop_id and stop_code where available.",
+  "stops": {
+    "001": {
+      "stop_code": "FEP",
+      "name_tc": "屯門碼頭輕鐵站",
+      "name_en": "LR Tuen Mun Ferry Pier Light Rail Stop",
+      "lat": 22.372707101,
+      "lng": 113.967116923,
+      "grid_easting": 814665.0,
+      "grid_northing": 825962.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Ferry Pier Light Rail Stop)"
+    },
+    "010": {
+      "stop_code": "MEG",
+      "name_tc": "美樂輕鐵站",
+      "name_en": "LR Melody Garden Light Rail Stop",
+      "lat": 22.375047136,
+      "lng": 113.961112777,
+      "grid_easting": 814047.0,
+      "grid_northing": 826222.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Melody Garden Light Rail Stop)"
+    },
+    "015": {
+      "stop_code": "BUT",
+      "name_tc": "蝴蝶輕鐵站",
+      "name_en": "LR Butterfly Light Rail Stop",
+      "lat": 22.378172414,
+      "lng": 113.961661429,
+      "grid_easting": 814104.0,
+      "grid_northing": 826568.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Butterfly Light Rail Stop)"
+    },
+    "020": {
+      "stop_code": "LRD",
+      "name_tc": "輕鐵車廠輕鐵站",
+      "name_en": "LR Light Rail Depot",
+      "lat": 22.381805001,
+      "lng": 113.963423108,
+      "grid_easting": 814286.0,
+      "grid_northing": 826970.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Light Rail Depot Light Rail Stop)"
+    },
+    "030": {
+      "stop_code": "LUM",
+      "name_tc": "龍門輕鐵站",
+      "name_en": "LR Lung Mun Light Rail Stop",
+      "lat": 22.385256691,
+      "lng": 113.964981231,
+      "grid_easting": 814447.0,
+      "grid_northing": 827352.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Lung Mun Light Rail Stop)"
+    },
+    "040": {
+      "stop_code": "TSS",
+      "name_tc": "青山村輕鐵站",
+      "name_en": "LR Tsing Shan Tsuen Light Rail Stop",
+      "lat": 22.390397616,
+      "lng": 113.966964167,
+      "grid_easting": 814652.0,
+      "grid_northing": 827921.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tsing Shan Tsuen Light Rail Stop)"
+    },
+    "050": {
+      "stop_code": "TWN",
+      "name_tc": "青雲輕鐵站",
+      "name_en": "LR Tsing Wun Light Rail Stop",
+      "lat": 22.394344502,
+      "lng": 113.967404956,
+      "grid_easting": 814698.0,
+      "grid_northing": 828358.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tsing Wun Light Rail Stop)"
+    },
+    "060": {
+      "stop_code": "KIO",
+      "name_tc": "建安輕鐵站",
+      "name_en": "LR Kin On Light Rail Stop",
+      "lat": 22.395132081,
+      "lng": 113.968899296,
+      "grid_easting": 814852.0,
+      "grid_northing": 828445.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Kin On Light Rail Stop)"
+    },
+    "070": {
+      "stop_code": "HOT",
+      "name_tc": "河田輕鐵站",
+      "name_en": "LR Ho Tin Light Rail Stop",
+      "lat": 22.397377022,
+      "lng": 113.973130097,
+      "grid_easting": 815288.0,
+      "grid_northing": 828693.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ho Tin Light Rail Stop)"
+    },
+    "075": {
+      "stop_code": "CYB",
+      "name_tc": "蔡意橋輕鐵站",
+      "name_en": "LR Choy Yee Bridge Light Rail Stop",
+      "lat": 22.399933945,
+      "lng": 113.974165502,
+      "grid_easting": 815395.0,
+      "grid_northing": 828976.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Choy Yee Bridge Light Rail Stop)"
+    },
+    "080": {
+      "stop_code": "AFF",
+      "name_tc": "澤豐輕鐵站",
+      "name_en": "LR Affluence Light Rail Stop",
+      "lat": 22.403494098,
+      "lng": 113.975889033,
+      "grid_easting": 815573.0,
+      "grid_northing": 829370.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Affluence Light Rail Stop)"
+    },
+    "090": {
+      "stop_code": "TMH",
+      "name_tc": "屯門醫院輕鐵站",
+      "name_en": "LR Tuen Mun Hospital Light Rail Stop",
+      "lat": 22.407767062,
+      "lng": 113.977145456,
+      "grid_easting": 815703.0,
+      "grid_northing": 829843.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Hospital Light Rail Stop)"
+    },
+    "100": {
+      "stop_code": "SHL",
+      "name_tc": "兆康輕鐵站",
+      "name_en": "LR Siu Hong Light Rail Stop",
+      "lat": 22.411904331,
+      "lng": 113.978217613,
+      "grid_easting": 815814.0,
+      "grid_northing": 830301.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Siu Hong Light Rail Stop)"
+    },
+    "110": {
+      "stop_code": "KEL",
+      "name_tc": "麒麟輕鐵站",
+      "name_en": "LR Kei Lun Light Rail Stop",
+      "lat": 22.410971882,
+      "lng": 113.97634447,
+      "grid_easting": 815621.0,
+      "grid_northing": 830198.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Kei Lun Light Rail Stop)"
+    },
+    "120": {
+      "stop_code": "CHC",
+      "name_tc": "青松輕鐵站",
+      "name_en": "LR Ching Chung Light Rail Stop",
+      "lat": 22.407291702,
+      "lng": 113.972523215,
+      "grid_easting": 815227.0,
+      "grid_northing": 829791.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ching Chung Light Rail Stop)"
+    },
+    "130": {
+      "stop_code": "KIS",
+      "name_tc": "建生輕鐵站",
+      "name_en": "LR Kin Sang Light Rail Stop",
+      "lat": 22.406727558,
+      "lng": 113.96918312,
+      "grid_easting": 814883.0,
+      "grid_northing": 829729.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Kin Sang Light Rail Stop)"
+    },
+    "140": {
+      "stop_code": "TNK",
+      "name_tc": "田景輕鐵站",
+      "name_en": "LR Tin King Light Rail Stop",
+      "lat": 22.407708321,
+      "lng": 113.966433154,
+      "grid_easting": 814600.0,
+      "grid_northing": 829838.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin King Light Rail Stop)"
+    },
+    "150": {
+      "stop_code": "LEK",
+      "name_tc": "良景輕鐵站",
+      "name_en": "LR Leung King Light Rail Stop",
+      "lat": 22.406693234,
+      "lng": 113.963627922,
+      "grid_easting": 814311.0,
+      "grid_northing": 829726.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Leung King Light Rail Stop)"
+    },
+    "160": {
+      "stop_code": "SAW",
+      "name_tc": "新圍輕鐵站",
+      "name_en": "LR San Wai Light Rail Stop",
+      "lat": 22.405294553,
+      "lng": 113.964416718,
+      "grid_easting": 814392.0,
+      "grid_northing": 829571.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR San Wai Light Rail Stop)"
+    },
+    "170": {
+      "stop_code": "SHP",
+      "name_tc": "石排輕鐵站",
+      "name_en": "LR Shek Pai Light Rail Stop",
+      "lat": 22.401379597,
+      "lng": 113.967685766,
+      "grid_easting": 814728.0,
+      "grid_northing": 829137.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shek Pai Light Rail Stop)"
+    },
+    "180": {
+      "stop_code": "SKN",
+      "name_tc": "山景(北)輕鐵站",
+      "name_en": "LR Shan King (North) Light Rail Stop",
+      "lat": 22.39850653,
+      "lng": 113.96662181,
+      "grid_easting": 814618.0,
+      "grid_northing": 828819.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shan King (North) Light Rail Stop)"
+    },
+    "190": {
+      "stop_code": "SKS",
+      "name_tc": "山景(南)輕鐵站",
+      "name_en": "LR Shan King (South) Light Rail Stop",
+      "lat": 22.396618333,
+      "lng": 113.965983704,
+      "grid_easting": 814552.0,
+      "grid_northing": 828610.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shan King (South) Light Rail Stop)"
+    },
+    "200": {
+      "stop_code": "MIK",
+      "name_tc": "鳴琴輕鐵站",
+      "name_en": "LR Ming Kum Light Rail Stop",
+      "lat": 22.397062592,
+      "lng": 113.967342617,
+      "grid_easting": 814692.0,
+      "grid_northing": 828659.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ming Kum Light Rail Stop)"
+    },
+    "212": {
+      "stop_code": "THN",
+      "name_tc": "大興(北)輕鐵站",
+      "name_en": "LR Tai Hing (North) Light Rail Stop",
+      "lat": 22.404597395,
+      "lng": 113.969982654,
+      "grid_easting": 814965.0,
+      "grid_northing": 829493.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tai Hing (North) Light Rail Stop)"
+    },
+    "220": {
+      "stop_code": "THS",
+      "name_tc": "大興(南)輕鐵站",
+      "name_en": "LR Tai Hing (South) Light Rail Stop",
+      "lat": 22.402667403,
+      "lng": 113.971966696,
+      "grid_easting": 815169.0,
+      "grid_northing": 829279.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tai Hing (South) Light Rail Stop)"
+    },
+    "230": {
+      "stop_code": "NGW",
+      "name_tc": "銀圍輕鐵站",
+      "name_en": "LR Ngan Wai Light Rail Stop",
+      "lat": 22.402391077,
+      "lng": 113.974841757,
+      "grid_easting": 815465.0,
+      "grid_northing": 829248.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ngan Wai Light Rail Stop)"
+    },
+    "240": {
+      "stop_code": "SHE",
+      "name_tc": "兆禧輕鐵站",
+      "name_en": "LR Siu Hei Light Rail Stop",
+      "lat": 22.375244387,
+      "lng": 113.966899507,
+      "grid_easting": 814643.0,
+      "grid_northing": 826243.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Siu Hei Light Rail Stop)"
+    },
+    "250": {
+      "stop_code": "TSP",
+      "name_tc": "屯門泳池輕鐵站",
+      "name_en": "LR Tuen Mun Swimming Pool Light Rail Stop",
+      "lat": 22.381163866,
+      "lng": 113.97040572,
+      "grid_easting": 815005.0,
+      "grid_northing": 826898.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Swimming Pool Light Rail Stop)"
+    },
+    "260": {
+      "stop_code": "GOG",
+      "name_tc": "豐景園輕鐵站",
+      "name_en": "LR Goodview Garden Light Rail Stop",
+      "lat": 22.38327124,
+      "lng": 113.972985563,
+      "grid_easting": 815271.0,
+      "grid_northing": 827131.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Goodview Garden Light Rail Stop)"
+    },
+    "265": {
+      "stop_code": "SIL",
+      "name_tc": "兆麟輕鐵站",
+      "name_en": "LR Siu Lun Light Rail Stop",
+      "lat": 22.384556207,
+      "lng": 113.975090856,
+      "grid_easting": 815488.0,
+      "grid_northing": 827273.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Siu Lun Light Rail Stop)"
+    },
+    "270": {
+      "stop_code": "ONT",
+      "name_tc": "安定輕鐵站",
+      "name_en": "LR On Ting Light Rail Stop",
+      "lat": 22.387644601,
+      "lng": 113.975066981,
+      "grid_easting": 815486.0,
+      "grid_northing": 827615.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR On Ting Light Rail Stop)"
+    },
+    "275": {
+      "stop_code": "YAO",
+      "name_tc": "友愛輕鐵站",
+      "name_en": "LR Yau Oi Light Rail Stop",
+      "lat": 22.386721561,
+      "lng": 113.973524329,
+      "grid_easting": 815327.0,
+      "grid_northing": 827513.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Yau Oi Light Rail Stop)"
+    },
+    "280": {
+      "stop_code": "TOC",
+      "name_tc": "市中心輕鐵站",
+      "name_en": "LR Town Centre Light Rail Stop",
+      "lat": 22.391364932,
+      "lng": 113.974886818,
+      "grid_easting": 815468.0,
+      "grid_northing": 828027.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Town Centre Light Rail Stop)"
+    },
+    "295": {
+      "stop_code": "TML",
+      "name_tc": "屯門輕鐵站",
+      "name_en": "LR Tuen Mun Light Rail Stop",
+      "lat": 22.393719909,
+      "lng": 113.973310223,
+      "grid_easting": 815306.0,
+      "grid_northing": 828288.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Light Rail Stop)"
+    },
+    "300": {
+      "stop_code": "PUT",
+      "name_tc": "杯渡輕鐵站",
+      "name_en": "LR Pui To Light Rail Stop",
+      "lat": 22.394609256,
+      "lng": 113.976804938,
+      "grid_easting": 815666.0,
+      "grid_northing": 828386.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Pui To Light Rail Stop)"
+    },
+    "310": {
+      "stop_code": "HFT",
+      "name_tc": "何福堂輕鐵站",
+      "name_en": "LR Hoh Fuk Tong Light Rail Stop",
+      "lat": 22.397373318,
+      "lng": 113.977403087,
+      "grid_easting": 815728.0,
+      "grid_northing": 828692.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hoh Fuk Tong Light Rail Stop)"
+    },
+    "320": {
+      "stop_code": "SAH",
+      "name_tc": "新墟輕鐵站",
+      "name_en": "LR San Hui Light Rail Stop",
+      "lat": 22.400218699,
+      "lng": 113.978039989,
+      "grid_easting": 815794.0,
+      "grid_northing": 829007.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR San Hui Light Rail Stop)"
+    },
+    "330": {
+      "stop_code": "PRV",
+      "name_tc": "景峰輕鐵站",
+      "name_en": "LR Prime View Light Rail Stop",
+      "lat": 22.4031283,
+      "lng": 113.979502322,
+      "grid_easting": 815945.0,
+      "grid_northing": 829329.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Prime View Light Rail Stop)"
+    },
+    "340": {
+      "stop_code": "FUT",
+      "name_tc": "鳳地輕鐵站",
+      "name_en": "LR Fung Tei Light Rail Stop",
+      "lat": 22.406739552,
+      "lng": 113.978739689,
+      "grid_easting": 815867.0,
+      "grid_northing": 829729.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Fung Tei Light Rail Stop)"
+    },
+    "350": {
+      "stop_code": "LTE",
+      "name_tc": "藍地輕鐵站",
+      "name_en": "LR Lam Tei Light Rail Stop",
+      "lat": 22.418500714,
+      "lng": 113.98162714,
+      "grid_easting": 816166.0,
+      "grid_northing": 831031.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Lam Tei Light Rail Stop)"
+    },
+    "360": {
+      "stop_code": "NAW",
+      "name_tc": "泥圍輕鐵站",
+      "name_en": "LR Nai Wai Light Rail Stop",
+      "lat": 22.42365367,
+      "lng": 113.986321106,
+      "grid_easting": 816650.0,
+      "grid_northing": 831601.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Nai Wai Light Rail Stop)"
+    },
+    "370": {
+      "stop_code": "CUT",
+      "name_tc": "鍾屋村輕鐵站",
+      "name_en": "LR Chung Uk Tsuen Light Rail Stop",
+      "lat": 22.429656742,
+      "lng": 113.992228484,
+      "grid_easting": 817259.0,
+      "grid_northing": 832265.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Chung Uk Tsuen Light Rail Stop)"
+    },
+    "380": {
+      "stop_code": "HSK",
+      "name_tc": "洪水橋輕鐵站",
+      "name_en": "LR Hung Shui Kiu Light Rail Stop",
+      "lat": 22.43364495,
+      "lng": 113.99736184,
+      "grid_easting": 817788.0,
+      "grid_northing": 832706.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hung Shui Kiu Light Rail Stop)"
+    },
+    "390": {
+      "stop_code": "TOF",
+      "name_tc": "塘坊村輕鐵站",
+      "name_en": "LR Tong Fong Tsuen Light Rail Stop",
+      "lat": 22.440112176,
+      "lng": 114.007038691,
+      "grid_easting": 818785.0,
+      "grid_northing": 833421.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tong Fong Tsuen Light Rail Stop)"
+    },
+    "400": {
+      "stop_code": "PIS",
+      "name_tc": "屏山輕鐵站",
+      "name_en": "LR Ping Shan Light Rail Stop",
+      "lat": 22.442817167,
+      "lng": 114.011756647,
+      "grid_easting": 819271.0,
+      "grid_northing": 833720.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ping Shan Light Rail Stop)"
+    },
+    "425": {
+      "stop_code": "HMT",
+      "name_tc": "坑尾村輕鐵站",
+      "name_en": "LR Hang Mei Tsuen Light Rail Stop",
+      "lat": 22.445086344,
+      "lng": 114.005526864,
+      "grid_easting": 818630.0,
+      "grid_northing": 833972.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hang Mei Tsuen Light Rail Stop)"
+    },
+    "430": {
+      "stop_code": "TSL",
+      "name_tc": "天水圍輕鐵站",
+      "name_en": "LR Tin Shui Wai Light Rail Stop",
+      "lat": 22.449448496,
+      "lng": 114.00595868,
+      "grid_easting": 818675.0,
+      "grid_northing": 834455.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Shui Wai Light Rail Stop)"
+    },
+    "435": {
+      "stop_code": "TIT",
+      "name_tc": "天慈輕鐵站",
+      "name_en": "LR Tin Tsz Light Rail Stop",
+      "lat": 22.452699515,
+      "lng": 114.006022702,
+      "grid_easting": 818682.0,
+      "grid_northing": 834815.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Tsz Light Rail Stop)"
+    },
+    "445": {
+      "stop_code": "TIY",
+      "name_tc": "天耀輕鐵站",
+      "name_en": "LR Tin Yiu Light Rail Stop",
+      "lat": 22.450384149,
+      "lng": 114.002673854,
+      "grid_easting": 818337.0,
+      "grid_northing": 834559.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Yiu Light Rail Stop)"
+    },
+    "448": {
+      "stop_code": "LOC",
+      "name_tc": "樂湖輕鐵站",
+      "name_en": "LR Locwood Light Rail Stop",
+      "lat": 22.45303736,
+      "lng": 114.001077245,
+      "grid_easting": 818173.0,
+      "grid_northing": 834853.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Locwood Light Rail Stop)"
+    },
+    "450": {
+      "stop_code": "TWU",
+      "name_tc": "天湖輕鐵站",
+      "name_en": "LR Tin Wu Light Rail Stop",
+      "lat": 22.45499297,
+      "lng": 114.005767294,
+      "grid_easting": 818656.0,
+      "grid_northing": 835069.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Wu Light Rail Stop)"
+    },
+    "455": {
+      "stop_code": "GIN",
+      "name_tc": "銀座輕鐵站",
+      "name_en": "LR Ginza Light Rail Stop",
+      "lat": 22.457556674,
+      "lng": 114.00488975,
+      "grid_easting": 818566.0,
+      "grid_northing": 835353.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ginza Light Rail Stop)"
+    },
+    "460": {
+      "stop_code": "TSU",
+      "name_tc": "天瑞輕鐵站",
+      "name_en": "LR Tin Shui Light Rail Stop",
+      "lat": 22.455916261,
+      "lng": 113.999431711,
+      "grid_easting": 818004.0,
+      "grid_northing": 835172.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Shui Light Rail Stop)"
+    },
+    "468": {
+      "stop_code": "CHF",
+      "name_tc": "頌富輕鐵站",
+      "name_en": "LR Chung Fu Light Rail Stop",
+      "lat": 22.462027106,
+      "lng": 113.996956111,
+      "grid_easting": 817750.0,
+      "grid_northing": 835849.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Chung Fu Light Rail Stop)"
+    },
+    "480": {
+      "stop_code": "TFU",
+      "name_tc": "天富輕鐵站",
+      "name_en": "LR Tin Fu Light Rail Stop",
+      "lat": 22.464538387,
+      "lng": 113.997701003,
+      "grid_easting": 817827.0,
+      "grid_northing": 836127.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Fu Light Rail Stop)"
+    },
+    "490": {
+      "stop_code": "CHE",
+      "name_tc": "翠湖輕鐵站",
+      "name_en": "LR Chestwood Light Rail Stop",
+      "lat": 22.459718176,
+      "lng": 113.999533745,
+      "grid_easting": 818015.0,
+      "grid_northing": 835593.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Chestwood Light Rail Stop)"
+    },
+    "500": {
+      "stop_code": "TWI",
+      "name_tc": "天榮輕鐵站",
+      "name_en": "LR Tin Wing Light Rail Stop",
+      "lat": 22.459531882,
+      "lng": 114.002604132,
+      "grid_easting": 818331.0,
+      "grid_northing": 835572.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Wing Light Rail Stop)"
+    },
+    "510": {
+      "stop_code": "TYU",
+      "name_tc": "天悅輕鐵站",
+      "name_en": "LR Tin Yuet Light Rail Stop",
+      "lat": 22.462817819,
+      "lng": 114.001560424,
+      "grid_easting": 818224.0,
+      "grid_northing": 835936.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Yuet Light Rail Stop)"
+    },
+    "520": {
+      "stop_code": "TSA",
+      "name_tc": "天秀輕鐵站",
+      "name_en": "LR Tin Sau Light Rail Stop",
+      "lat": 22.465546522,
+      "lng": 114.002965824,
+      "grid_easting": 818369.0,
+      "grid_northing": 836238.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Sau Light Rail Stop)"
+    },
+    "530": {
+      "stop_code": "WEP",
+      "name_tc": "濕地公園輕鐵站",
+      "name_en": "LR Wetland Park Light Rail Stop",
+      "lat": 22.46960062,
+      "lng": 114.002455514,
+      "grid_easting": 818317.0,
+      "grid_northing": 836687.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Wetland Park Light Rail Stop)"
+    },
+    "540": {
+      "stop_code": "THE",
+      "name_tc": "天恒輕鐵站",
+      "name_en": "LR Tin Heng Light Rail Stop",
+      "lat": 22.469661996,
+      "lng": 114.000764788,
+      "grid_easting": 818143.0,
+      "grid_northing": 836694.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Heng Light Rail Stop)"
+    },
+    "550": {
+      "stop_code": "TYA",
+      "name_tc": "天逸輕鐵站",
+      "name_en": "LR Tin Yat Light Rail Stop",
+      "lat": 22.466968819,
+      "lng": 113.998834672,
+      "grid_easting": 817944.0,
+      "grid_northing": 836396.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Yat Light Rail Stop)"
+    },
+    "560": {
+      "stop_code": "SPW",
+      "name_tc": "水邊圍輕鐵站",
+      "name_en": "LR Shui Pin Wai Light Rail Stop",
+      "lat": 22.44446033,
+      "lng": 114.020449287,
+      "grid_easting": 820166.0,
+      "grid_northing": 833901.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shui Pin Wai Light Rail Stop)"
+    },
+    "570": {
+      "stop_code": "FNR",
+      "name_tc": "豐年路輕鐵站",
+      "name_en": "LR Fung Nin Road Light Rail Stop",
+      "lat": 22.444472665,
+      "lng": 114.023897964,
+      "grid_easting": 820521.0,
+      "grid_northing": 833902.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Fung Nin Road Light Rail Stop)"
+    },
+    "580": {
+      "stop_code": "HLR",
+      "name_tc": "康樂路輕鐵站",
+      "name_en": "LR Hong Lok Road Light Rail Stop",
+      "lat": 22.444547453,
+      "lng": 114.026608264,
+      "grid_easting": 820800.0,
+      "grid_northing": 833910.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hong Lok Road Light Rail Stop)"
+    },
+    "590": {
+      "stop_code": "TTR",
+      "name_tc": "大棠路輕鐵站",
+      "name_en": "LR Tai Tong Road Light Rail Stop",
+      "lat": 22.444522541,
+      "lng": 114.028968945,
+      "grid_easting": 821043.0,
+      "grid_northing": 833907.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tai Tong Road Light Rail Stop)"
+    },
+    "600": {
+      "stop_code": "YLL",
+      "name_tc": "元朗輕鐵站",
+      "name_en": "LR Yuen Long Light Rail Stop",
+      "lat": 22.445719415,
+      "lng": 114.034369056,
+      "grid_easting": 821599.0,
+      "grid_northing": 834039.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Yuen Long Light Rail Stop)"
+    },
+    "920": {
+      "stop_code": "SAS",
+      "name_tc": "三聖輕鐵站",
+      "name_en": "LR Sam Shing Light Rail Stop",
+      "lat": 22.382896795,
+      "lng": 113.976860528,
+      "grid_easting": 815670.0,
+      "grid_northing": 827089.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Sam Shing Light Rail Stop)"
+    },
+    "AFF": {
+      "stop_code": "AFF",
+      "name_tc": "澤豐輕鐵站",
+      "name_en": "LR Affluence Light Rail Stop",
+      "lat": 22.403494098,
+      "lng": 113.975889033,
+      "grid_easting": 815573.0,
+      "grid_northing": 829370.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Affluence Light Rail Stop)"
+    },
+    "BUT": {
+      "stop_code": "BUT",
+      "name_tc": "蝴蝶輕鐵站",
+      "name_en": "LR Butterfly Light Rail Stop",
+      "lat": 22.378172414,
+      "lng": 113.961661429,
+      "grid_easting": 814104.0,
+      "grid_northing": 826568.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Butterfly Light Rail Stop)"
+    },
+    "CHC": {
+      "stop_code": "CHC",
+      "name_tc": "青松輕鐵站",
+      "name_en": "LR Ching Chung Light Rail Stop",
+      "lat": 22.407291702,
+      "lng": 113.972523215,
+      "grid_easting": 815227.0,
+      "grid_northing": 829791.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ching Chung Light Rail Stop)"
+    },
+    "CHE": {
+      "stop_code": "CHE",
+      "name_tc": "翠湖輕鐵站",
+      "name_en": "LR Chestwood Light Rail Stop",
+      "lat": 22.459718176,
+      "lng": 113.999533745,
+      "grid_easting": 818015.0,
+      "grid_northing": 835593.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Chestwood Light Rail Stop)"
+    },
+    "CHF": {
+      "stop_code": "CHF",
+      "name_tc": "頌富輕鐵站",
+      "name_en": "LR Chung Fu Light Rail Stop",
+      "lat": 22.462027106,
+      "lng": 113.996956111,
+      "grid_easting": 817750.0,
+      "grid_northing": 835849.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Chung Fu Light Rail Stop)"
+    },
+    "CUT": {
+      "stop_code": "CUT",
+      "name_tc": "鍾屋村輕鐵站",
+      "name_en": "LR Chung Uk Tsuen Light Rail Stop",
+      "lat": 22.429656742,
+      "lng": 113.992228484,
+      "grid_easting": 817259.0,
+      "grid_northing": 832265.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Chung Uk Tsuen Light Rail Stop)"
+    },
+    "CYB": {
+      "stop_code": "CYB",
+      "name_tc": "蔡意橋輕鐵站",
+      "name_en": "LR Choy Yee Bridge Light Rail Stop",
+      "lat": 22.399933945,
+      "lng": 113.974165502,
+      "grid_easting": 815395.0,
+      "grid_northing": 828976.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Choy Yee Bridge Light Rail Stop)"
+    },
+    "FEP": {
+      "stop_code": "FEP",
+      "name_tc": "屯門碼頭輕鐵站",
+      "name_en": "LR Tuen Mun Ferry Pier Light Rail Stop",
+      "lat": 22.372707101,
+      "lng": 113.967116923,
+      "grid_easting": 814665.0,
+      "grid_northing": 825962.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Ferry Pier Light Rail Stop)"
+    },
+    "FNR": {
+      "stop_code": "FNR",
+      "name_tc": "豐年路輕鐵站",
+      "name_en": "LR Fung Nin Road Light Rail Stop",
+      "lat": 22.444472665,
+      "lng": 114.023897964,
+      "grid_easting": 820521.0,
+      "grid_northing": 833902.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Fung Nin Road Light Rail Stop)"
+    },
+    "FUT": {
+      "stop_code": "FUT",
+      "name_tc": "鳳地輕鐵站",
+      "name_en": "LR Fung Tei Light Rail Stop",
+      "lat": 22.406739552,
+      "lng": 113.978739689,
+      "grid_easting": 815867.0,
+      "grid_northing": 829729.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Fung Tei Light Rail Stop)"
+    },
+    "GIN": {
+      "stop_code": "GIN",
+      "name_tc": "銀座輕鐵站",
+      "name_en": "LR Ginza Light Rail Stop",
+      "lat": 22.457556674,
+      "lng": 114.00488975,
+      "grid_easting": 818566.0,
+      "grid_northing": 835353.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ginza Light Rail Stop)"
+    },
+    "GOG": {
+      "stop_code": "GOG",
+      "name_tc": "豐景園輕鐵站",
+      "name_en": "LR Goodview Garden Light Rail Stop",
+      "lat": 22.38327124,
+      "lng": 113.972985563,
+      "grid_easting": 815271.0,
+      "grid_northing": 827131.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Goodview Garden Light Rail Stop)"
+    },
+    "HFT": {
+      "stop_code": "HFT",
+      "name_tc": "何福堂輕鐵站",
+      "name_en": "LR Hoh Fuk Tong Light Rail Stop",
+      "lat": 22.397373318,
+      "lng": 113.977403087,
+      "grid_easting": 815728.0,
+      "grid_northing": 828692.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hoh Fuk Tong Light Rail Stop)"
+    },
+    "HLR": {
+      "stop_code": "HLR",
+      "name_tc": "康樂路輕鐵站",
+      "name_en": "LR Hong Lok Road Light Rail Stop",
+      "lat": 22.444547453,
+      "lng": 114.026608264,
+      "grid_easting": 820800.0,
+      "grid_northing": 833910.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hong Lok Road Light Rail Stop)"
+    },
+    "HMT": {
+      "stop_code": "HMT",
+      "name_tc": "坑尾村輕鐵站",
+      "name_en": "LR Hang Mei Tsuen Light Rail Stop",
+      "lat": 22.445086344,
+      "lng": 114.005526864,
+      "grid_easting": 818630.0,
+      "grid_northing": 833972.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hang Mei Tsuen Light Rail Stop)"
+    },
+    "HOT": {
+      "stop_code": "HOT",
+      "name_tc": "河田輕鐵站",
+      "name_en": "LR Ho Tin Light Rail Stop",
+      "lat": 22.397377022,
+      "lng": 113.973130097,
+      "grid_easting": 815288.0,
+      "grid_northing": 828693.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ho Tin Light Rail Stop)"
+    },
+    "HSK": {
+      "stop_code": "HSK",
+      "name_tc": "洪水橋輕鐵站",
+      "name_en": "LR Hung Shui Kiu Light Rail Stop",
+      "lat": 22.43364495,
+      "lng": 113.99736184,
+      "grid_easting": 817788.0,
+      "grid_northing": 832706.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Hung Shui Kiu Light Rail Stop)"
+    },
+    "KEL": {
+      "stop_code": "KEL",
+      "name_tc": "麒麟輕鐵站",
+      "name_en": "LR Kei Lun Light Rail Stop",
+      "lat": 22.410971882,
+      "lng": 113.97634447,
+      "grid_easting": 815621.0,
+      "grid_northing": 830198.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Kei Lun Light Rail Stop)"
+    },
+    "KIO": {
+      "stop_code": "KIO",
+      "name_tc": "建安輕鐵站",
+      "name_en": "LR Kin On Light Rail Stop",
+      "lat": 22.395132081,
+      "lng": 113.968899296,
+      "grid_easting": 814852.0,
+      "grid_northing": 828445.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Kin On Light Rail Stop)"
+    },
+    "KIS": {
+      "stop_code": "KIS",
+      "name_tc": "建生輕鐵站",
+      "name_en": "LR Kin Sang Light Rail Stop",
+      "lat": 22.406727558,
+      "lng": 113.96918312,
+      "grid_easting": 814883.0,
+      "grid_northing": 829729.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Kin Sang Light Rail Stop)"
+    },
+    "LEK": {
+      "stop_code": "LEK",
+      "name_tc": "良景輕鐵站",
+      "name_en": "LR Leung King Light Rail Stop",
+      "lat": 22.406693234,
+      "lng": 113.963627922,
+      "grid_easting": 814311.0,
+      "grid_northing": 829726.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Leung King Light Rail Stop)"
+    },
+    "LOC": {
+      "stop_code": "LOC",
+      "name_tc": "樂湖輕鐵站",
+      "name_en": "LR Locwood Light Rail Stop",
+      "lat": 22.45303736,
+      "lng": 114.001077245,
+      "grid_easting": 818173.0,
+      "grid_northing": 834853.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Locwood Light Rail Stop)"
+    },
+    "LRD": {
+      "stop_code": "LRD",
+      "name_tc": "輕鐵車廠輕鐵站",
+      "name_en": "LR Light Rail Depot",
+      "lat": 22.381805001,
+      "lng": 113.963423108,
+      "grid_easting": 814286.0,
+      "grid_northing": 826970.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Light Rail Depot Light Rail Stop)"
+    },
+    "LTE": {
+      "stop_code": "LTE",
+      "name_tc": "藍地輕鐵站",
+      "name_en": "LR Lam Tei Light Rail Stop",
+      "lat": 22.418500714,
+      "lng": 113.98162714,
+      "grid_easting": 816166.0,
+      "grid_northing": 831031.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Lam Tei Light Rail Stop)"
+    },
+    "LUM": {
+      "stop_code": "LUM",
+      "name_tc": "龍門輕鐵站",
+      "name_en": "LR Lung Mun Light Rail Stop",
+      "lat": 22.385256691,
+      "lng": 113.964981231,
+      "grid_easting": 814447.0,
+      "grid_northing": 827352.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Lung Mun Light Rail Stop)"
+    },
+    "MEG": {
+      "stop_code": "MEG",
+      "name_tc": "美樂輕鐵站",
+      "name_en": "LR Melody Garden Light Rail Stop",
+      "lat": 22.375047136,
+      "lng": 113.961112777,
+      "grid_easting": 814047.0,
+      "grid_northing": 826222.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Melody Garden Light Rail Stop)"
+    },
+    "MIK": {
+      "stop_code": "MIK",
+      "name_tc": "鳴琴輕鐵站",
+      "name_en": "LR Ming Kum Light Rail Stop",
+      "lat": 22.397062592,
+      "lng": 113.967342617,
+      "grid_easting": 814692.0,
+      "grid_northing": 828659.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ming Kum Light Rail Stop)"
+    },
+    "NAW": {
+      "stop_code": "NAW",
+      "name_tc": "泥圍輕鐵站",
+      "name_en": "LR Nai Wai Light Rail Stop",
+      "lat": 22.42365367,
+      "lng": 113.986321106,
+      "grid_easting": 816650.0,
+      "grid_northing": 831601.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Nai Wai Light Rail Stop)"
+    },
+    "NGW": {
+      "stop_code": "NGW",
+      "name_tc": "銀圍輕鐵站",
+      "name_en": "LR Ngan Wai Light Rail Stop",
+      "lat": 22.402391077,
+      "lng": 113.974841757,
+      "grid_easting": 815465.0,
+      "grid_northing": 829248.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ngan Wai Light Rail Stop)"
+    },
+    "ONT": {
+      "stop_code": "ONT",
+      "name_tc": "安定輕鐵站",
+      "name_en": "LR On Ting Light Rail Stop",
+      "lat": 22.387644601,
+      "lng": 113.975066981,
+      "grid_easting": 815486.0,
+      "grid_northing": 827615.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR On Ting Light Rail Stop)"
+    },
+    "PIS": {
+      "stop_code": "PIS",
+      "name_tc": "屏山輕鐵站",
+      "name_en": "LR Ping Shan Light Rail Stop",
+      "lat": 22.442817167,
+      "lng": 114.011756647,
+      "grid_easting": 819271.0,
+      "grid_northing": 833720.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Ping Shan Light Rail Stop)"
+    },
+    "PRV": {
+      "stop_code": "PRV",
+      "name_tc": "景峰輕鐵站",
+      "name_en": "LR Prime View Light Rail Stop",
+      "lat": 22.4031283,
+      "lng": 113.979502322,
+      "grid_easting": 815945.0,
+      "grid_northing": 829329.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Prime View Light Rail Stop)"
+    },
+    "PUT": {
+      "stop_code": "PUT",
+      "name_tc": "杯渡輕鐵站",
+      "name_en": "LR Pui To Light Rail Stop",
+      "lat": 22.394609256,
+      "lng": 113.976804938,
+      "grid_easting": 815666.0,
+      "grid_northing": 828386.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Pui To Light Rail Stop)"
+    },
+    "SAH": {
+      "stop_code": "SAH",
+      "name_tc": "新墟輕鐵站",
+      "name_en": "LR San Hui Light Rail Stop",
+      "lat": 22.400218699,
+      "lng": 113.978039989,
+      "grid_easting": 815794.0,
+      "grid_northing": 829007.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR San Hui Light Rail Stop)"
+    },
+    "SAS": {
+      "stop_code": "SAS",
+      "name_tc": "三聖輕鐵站",
+      "name_en": "LR Sam Shing Light Rail Stop",
+      "lat": 22.382896795,
+      "lng": 113.976860528,
+      "grid_easting": 815670.0,
+      "grid_northing": 827089.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Sam Shing Light Rail Stop)"
+    },
+    "SAW": {
+      "stop_code": "SAW",
+      "name_tc": "新圍輕鐵站",
+      "name_en": "LR San Wai Light Rail Stop",
+      "lat": 22.405294553,
+      "lng": 113.964416718,
+      "grid_easting": 814392.0,
+      "grid_northing": 829571.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR San Wai Light Rail Stop)"
+    },
+    "SHE": {
+      "stop_code": "SHE",
+      "name_tc": "兆禧輕鐵站",
+      "name_en": "LR Siu Hei Light Rail Stop",
+      "lat": 22.375244387,
+      "lng": 113.966899507,
+      "grid_easting": 814643.0,
+      "grid_northing": 826243.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Siu Hei Light Rail Stop)"
+    },
+    "SHL": {
+      "stop_code": "SHL",
+      "name_tc": "兆康輕鐵站",
+      "name_en": "LR Siu Hong Light Rail Stop",
+      "lat": 22.411904331,
+      "lng": 113.978217613,
+      "grid_easting": 815814.0,
+      "grid_northing": 830301.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Siu Hong Light Rail Stop)"
+    },
+    "SHP": {
+      "stop_code": "SHP",
+      "name_tc": "石排輕鐵站",
+      "name_en": "LR Shek Pai Light Rail Stop",
+      "lat": 22.401379597,
+      "lng": 113.967685766,
+      "grid_easting": 814728.0,
+      "grid_northing": 829137.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shek Pai Light Rail Stop)"
+    },
+    "SIL": {
+      "stop_code": "SIL",
+      "name_tc": "兆麟輕鐵站",
+      "name_en": "LR Siu Lun Light Rail Stop",
+      "lat": 22.384556207,
+      "lng": 113.975090856,
+      "grid_easting": 815488.0,
+      "grid_northing": 827273.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Siu Lun Light Rail Stop)"
+    },
+    "SKN": {
+      "stop_code": "SKN",
+      "name_tc": "山景(北)輕鐵站",
+      "name_en": "LR Shan King (North) Light Rail Stop",
+      "lat": 22.39850653,
+      "lng": 113.96662181,
+      "grid_easting": 814618.0,
+      "grid_northing": 828819.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shan King (North) Light Rail Stop)"
+    },
+    "SKS": {
+      "stop_code": "SKS",
+      "name_tc": "山景(南)輕鐵站",
+      "name_en": "LR Shan King (South) Light Rail Stop",
+      "lat": 22.396618333,
+      "lng": 113.965983704,
+      "grid_easting": 814552.0,
+      "grid_northing": 828610.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shan King (South) Light Rail Stop)"
+    },
+    "SPW": {
+      "stop_code": "SPW",
+      "name_tc": "水邊圍輕鐵站",
+      "name_en": "LR Shui Pin Wai Light Rail Stop",
+      "lat": 22.44446033,
+      "lng": 114.020449287,
+      "grid_easting": 820166.0,
+      "grid_northing": 833901.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Shui Pin Wai Light Rail Stop)"
+    },
+    "TFU": {
+      "stop_code": "TFU",
+      "name_tc": "天富輕鐵站",
+      "name_en": "LR Tin Fu Light Rail Stop",
+      "lat": 22.464538387,
+      "lng": 113.997701003,
+      "grid_easting": 817827.0,
+      "grid_northing": 836127.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Fu Light Rail Stop)"
+    },
+    "THE": {
+      "stop_code": "THE",
+      "name_tc": "天恒輕鐵站",
+      "name_en": "LR Tin Heng Light Rail Stop",
+      "lat": 22.469661996,
+      "lng": 114.000764788,
+      "grid_easting": 818143.0,
+      "grid_northing": 836694.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Heng Light Rail Stop)"
+    },
+    "THN": {
+      "stop_code": "THN",
+      "name_tc": "大興(北)輕鐵站",
+      "name_en": "LR Tai Hing (North) Light Rail Stop",
+      "lat": 22.404597395,
+      "lng": 113.969982654,
+      "grid_easting": 814965.0,
+      "grid_northing": 829493.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tai Hing (North) Light Rail Stop)"
+    },
+    "THS": {
+      "stop_code": "THS",
+      "name_tc": "大興(南)輕鐵站",
+      "name_en": "LR Tai Hing (South) Light Rail Stop",
+      "lat": 22.402667403,
+      "lng": 113.971966696,
+      "grid_easting": 815169.0,
+      "grid_northing": 829279.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tai Hing (South) Light Rail Stop)"
+    },
+    "TIT": {
+      "stop_code": "TIT",
+      "name_tc": "天慈輕鐵站",
+      "name_en": "LR Tin Tsz Light Rail Stop",
+      "lat": 22.452699515,
+      "lng": 114.006022702,
+      "grid_easting": 818682.0,
+      "grid_northing": 834815.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Tsz Light Rail Stop)"
+    },
+    "TIY": {
+      "stop_code": "TIY",
+      "name_tc": "天耀輕鐵站",
+      "name_en": "LR Tin Yiu Light Rail Stop",
+      "lat": 22.450384149,
+      "lng": 114.002673854,
+      "grid_easting": 818337.0,
+      "grid_northing": 834559.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Yiu Light Rail Stop)"
+    },
+    "TMH": {
+      "stop_code": "TMH",
+      "name_tc": "屯門醫院輕鐵站",
+      "name_en": "LR Tuen Mun Hospital Light Rail Stop",
+      "lat": 22.407767062,
+      "lng": 113.977145456,
+      "grid_easting": 815703.0,
+      "grid_northing": 829843.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Hospital Light Rail Stop)"
+    },
+    "TML": {
+      "stop_code": "TML",
+      "name_tc": "屯門輕鐵站",
+      "name_en": "LR Tuen Mun Light Rail Stop",
+      "lat": 22.393719909,
+      "lng": 113.973310223,
+      "grid_easting": 815306.0,
+      "grid_northing": 828288.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Light Rail Stop)"
+    },
+    "TNK": {
+      "stop_code": "TNK",
+      "name_tc": "田景輕鐵站",
+      "name_en": "LR Tin King Light Rail Stop",
+      "lat": 22.407708321,
+      "lng": 113.966433154,
+      "grid_easting": 814600.0,
+      "grid_northing": 829838.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin King Light Rail Stop)"
+    },
+    "TOC": {
+      "stop_code": "TOC",
+      "name_tc": "市中心輕鐵站",
+      "name_en": "LR Town Centre Light Rail Stop",
+      "lat": 22.391364932,
+      "lng": 113.974886818,
+      "grid_easting": 815468.0,
+      "grid_northing": 828027.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Town Centre Light Rail Stop)"
+    },
+    "TOF": {
+      "stop_code": "TOF",
+      "name_tc": "塘坊村輕鐵站",
+      "name_en": "LR Tong Fong Tsuen Light Rail Stop",
+      "lat": 22.440112176,
+      "lng": 114.007038691,
+      "grid_easting": 818785.0,
+      "grid_northing": 833421.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tong Fong Tsuen Light Rail Stop)"
+    },
+    "TSA": {
+      "stop_code": "TSA",
+      "name_tc": "天秀輕鐵站",
+      "name_en": "LR Tin Sau Light Rail Stop",
+      "lat": 22.465546522,
+      "lng": 114.002965824,
+      "grid_easting": 818369.0,
+      "grid_northing": 836238.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Sau Light Rail Stop)"
+    },
+    "TSL": {
+      "stop_code": "TSL",
+      "name_tc": "天水圍輕鐵站",
+      "name_en": "LR Tin Shui Wai Light Rail Stop",
+      "lat": 22.449448496,
+      "lng": 114.00595868,
+      "grid_easting": 818675.0,
+      "grid_northing": 834455.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Shui Wai Light Rail Stop)"
+    },
+    "TSP": {
+      "stop_code": "TSP",
+      "name_tc": "屯門泳池輕鐵站",
+      "name_en": "LR Tuen Mun Swimming Pool Light Rail Stop",
+      "lat": 22.381163866,
+      "lng": 113.97040572,
+      "grid_easting": 815005.0,
+      "grid_northing": 826898.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tuen Mun Swimming Pool Light Rail Stop)"
+    },
+    "TSS": {
+      "stop_code": "TSS",
+      "name_tc": "青山村輕鐵站",
+      "name_en": "LR Tsing Shan Tsuen Light Rail Stop",
+      "lat": 22.390397616,
+      "lng": 113.966964167,
+      "grid_easting": 814652.0,
+      "grid_northing": 827921.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tsing Shan Tsuen Light Rail Stop)"
+    },
+    "TSU": {
+      "stop_code": "TSU",
+      "name_tc": "天瑞輕鐵站",
+      "name_en": "LR Tin Shui Light Rail Stop",
+      "lat": 22.455916261,
+      "lng": 113.999431711,
+      "grid_easting": 818004.0,
+      "grid_northing": 835172.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Shui Light Rail Stop)"
+    },
+    "TTR": {
+      "stop_code": "TTR",
+      "name_tc": "大棠路輕鐵站",
+      "name_en": "LR Tai Tong Road Light Rail Stop",
+      "lat": 22.444522541,
+      "lng": 114.028968945,
+      "grid_easting": 821043.0,
+      "grid_northing": 833907.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tai Tong Road Light Rail Stop)"
+    },
+    "TWI": {
+      "stop_code": "TWI",
+      "name_tc": "天榮輕鐵站",
+      "name_en": "LR Tin Wing Light Rail Stop",
+      "lat": 22.459531882,
+      "lng": 114.002604132,
+      "grid_easting": 818331.0,
+      "grid_northing": 835572.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Wing Light Rail Stop)"
+    },
+    "TWN": {
+      "stop_code": "TWN",
+      "name_tc": "青雲輕鐵站",
+      "name_en": "LR Tsing Wun Light Rail Stop",
+      "lat": 22.394344502,
+      "lng": 113.967404956,
+      "grid_easting": 814698.0,
+      "grid_northing": 828358.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tsing Wun Light Rail Stop)"
+    },
+    "TWU": {
+      "stop_code": "TWU",
+      "name_tc": "天湖輕鐵站",
+      "name_en": "LR Tin Wu Light Rail Stop",
+      "lat": 22.45499297,
+      "lng": 114.005767294,
+      "grid_easting": 818656.0,
+      "grid_northing": 835069.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Wu Light Rail Stop)"
+    },
+    "TYA": {
+      "stop_code": "TYA",
+      "name_tc": "天逸輕鐵站",
+      "name_en": "LR Tin Yat Light Rail Stop",
+      "lat": 22.466968819,
+      "lng": 113.998834672,
+      "grid_easting": 817944.0,
+      "grid_northing": 836396.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Yat Light Rail Stop)"
+    },
+    "TYU": {
+      "stop_code": "TYU",
+      "name_tc": "天悅輕鐵站",
+      "name_en": "LR Tin Yuet Light Rail Stop",
+      "lat": 22.462817819,
+      "lng": 114.001560424,
+      "grid_easting": 818224.0,
+      "grid_northing": 835936.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Tin Yuet Light Rail Stop)"
+    },
+    "WEP": {
+      "stop_code": "WEP",
+      "name_tc": "濕地公園輕鐵站",
+      "name_en": "LR Wetland Park Light Rail Stop",
+      "lat": 22.46960062,
+      "lng": 114.002455514,
+      "grid_easting": 818317.0,
+      "grid_northing": 836687.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Wetland Park Light Rail Stop)"
+    },
+    "YAO": {
+      "stop_code": "YAO",
+      "name_tc": "友愛輕鐵站",
+      "name_en": "LR Yau Oi Light Rail Stop",
+      "lat": 22.386721561,
+      "lng": 113.973524329,
+      "grid_easting": 815327.0,
+      "grid_northing": 827513.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Yau Oi Light Rail Stop)"
+    },
+    "YLL": {
+      "stop_code": "YLL",
+      "name_tc": "元朗輕鐵站",
+      "name_en": "LR Yuen Long Light Rail Stop",
+      "lat": 22.445719415,
+      "lng": 114.034369056,
+      "grid_easting": 821599.0,
+      "grid_northing": 834039.0,
+      "source": "Offline LRT coordinate seed: LandsD Location Search API (LR Yuen Long Light Rail Stop)"
+    }
+  },
+  "unresolved": [],
+  "generated_at": "2026-05-04T08:44:44Z"
 }

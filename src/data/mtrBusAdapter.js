@@ -1,6 +1,6 @@
 import { buildOperatorSummary, createStaticDatasetLoader } from './operatorCommon.js';
 
-const loadMtrBusDatasetInternal = createStaticDatasetLoader('mtr-bus', '/api/operators/mtr-bus/dataset?compact=1');
+const loadMtrBusDatasetInternal = createStaticDatasetLoader('mtr-bus', '/operator-data/mtr-bus.compact.json');
 
 export async function loadMtrBusDataset() {
   return loadMtrBusDatasetInternal();

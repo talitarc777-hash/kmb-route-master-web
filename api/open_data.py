@@ -40,6 +40,7 @@ LOCATION_SEARCH_URL = "https://geodata.gov.hk/gs/api/v1.0.0/locationSearch?q={qu
 COORD_TRANSFORM_URL = "https://www.geodetic.gov.hk/transform/v2/?inSys=hkgrid&outSys=wgsgeog&n={northing}&e={easting}"
 MTR_MANUAL_COORDINATE_FILE = os.path.join(os.path.dirname(__file__), "mtr_station_coordinates.manual.json")
 LRT_MANUAL_COORDINATE_FILE = os.path.join(os.path.dirname(__file__), "lrt_stop_coordinates.manual.json")
+PUBLIC_OPERATOR_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "public", "operator-data"))
 
 CACHE = {}
 
@@ -157,6 +158,18 @@ def fetch_xml_rows(url, tag_name, ttl_seconds=STATIC_TTL_SECONDS):
     for node in root.findall(tag_name):
         rows.append({child.tag: (child.text or "").strip() for child in node})
     return set_cached_value(cache_key, rows, ttl_seconds)
+
+
+def load_prebuilt_compact_dataset(operator_key):
+    safe_key = re.sub(r"[^a-z0-9_-]+", "", str(operator_key or "").lower())
+    if not safe_key:
+        return None
+    path = os.path.join(PUBLIC_OPERATOR_DATA_DIR, f"{safe_key}.compact.json")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return None
 
 
 def parse_float(value):
@@ -546,10 +559,14 @@ def score_lrt_location_result(result, name_block, query):
     score = 0
     if english and canonicalize_name(english) == canonicalize_name(name_en):
         score += 85
+    if english and canonicalize_name(english) in canonicalize_name(name_en) and "Light Rail" in name_en:
+        score += 75
     if english and canonicalize_name(english) == canonicalize_name(address_en):
         score += 60
     if chinese and chinese == name_zh:
         score += 85
+    if chinese and chinese in name_zh and "\u8f15\u9435" in name_zh:
+        score += 75
     if chinese and chinese == address_zh:
         score += 60
     if "Light Rail" in name_en or "Light Rail" in address_en:
@@ -1390,7 +1407,7 @@ def dataset_health_row(name, builder):
             "stops": len(stops),
             "route_stops": len(dataset.get("route_stops") or []),
             "fares": len(dataset.get("fares") or []),
-            "stops_with_wgs84": validation.get("stops_with_wgs84"),
+            "stops_with_wgs84": validation.get("stops_with_wgs84", validation.get("stations_with_wgs84")),
             "error": None,
         }
     except Exception as exc:
@@ -1409,11 +1426,11 @@ def dataset_health_row(name, builder):
 
 def build_operator_diagnostics(mode_filter=None):
     builders = {
-        "citybus": build_citybus_dataset,
-        "tram": build_tram_dataset,
-        "mtr": build_mtr_dataset,
-        "mtr-bus": build_mtr_bus_dataset,
-        "lrt": build_lrt_dataset,
+        "citybus": lambda: load_prebuilt_compact_dataset("citybus") or compact_operator_dataset(build_citybus_dataset(include_fares=False)),
+        "tram": lambda: load_prebuilt_compact_dataset("tram") or compact_operator_dataset(build_tram_dataset(include_fares=False)),
+        "mtr": lambda: load_prebuilt_compact_dataset("mtr") or compact_operator_dataset(build_mtr_dataset(), include_fares=True),
+        "mtr-bus": lambda: load_prebuilt_compact_dataset("mtr-bus") or compact_operator_dataset(build_mtr_bus_dataset(), include_fares=True),
+        "lrt": lambda: load_prebuilt_compact_dataset("lrt") or compact_operator_dataset(build_lrt_dataset()),
     }
     requested = [
         item.strip()
@@ -1471,6 +1488,18 @@ def compact_operator_dataset(dataset, include_fares=False):
             "stop_id": row.get("stop_id"),
         })
 
+    validation = dataset.get("validation") or {}
+    compact_validation = {
+        key: value
+        for key, value in validation.items()
+        if not key.startswith("unresolved_") and not key.startswith("invalid_")
+    }
+    for key, value in validation.items():
+        if key.startswith("unresolved_") and isinstance(value, list):
+            compact_validation[f"{key}_count"] = len(value)
+        if key.startswith("invalid_") and isinstance(value, list):
+            compact_validation[f"{key}_count"] = len(value)
+
     return {
         "operator": dataset.get("operator"),
         "sources": dataset.get("sources"),
@@ -1478,7 +1507,7 @@ def compact_operator_dataset(dataset, include_fares=False):
         "route_stops": route_stops,
         "stops": stops,
         "fares": (dataset.get("fares") or []) if include_fares else [],
-        "validation": dataset.get("validation"),
+        "validation": compact_validation,
         "limitations": dataset.get("limitations") or [],
         "generated_at": dataset.get("generated_at"),
         "compact": True,
@@ -1545,18 +1574,38 @@ class handler(BaseHTTPRequestHandler):
                 mode_filter = (query_params.get("modes") or [""])[0]
                 return self.send_json(build_operator_diagnostics(mode_filter or None))
             if path == "/api/operators/citybus/dataset":
+                if compact_requested:
+                    prebuilt = load_prebuilt_compact_dataset("citybus")
+                    if prebuilt:
+                        return self.send_json(prebuilt)
                 payload = build_citybus_dataset(include_fares=not compact_requested)
                 return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path == "/api/operators/tram/dataset":
+                if compact_requested:
+                    prebuilt = load_prebuilt_compact_dataset("tram")
+                    if prebuilt:
+                        return self.send_json(prebuilt)
                 payload = build_tram_dataset(include_fares=not compact_requested)
                 return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path == "/api/operators/mtr/dataset":
+                if compact_requested:
+                    prebuilt = load_prebuilt_compact_dataset("mtr")
+                    if prebuilt:
+                        return self.send_json(prebuilt)
                 payload = build_mtr_dataset()
                 return self.send_json(compact_operator_dataset(payload, include_fares=True) if compact_requested else payload)
             if path == "/api/operators/mtr-bus/dataset":
+                if compact_requested:
+                    prebuilt = load_prebuilt_compact_dataset("mtr-bus")
+                    if prebuilt:
+                        return self.send_json(prebuilt)
                 payload = build_mtr_bus_dataset()
                 return self.send_json(compact_operator_dataset(payload, include_fares=True) if compact_requested else payload)
             if path == "/api/operators/lrt/dataset":
+                if compact_requested:
+                    prebuilt = load_prebuilt_compact_dataset("lrt")
+                    if prebuilt:
+                        return self.send_json(prebuilt)
                 payload = build_lrt_dataset()
                 return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path.startswith("/api/operators/citybus/eta/"):
