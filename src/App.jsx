@@ -1157,7 +1157,11 @@ const App = () => {
         fetch('/api/kmb/route-stop')
       ]);
 
-      if (!stopsRes.ok) throw new Error('API Response Error');
+      if (!stopsRes.ok || !routesRes.ok || !routeStopsRes.ok) {
+        throw new Error(
+          `KMB API response error: stop=${stopsRes.status}, route=${routesRes.status}, route-stop=${routeStopsRes.status}`,
+        );
+      }
 
       setLoadingStatus('Processing Map Data...');
       const [stopsData, routesData, routeStopsData] = await Promise.all([
@@ -1165,6 +1169,10 @@ const App = () => {
         routesRes.json(),
         routeStopsRes.json(),
       ]);
+
+      if (!Array.isArray(stopsData?.data) || !Array.isArray(routesData?.data) || !Array.isArray(routeStopsData?.data)) {
+        throw new Error('KMB API payload format error (missing data arrays).');
+      }
 
       // 1. Process Stops (ID -> Name/Lat/Long)
       const sm = {};

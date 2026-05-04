@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler
 import urllib.request
 import urllib.parse
 import json
+import time
 
 class handler(BaseHTTPRequestHandler):
     def send_json(self, payload, status_code=200):
@@ -12,6 +13,19 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(body)
+
+    def fetch_upstream_bytes(self, target_url, headers, timeout_sec=25, retries=2):
+        last_error = None
+        for attempt in range(retries + 1):
+            try:
+                req = urllib.request.Request(target_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+                    return response.read()
+            except Exception as exc:
+                last_error = exc
+                if attempt < retries:
+                    time.sleep(0.35 * (attempt + 1))
+        raise last_error
 
     def do_GET(self):
         parsed_path = urllib.parse.urlparse(self.path)
@@ -56,13 +70,13 @@ class handler(BaseHTTPRequestHandler):
             host = self.headers.get('Host', 'localhost')
             
             # Add the Referer header so Google's security lets it pass
-            req = urllib.request.Request(target_url, headers={
+            headers = {
                 'User-Agent': 'Mozilla/5.0',
-                'Referer': f"https://{host}/" 
-            })
-            
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = response.read()
+                'Referer': f"https://{host}/"
+            }
+            timeout_sec = 25 if '/api/kmb/' in path else 12
+            retries = 2 if '/api/kmb/' in path else 1
+            data = self.fetch_upstream_bytes(target_url, headers, timeout_sec=timeout_sec, retries=retries)
             
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
