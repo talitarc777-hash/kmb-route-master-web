@@ -1,6 +1,6 @@
 import { buildOperatorSummary, createStaticDatasetLoader } from './operatorCommon.js';
 
-const loadLrtDatasetInternal = createStaticDatasetLoader('lrt', '/api/operators/lrt/dataset');
+const loadLrtDatasetInternal = createStaticDatasetLoader('lrt', '/api/operators/lrt/dataset?compact=1');
 
 export async function loadLrtDataset() {
   return loadLrtDatasetInternal();

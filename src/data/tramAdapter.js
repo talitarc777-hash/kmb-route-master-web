@@ -1,6 +1,6 @@
 import { buildGeoResolver, buildOperatorSummary, createStaticDatasetLoader } from './operatorCommon.js';
 
-const loadTramDatasetInternal = createStaticDatasetLoader('tram', '/api/operators/tram/dataset');
+const loadTramDatasetInternal = createStaticDatasetLoader('tram', '/api/operators/tram/dataset?compact=1');
 
 export async function loadTramDataset() {
   return loadTramDatasetInternal();

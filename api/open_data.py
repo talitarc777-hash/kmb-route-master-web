@@ -1426,6 +1426,62 @@ def build_operator_diagnostics(mode_filter=None):
     }
 
 
+def compact_operator_dataset(dataset, include_fares=False):
+    routes = []
+    for route in dataset.get("routes") or []:
+        routes.append({
+            "id": route.get("id"),
+            "operator": route.get("operator"),
+            "route_id": route.get("route_id"),
+            "route": route.get("route"),
+            "line": route.get("line"),
+            "display_route": route.get("display_route"),
+            "direction": route.get("direction"),
+            "service_type": route.get("service_type"),
+            "fare": route.get("fare"),
+            "full_fare": route.get("full_fare"),
+            "fare_currency": route.get("fare_currency"),
+        })
+
+    stops = []
+    for stop in dataset.get("stops") or []:
+        stops.append({
+            "id": stop.get("id"),
+            "operator": stop.get("operator"),
+            "stop_id": stop.get("stop_id"),
+            "station_code": stop.get("station_code"),
+            "name": stop.get("name"),
+            "lat": stop.get("lat"),
+            "lng": stop.get("lng"),
+            "coordinate_source": stop.get("coordinate_source"),
+        })
+
+    route_stops = []
+    for row in dataset.get("route_stops") or []:
+        route_stops.append({
+            "route_id": row.get("route_id"),
+            "route_variant_id": row.get("route_variant_id"),
+            "direction": row.get("direction"),
+            "service_type": row.get("service_type"),
+            "sequence": row.get("sequence"),
+            "stop_id": row.get("stop_id"),
+        })
+
+    return {
+        "operator": dataset.get("operator"),
+        "sources": dataset.get("sources"),
+        "routes": routes,
+        "route_stops": route_stops,
+        "stops": stops,
+        "fares": (dataset.get("fares") or []) if include_fares else [],
+        "validation": dataset.get("validation"),
+        "limitations": dataset.get("limitations") or [],
+        "generated_at": dataset.get("generated_at"),
+        "compact": True,
+        "fares_included": bool(include_fares),
+    }
+
+
 def build_mtr_eta(line, station):
     safe_line = urllib.parse.quote(str(line or "").strip())
     safe_station = urllib.parse.quote(str(station or "").strip())
@@ -1478,21 +1534,27 @@ class handler(BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query_params = urllib.parse.parse_qs(parsed_path.query)
+        compact_requested = (query_params.get("compact") or ["0"])[0] in ("1", "true", "yes")
 
         try:
             if path == "/api/operators/diagnostics":
                 mode_filter = (query_params.get("modes") or [""])[0]
                 return self.send_json(build_operator_diagnostics(mode_filter or None))
             if path == "/api/operators/citybus/dataset":
-                return self.send_json(build_citybus_dataset())
+                payload = build_citybus_dataset()
+                return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path == "/api/operators/tram/dataset":
-                return self.send_json(build_tram_dataset())
+                payload = build_tram_dataset()
+                return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path == "/api/operators/mtr/dataset":
-                return self.send_json(build_mtr_dataset())
+                payload = build_mtr_dataset()
+                return self.send_json(compact_operator_dataset(payload, include_fares=True) if compact_requested else payload)
             if path == "/api/operators/mtr-bus/dataset":
-                return self.send_json(build_mtr_bus_dataset())
+                payload = build_mtr_bus_dataset()
+                return self.send_json(compact_operator_dataset(payload, include_fares=True) if compact_requested else payload)
             if path == "/api/operators/lrt/dataset":
-                return self.send_json(build_lrt_dataset())
+                payload = build_lrt_dataset()
+                return self.send_json(compact_operator_dataset(payload) if compact_requested else payload)
             if path.startswith("/api/operators/citybus/eta/"):
                 eta_path = path.replace("/api/operators/citybus/eta/", "", 1)
                 stop_id, _, route = eta_path.partition("/")

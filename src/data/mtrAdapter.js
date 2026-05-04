@@ -1,6 +1,6 @@
 import { buildOperatorSummary, createEtaLoader, createStaticDatasetLoader } from './operatorCommon.js';
 
-const loadMtrDatasetInternal = createStaticDatasetLoader('mtr', '/api/operators/mtr/dataset');
+const loadMtrDatasetInternal = createStaticDatasetLoader('mtr', '/api/operators/mtr/dataset?compact=1');
 const loadMtrEtaInternal = createEtaLoader('mtr-eta', ({ line, station }) =>
   `/api/operators/mtr/eta?line=${encodeURIComponent(line)}&station=${encodeURIComponent(station)}`,
 );
