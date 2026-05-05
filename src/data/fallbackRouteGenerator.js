@@ -797,7 +797,7 @@ async function buildMixedCandidateFromEntries(originLoc, destLoc, entryPath, ori
 }
 
 async function generateMixedOperatorCandidates(operatorIndexes, originLoc, destLoc, transferRadiusKm, options) {
-  if (options.includeTransfers === false || operatorIndexes.length < 2) return { candidates: [], debug: null };
+  if (options.includeMixedTransfers === false || operatorIndexes.length < 2) return { candidates: [], debug: null };
 
   const originEntries = [];
   const destEntriesByRouteKey = new Map();
@@ -992,6 +992,7 @@ export async function generateFallbackCandidatesFromDatasets({
   datasets,
   maxCandidates = 24,
   includeTransfers = true,
+  includeMixedTransfers = true,
   operatorModes = ['citybus', 'tram', 'mtr', 'mtr_bus', 'lrt'],
   walkRadiusKm = DEFAULT_WALK_RADIUS_KM,
   transferRadiusKm = DEFAULT_TRANSFER_RADIUS_KM,
@@ -1006,6 +1007,7 @@ export async function generateFallbackCandidatesFromDatasets({
 
   const options = {
     includeTransfers,
+    includeMixedTransfers,
     walkRadiusKm,
     transferRadiusKm,
     timeMode,
@@ -1050,8 +1052,13 @@ export async function generateFallbackCandidatesFromDatasets({
     .flatMap((row) => row.candidates)
     .concat(mixed.candidates)
     .sort((a, b) => {
-      if (a.transfers !== b.transfers) return a.transfers - b.transfers;
+      const aFare = a.fare?.status === 'available' && a.fare.amount != null ? Number(a.fare.amount) : null;
+      const bFare = b.fare?.status === 'available' && b.fare.amount != null ? Number(b.fare.amount) : null;
+      if (aFare != null && bFare != null && aFare !== bFare) return aFare - bFare;
+      if (aFare != null && bFare == null) return -1;
+      if (aFare == null && bFare != null) return 1;
       if (a.estimated_time_min !== b.estimated_time_min) return a.estimated_time_min - b.estimated_time_min;
+      if (a.transfers !== b.transfers) return a.transfers - b.transfers;
       return b.confidence - a.confidence;
     })
     .slice(0, maxCandidates);

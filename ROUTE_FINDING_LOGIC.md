@@ -78,6 +78,7 @@ When the checkbox is off:
 
 When the checkbox is on:
 - The app still runs normal KMB search first
+- KMB results are not the only route shape; alternatives may be whole journeys or mixed journeys that combine KMB with other modes
 - It inspects the first 3 fastest KMB candidates for weak/no-ETA segments
 - If a KMB segment has no active ETA, the app searches non-KMB options only around that segment's start and end stops
 - It then loads cached enriched operator datasets for:
@@ -88,9 +89,10 @@ When the checkbox is on:
   - Light Rail
 - It builds local indexes from the enriched WGS84 data and generates targeted gap-repair candidates first
 - It also converts the already-loaded KMB data into the same local fallback shape for mixed-operator transfer search
+- Mixed-operator transfer search is enabled whenever the checkbox is on, even when same-operator transfer search is kept lighter for speed
 - The live UI uses a fast local pass first, then lets slower alternative loading continue in the background
 - If one operator dataset fails, the other operators can still produce alternatives
-- If targeted gap repair finds useful options, broad all-origin-to-destination alternative search is skipped for speed
+- Targeted gap repair can add useful no-ETA replacements, but broad all-origin-to-destination mixed search still runs so KMB + MTR / KMB + MTR Bus style journeys can appear
 - If no KMB gap is found, the app can still run the broader comparison path
 
 Alternative transport data source notes:
@@ -120,8 +122,9 @@ Candidate types:
 - Light Rail direct
 - Mixed-operator journeys up to 3 legs, such as KMB -> KMB -> MTR Bus
 - Limited 1-transfer support remains in the generator
-- The live comparison path keeps transfer search off when KMB quality is usable
-- The live comparison path enables transfer search when the KMB quality score is weak, which helps cross-harbour cases such as North Point/NPGO to Hung Hom
+- The live comparison path can keep same-operator transfer search off when KMB quality is usable
+- Mixed-operator transfer search remains on with the checkbox, because this is the path that can produce journeys like KMB -> MTR or KMB -> MTR Bus
+- The KMB quality score still controls how heavy the broader same-operator transfer search becomes, which helps keep loading time lower when KMB already looks usable
 - Tram is considered only when both gap endpoints are likely on Hong Kong Island
 - Light Rail is considered when either endpoint is in the NW New Territories Light Rail corridor
 - KMB is included in the broad alternative generator only as a transfer-network input, so mixed routes like `110 -> 269B -> K75P` can be found without replacing the normal KMB-first search

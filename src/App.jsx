@@ -246,6 +246,7 @@ function buildFallbackCacheKey({
   dateValue,
   timeValue,
   includeTransfers,
+  includeMixedTransfers,
   maxCandidates,
   operatorModes,
 }) {
@@ -258,6 +259,7 @@ function buildFallbackCacheKey({
     timeMode,
     timeKey,
     includeTransfers: Boolean(includeTransfers),
+    includeMixedTransfers: includeMixedTransfers !== false,
     maxCandidates,
     operatorModes: (operatorModes || ['citybus', 'tram', 'mtr', 'mtr_bus', 'lrt']).join(','),
   });
@@ -411,6 +413,7 @@ function fallbackSearchSettings(kmbQuality) {
   if (kmbQuality.isWeak) {
     return {
       includeTransfers: true,
+      includeMixedTransfers: true,
       maxCandidates: 12,
       googleRefineLimit: 1,
       timeoutMs: 20000,
@@ -419,7 +422,8 @@ function fallbackSearchSettings(kmbQuality) {
 
   return {
     includeTransfers: false,
-    maxCandidates: 6,
+    includeMixedTransfers: true,
+    maxCandidates: 12,
     googleRefineLimit: 0,
     timeoutMs: 12000,
   };
@@ -1411,6 +1415,7 @@ const App = () => {
           dateValue,
           timeValue,
           includeTransfers: fallbackSettings.includeTransfers,
+          includeMixedTransfers: fallbackSettings.includeMixedTransfers,
           maxCandidates: fallbackSettings.maxCandidates,
           operatorModes: broadOperatorModes,
         });
@@ -1429,6 +1434,7 @@ const App = () => {
                 dateValue,
                 timeValue,
                 includeTransfers: true,
+                includeMixedTransfers: true,
                 maxCandidates: 4,
                 operatorModes,
               });
@@ -1442,6 +1448,7 @@ const App = () => {
                 destLoc: gap.destLoc,
                 maxCandidates: 4,
                 includeTransfers: true,
+                includeMixedTransfers: true,
                 operatorModes,
                 timeMode,
                 dateValue,
@@ -1481,52 +1488,6 @@ const App = () => {
             );
           }
 
-          if (targetedAlternatives.length > 0) {
-            finalResults = rankCombinedTransportOptions([
-              ...filteredCandidates,
-              ...targetedAlternatives,
-            ]);
-            if (canReusePlannedSearch) {
-              searchCacheRef.current.set(searchCacheKey, cloneRouteResults(finalResults));
-              if (searchCacheRef.current.size > 8) {
-                const oldestKey = searchCacheRef.current.keys().next().value;
-                searchCacheRef.current.delete(oldestKey);
-              }
-            }
-            setResults(finalResults);
-            setIsSearchOpen(false);
-            if (fallbackSettings.googleRefineLimit > 0) {
-              Promise.all(gapPayloads.map(async ({ gap, payload }) => {
-                const refinedCandidates = await refineFallbackCandidateRideTimes(
-                  payload.candidates || [],
-                  {
-                    maxRefinements: Math.min(fallbackSettings.googleRefineLimit, (payload.candidates || []).length),
-                    timeMode,
-                    dateValue,
-                    timeValue,
-                  },
-                );
-                return annotateGapRepairCandidates(refinedCandidates, gap);
-              }))
-                .then((refinedRows) => {
-                  if (searchRunRef.current !== searchRunId) return;
-                  const refinedAlternatives = refinedRows.flat();
-                  if (refinedAlternatives.length === 0) return;
-                  setResults((currentResults) => {
-                    const currentKmb = (currentResults || []).filter((route) => !isFallbackRoute(route));
-                    return rankCombinedTransportOptions([
-                      ...currentKmb,
-                      ...refinedAlternatives,
-                    ]);
-                  });
-                })
-                .catch((error) => {
-                  console.warn('KMB gap Google ride-time refinement failed:', error);
-                });
-            }
-            return;
-          }
-
           const cachedFallback = getCachedFallback(fallbackCacheRef.current, fallbackCacheKey);
           let fallbackPayload = cachedFallback?.payload || null;
           let fallbackTimedOut = false;
@@ -1538,6 +1499,7 @@ const App = () => {
               kmbDataset: kmbFallbackDataset,
               maxCandidates: fallbackSettings.maxCandidates,
               includeTransfers: fallbackSettings.includeTransfers,
+              includeMixedTransfers: fallbackSettings.includeMixedTransfers,
               timeMode,
               dateValue,
               timeValue,
@@ -1568,6 +1530,7 @@ const App = () => {
                 kmbDataset: kmbFallbackDataset,
                 maxCandidates: Math.max(18, fallbackSettings.maxCandidates),
                 includeTransfers: true,
+                includeMixedTransfers: true,
                 operatorModes: broadOperatorModes,
                 walkRadiusKm: 1.8,
                 transferRadiusKm: 0.35,
@@ -1591,6 +1554,7 @@ const App = () => {
                 kmbDataset: kmbFallbackDataset,
                 maxCandidates: Math.max(40, fallbackSettings.maxCandidates),
                 includeTransfers: true,
+                includeMixedTransfers: true,
                 operatorModes: broadOperatorModes,
                 walkRadiusKm: 8.0,
                 transferRadiusKm: 1.2,
@@ -1611,8 +1575,9 @@ const App = () => {
               }));
             }
           }
-          finalResults = rankCombinedTransportOptions([...filteredCandidates, ...alternatives]);
-          if (!fallbackTimedOut && filteredCandidates.length === 0 && alternatives.length === 0) {
+          const allAlternatives = [...targetedAlternatives, ...alternatives];
+          finalResults = rankCombinedTransportOptions([...filteredCandidates, ...allAlternatives]);
+          if (!fallbackTimedOut && filteredCandidates.length === 0 && allAlternatives.length === 0) {
             throw new Error(
               'No route found with current alternative coverage (KMB mixed transfers, Citybus, Tram, MTR rail, MTR Bus feeder, Light Rail).',
             );
@@ -1627,7 +1592,8 @@ const App = () => {
                 setSearchError(null);
                 setResults((currentResults) => {
                   const currentKmb = (currentResults || []).filter((route) => !isFallbackRoute(route));
-                  return rankCombinedTransportOptions([...currentKmb, ...lateAlternatives]);
+                  const currentFallback = (currentResults || []).filter((route) => isFallbackRoute(route));
+                  return rankCombinedTransportOptions([...currentKmb, ...currentFallback, ...lateAlternatives]);
                 });
                 setIsSearchOpen(false);
               })
@@ -1653,8 +1619,8 @@ const App = () => {
           setResults(finalResults);
           setIsSearchOpen(false);
 
-          if (!fallbackTimedOut && !cachedFallback?.refined && alternatives.length > 0 && fallbackSettings.googleRefineLimit > 0) {
-            refineFallbackCandidateRideTimes(alternatives, {
+          if (!fallbackTimedOut && !cachedFallback?.refined && allAlternatives.length > 0 && fallbackSettings.googleRefineLimit > 0) {
+            refineFallbackCandidateRideTimes(allAlternatives, {
               maxRefinements: fallbackSettings.googleRefineLimit,
               timeMode,
               dateValue,
