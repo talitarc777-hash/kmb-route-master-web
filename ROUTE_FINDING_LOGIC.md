@@ -161,6 +161,7 @@ Alternative loading resilience:
 - Citybus, Tram, MTR, MTR Bus, and Light Rail dataset loading is partial-success tolerant via settled promises
 - A slow alternative load no longer throws `Other transport data took too long to load` into the UI
 - If the first local alternative pass is still pending, KMB results can render first and alternatives are added after the background load completes
+- Wide rescue separates origin and destination walking radii: the destination side may expand farther to find rural/NW New Territories links, but the origin side stays near the user's actual start point so North Point searches do not begin from Hung Hom or Whampoa
 
 Ranking when comparison mode is enabled:
 1. Known total fare

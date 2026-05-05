@@ -265,6 +265,14 @@ function findNearbyStops(index, loc, radiusKm) {
   return nearbyStopsFromGrid(index, loc, radiusKm).slice(0, MAX_NEARBY_STOPS);
 }
 
+function originWalkRadius(options) {
+  return options.originWalkRadiusKm ?? options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM;
+}
+
+function destinationWalkRadius(options) {
+  return options.destinationWalkRadiusKm ?? options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM;
+}
+
 function entriesForNearbyStops(index, nearbyStops) {
   const out = [];
   for (const nearby of nearbyStops) {
@@ -803,10 +811,10 @@ async function generateMixedOperatorCandidates(operatorIndexes, originLoc, destL
   const destEntriesByRouteKey = new Map();
 
   for (const operatorIndex of operatorIndexes) {
-    for (const nearby of findNearbyStops(operatorIndex, originLoc, options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM)) {
+    for (const nearby of findNearbyStops(operatorIndex, originLoc, originWalkRadius(options))) {
       originEntries.push(...entriesForStop(operatorIndex, nearby));
     }
-    for (const nearby of findNearbyStops(operatorIndex, destLoc, options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM)) {
+    for (const nearby of findNearbyStops(operatorIndex, destLoc, destinationWalkRadius(options))) {
       for (const entry of entriesForStop(operatorIndex, nearby)) {
         if (!destEntriesByRouteKey.has(entry.routeKey)) destEntriesByRouteKey.set(entry.routeKey, []);
         destEntriesByRouteKey.get(entry.routeKey).push(entry);
@@ -962,11 +970,10 @@ async function generateMixedOperatorCandidates(operatorIndexes, originLoc, destL
 
 async function generateForOperator({ dataset, config, originLoc, destLoc, options }) {
   const index = getOperatorIndex(dataset, config);
-  const walkRadiusKm = options.walkRadiusKm ?? DEFAULT_WALK_RADIUS_KM;
   const transferRadiusKm = options.transferRadiusKm ?? DEFAULT_TRANSFER_RADIUS_KM;
 
-  const originNearby = findNearbyStops(index, originLoc, walkRadiusKm);
-  const destNearby = findNearbyStops(index, destLoc, walkRadiusKm);
+  const originNearby = findNearbyStops(index, originLoc, originWalkRadius(options));
+  const destNearby = findNearbyStops(index, destLoc, destinationWalkRadius(options));
   const originEntries = entriesForNearbyStops(index, originNearby);
   const destEntries = entriesForNearbyStops(index, destNearby);
   const direct = await generateDirectCandidates(index, originLoc, destLoc, originEntries, destEntries, options);
@@ -995,6 +1002,8 @@ export async function generateFallbackCandidatesFromDatasets({
   includeMixedTransfers = true,
   operatorModes = ['citybus', 'tram', 'mtr', 'mtr_bus', 'lrt'],
   walkRadiusKm = DEFAULT_WALK_RADIUS_KM,
+  originWalkRadiusKm,
+  destinationWalkRadiusKm,
   transferRadiusKm = DEFAULT_TRANSFER_RADIUS_KM,
   timeMode = 'now',
   dateValue,
@@ -1009,6 +1018,8 @@ export async function generateFallbackCandidatesFromDatasets({
     includeTransfers,
     includeMixedTransfers,
     walkRadiusKm,
+    originWalkRadiusKm,
+    destinationWalkRadiusKm,
     transferRadiusKm,
     timeMode,
     dateValue,
