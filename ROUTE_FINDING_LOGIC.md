@@ -1,6 +1,6 @@
 # Route Finding Logic
 
-This document explains how route search works in `public/routeEngine.js`, how KMB routes are rendered in `src/App.jsx`, and how the optional non-KMB comparison path works through `src/data/fallbackRouteGenerator.js`.
+This document explains how route search works in `public/routeEngine.js`, how KMB routes are rendered in `src/App.jsx`, and how optional Google Transit gap repair works for unavailable KMB segments.
 
 ## 1. Inputs and Setup
 
@@ -71,63 +71,34 @@ Final return:
 
 ## 4. Alternative Transport Options
 
-Optional non-KMB comparison is handled by `src/data/fallbackRouteGenerator.js`.
+Optional gap repair is handled directly in `src/App.jsx` through Google Directions Transit.
 
 When the checkbox is off:
 - Existing KMB-only behavior stays unchanged
 
 When the checkbox is on:
 - The app still runs normal KMB search first
-- KMB results are not the only route shape; alternatives may be whole journeys or mixed journeys that combine KMB with other modes
-- It inspects the first 3 fastest KMB candidates for weak/no-ETA segments
-- If a KMB segment has no active ETA, the app searches non-KMB options only around that segment's start and end stops
-- It then loads cached enriched operator datasets for:
-  - Citybus
-  - Tram
-  - MTR
-  - MTR Bus (feeder / K routes)
-  - Light Rail
-- It builds local indexes from the enriched WGS84 data and generates targeted gap-repair candidates first
-- It also converts the already-loaded KMB data into the same local fallback shape for mixed-operator transfer search
-- Mixed-operator transfer search is enabled whenever the checkbox is on, even when same-operator transfer search is kept lighter for speed
-- The live UI uses a fast local pass first, then lets slower alternative loading continue in the background
-- If one operator dataset fails, the other operators can still produce alternatives
-- Targeted gap repair can add useful no-ETA replacements, but broad all-origin-to-destination mixed search still runs so KMB + MTR / KMB + MTR Bus style journeys can appear
-- If no KMB gap is found, the app can still run the broader comparison path
-
-Alternative transport data source notes:
-- Citybus and Tram use enriched TD stop data with cached WGS84 coordinates
-- MTR uses station coordinates from the manual/open-source seed file when available
-- MTR no longer performs live per-station LandsD geocoding during route search because that made alternative loading too slow
-- MTR feeder bus stops use WGS84 coordinates from MTR Open Data
-- Light Rail route-stop topology comes from MTR Open Data; stop coordinates use manual seed first, then cached LandsD lookups as fallback
-- Minibus is still not included in the current non-KMB candidate generator
-- No Google Transit shortcut is used
-- Google Directions transit is used only to refine in-vehicle ride time after local candidates are already generated
-- If `GCP_API_KEY` is not configured, Google ride-time refinement is skipped/falls back to heuristic timing
+- The KMB engine is allowed to return no-ETA candidates internally so the app can identify repairable gaps
+- It inspects the first 3 fastest KMB candidates for no-ETA / unavailable KMB segments
+- For each missing KMB segment, the app calls `/api/google/directions/json` with `mode=transit`
+- Google is asked only for the gap between the KMB segment's start stop and end stop
+- The returned Google route is shown as a gap option, with the transit legs, operators, route/line labels, Google duration, and fare only if Google provides one
+- The displayed hybrid time is: original KMB route time minus the missing KMB segment estimate plus the Google gap duration
+- If no KMB route is available at all, Google Transit is asked for the whole origin-to-destination journey
+- The old local Citybus / Tram / MTR / MTR Bus / Light Rail dataset search is no longer used in the live app flow
 
 ## 5. Alternative Candidate Generation
 
-The generator builds a local operator index from the cached datasets:
-- Stops are filtered to records with valid WGS84 coordinates
-- Route variants are grouped by `route_variant_id`
-- Stop-to-route lookups are prepared once and reused
+Google gap candidates are generated from the Google Directions response:
+- `routes[].legs[].steps[]` is scanned for `TRANSIT` steps
+- Each transit step becomes one displayed leg
+- Operator labels are inferred from Google vehicle type, line name, and agency name
+- Walking steps are not separately routed by our code; Google route duration already includes its own walking/waiting/transit timing
+- If Google returns a walking-only option, it can be shown as a walk gap option
 
 Candidate types:
-- KMB gap repair using Citybus, MTR, and Tram where applicable
-- Citybus direct
-- Tram direct
-- MTR direct
-- MTR Bus direct
-- Light Rail direct
-- Mixed-operator journeys up to 3 legs, such as KMB -> KMB -> MTR Bus
-- Limited 1-transfer support remains in the generator
-- The live comparison path can keep same-operator transfer search off when KMB quality is usable
-- Mixed-operator transfer search remains on with the checkbox, because this is the path that can produce journeys like KMB -> MTR or KMB -> MTR Bus
-- The KMB quality score still controls how heavy the broader same-operator transfer search becomes, which helps keep loading time lower when KMB already looks usable
-- Tram is considered only when both gap endpoints are likely on Hong Kong Island
-- Light Rail is considered when either endpoint is in the NW New Territories Light Rail corridor
-- KMB is included in the broad alternative generator only as a transfer-network input, so mixed routes like `110 -> 269B -> K75P` can be found without replacing the normal KMB-first search
+- Google Transit gap repair for a KMB segment with no active ETA
+- Google Transit whole-trip option when KMB has no usable route
 
 Candidate metadata:
 - `operator`
@@ -143,25 +114,15 @@ Candidate metadata:
 - for gap repair: replaced KMB route, replaced segment index, original gap time, alternative gap time, and repair reason
 
 Alternative timing model:
-- Candidate generation still starts locally from cached enriched operator datasets
-- Walking time remains local straight-line walking estimation
-- Boarding/wait handling remains the current simple buffer model (`BOARDING_BUFFER_MIN`)
-- Gap-repair cards show a hybrid estimate: original KMB route time minus the no-ETA KMB segment estimate plus the alternative segment estimate
-- In-vehicle ride time now prefers Google transit step duration by operator mode:
-  - Citybus: Google `transit_mode=bus`
-  - Tram: Google `transit_mode=tram`
-  - MTR: Google `transit_mode=subway`
-  - MTR Bus: Google `transit_mode=bus`
-  - Light Rail: Google `transit_mode=tram`
-- If Google cannot return a usable transit step, the generator falls back to the previous per-stop heuristic
+- Google provides the replacement gap route and total gap duration
+- Google step durations are displayed for each transit leg
+- The app does not locally compute non-KMB stop matching, route topology, waiting time, or transfer routing
+- Fare is marked unavailable unless Google returns `route.fare`
 
 Alternative loading resilience:
-- Static operator dataset loaders first use memory/localStorage cache
-- If a live static dataset request fails, stale localStorage data is reused when available
-- Citybus, Tram, MTR, MTR Bus, and Light Rail dataset loading is partial-success tolerant via settled promises
-- A slow alternative load no longer throws `Other transport data took too long to load` into the UI
-- If the first local alternative pass is still pending, KMB results can render first and alternatives are added after the background load completes
-- Wide rescue separates origin and destination walking radii: the destination side may expand farther to find rural/NW New Territories links, but the origin side stays near the user's actual start point so North Point searches do not begin from Hung Hom or Whampoa
+- Google Transit gap responses are cached in memory/localStorage for a short time window
+- If Google fails but KMB routes exist, the app keeps the KMB results
+- If no KMB route exists and Google also fails, the app shows a no-route error
 
 Ranking when comparison mode is enabled:
 1. Known total fare
@@ -179,26 +140,26 @@ The checkbox appears in two places:
 - Results panel
 
 The label is:
-- `Include other transport options with KMB`
+- `Use Google Transit for KMB unavailable gaps`
 
 When the checkbox changes:
 - The current search is re-run with the selected mode
 - KMB results remain in the list
-- Alternative transport options are shown alongside KMB instead of waiting for KMB failure
+- Google Transit gap options are shown alongside KMB when no-ETA / unavailable KMB segments exist
 
 Display behavior:
 - KMB cards keep their normal route styling
-- Alternative cards show an operator badge and the label `Alternative transport option`
-- The selected alternative route gets a dedicated detail panel
+- Google gap cards show operator badges inferred from Google Transit data
+- The selected Google gap route gets a dedicated detail panel
 
 ## 7. Map Rendering
 
 KMB route rendering remains unchanged.
 
-For alternative transport options:
-- The app draws a simple local WGS84 preview line
-- It does not call Google Transit
-- It does not add paid Google/GCP route calls for the alternative preview
+For Google Transit gap options:
+- The app draws a simple WGS84 preview line through the Google-provided transit stops
+- It reuses the Google Directions result already fetched during search
+- It does not make an extra Google/GCP call just for map preview
 
 ## 8. Bookmark and ETA Behavior
 
@@ -212,6 +173,6 @@ Current behavior:
 
 Current behavior is:
 - Checkbox off: KMB-only search, unchanged
-- Checkbox on: KMB plus Citybus, Tram, MTR, MTR Bus, and Light Rail options for direct comparison
+- Checkbox on: KMB search first, then Google Transit is used only to fill KMB no-ETA / unavailable gaps
 - KMB remains the default path
-- Alternative transport options are local, cached, and clearly labeled
+- Google Transit gap options are cached briefly and clearly labeled
