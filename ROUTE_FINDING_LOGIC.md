@@ -95,6 +95,7 @@ Google gap candidates are generated from the Google Directions response:
 - Each transit step becomes one displayed leg
 - KMB segments before and after the missing segment are converted into displayed legs and merged around the Google legs
 - Operator labels are inferred from Google vehicle type, line name, and agency name
+- MTR agency is checked before the generic Google `TRAM` vehicle type, so MTR Light Rail is labelled as `LRT` instead of Hong Kong Tramways
 - Walking steps are not separately routed by our code; Google route duration already includes its own walking/waiting/transit timing
 - If Google returns a walking-only option, it can be shown as a walk gap option
 
@@ -122,6 +123,7 @@ Alternative timing model:
 - Fare enrichment avoids extra Google calls:
 - KMB legs are treated as `HKD 0.0` because of the monthly pass rule
 - Citybus / Tram / MTR Bus legs are priced through `/api/operators/fare`, which uses cached TD or MTR static fare data
+- LRT is kept separate from Hong Kong Tramways; LRT fare remains unavailable unless Google supplies a fare because no LRT fare table is attached yet
 - Google `route.fare` is used only when static fare lookup cannot provide a better local value
 - Fare remains unavailable only when neither static fare data nor Google provides a usable fare
 

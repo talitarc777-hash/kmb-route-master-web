@@ -476,11 +476,12 @@ function googleOperatorCode(step) {
   const agencyName = String(line.agencies?.[0]?.name || '').toUpperCase();
   const shortName = String(line.short_name || line.name || '').trim().toUpperCase();
 
-  if (vehicleType === 'TRAM') return 'TRAM';
-  if (vehicleType === 'SUBWAY' || vehicleType === 'HEAVY_RAIL' || agencyName.includes('MTR')) {
+  if (agencyName.includes('MTR')) {
     if (vehicleType === 'BUS' || /^K\d/.test(shortName)) return 'MTR_BUS';
+    if (vehicleType === 'TRAM' || vehicleType === 'LIGHT_RAIL' || /^\d{3}[A-Z]?$/.test(shortName)) return 'LRT';
     return 'MTR';
   }
+  if (vehicleType === 'TRAM') return 'TRAM';
   if (agencyName.includes('CITYBUS') || agencyName.includes('CTB')) return 'CTB';
   if (agencyName.includes('KOWLOON MOTOR BUS') || agencyName.includes('KMB')) return 'KMB';
   if (vehicleType === 'BUS') return 'BUS';
