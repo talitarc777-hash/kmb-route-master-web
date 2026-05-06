@@ -34,6 +34,7 @@ MTR_BUS_ROUTES_URL = "https://opendata.mtr.com.hk/data/mtr_bus_routes.csv"
 MTR_BUS_STOPS_URL = "https://opendata.mtr.com.hk/data/mtr_bus_stops.csv"
 MTR_BUS_FARES_URL = "https://opendata.mtr.com.hk/data/mtr_bus_fares.csv"
 LIGHT_RAIL_ROUTES_STOPS_URL = "https://opendata.mtr.com.hk/data/light_rail_routes_and_stops.csv"
+LIGHT_RAIL_FARES_URL = "https://opendata.mtr.com.hk/data/light_rail_fares.csv"
 MTR_TRAIN_ETA_URL = "https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line={line}&sta={station}"
 LOCATION_SEARCH_URL = "https://geodata.gov.hk/gs/api/v1.0.0/locationSearch?q={query}"
 
@@ -116,6 +117,7 @@ def fetch_text(url, ttl_seconds=STATIC_TTL_SECONDS):
             pass
         safe_url = str(url).replace("'", "''")
         command = (
+            "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
             f"$content = (Invoke-WebRequest -UseBasicParsing -Uri '{safe_url}' -TimeoutSec 30).Content; "
             "Write-Output $content"
         )
@@ -125,6 +127,8 @@ def fetch_text(url, ttl_seconds=STATIC_TTL_SECONDS):
             encoding="utf-8",
             timeout=40,
         ).lstrip("\ufeff")
+        if not payload.strip():
+            raise RuntimeError(f"Empty response from {url}")
     return set_cached_value(cache_key, payload, ttl_seconds)
 
 
@@ -142,8 +146,14 @@ def fetch_csv_rows(url, ttl_seconds=STATIC_TTL_SECONDS):
     cached = get_cached_value(cache_key)
     if cached is not None:
         return cached
-    text = fetch_text(url, ttl_seconds=ttl_seconds)
-    rows = list(csv.DictReader(io.StringIO(text)))
+    text = fetch_text(url, ttl_seconds=ttl_seconds).lstrip("\ufeff").lstrip("ï»¿")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = []
+    for row in reader:
+        rows.append({
+            str(key or "").lstrip("\ufeff").lstrip("ï»¿"): value
+            for key, value in row.items()
+        })
     return set_cached_value(cache_key, rows, ttl_seconds)
 
 
@@ -1229,6 +1239,30 @@ def normalize_lrt_stop(stop_id, name_tc=None, name_en=None):
     }
 
 
+def normalize_lrt_fare(row):
+    src_stop_id = str(parse_int(row.get("from_station_id")) or row.get("from_station_id") or "").strip()
+    dest_stop_id = str(parse_int(row.get("to_station_id")) or row.get("to_station_id") or "").strip()
+    return {
+        "id": f"LRT:{src_stop_id}:{dest_stop_id}",
+        "operator": "MTR",
+        "src_stop_id": src_stop_id,
+        "dest_stop_id": dest_stop_id,
+        "fare_rule": {
+            "octopus_adult": parse_float(row.get("fare_octo_adult")),
+            "octopus_child": parse_float(row.get("fare_octo_child")),
+            "octopus_elderly": parse_float(row.get("fare_octo_elderly")),
+            "octopus_pwd": parse_float(row.get("fare_octo_pwd")),
+            "octopus_student": parse_float(row.get("fare_octo_student")),
+            "joyyou_sixty": parse_float(row.get("fare_octo_joyyou_sixty")),
+            "single_adult": parse_float(row.get("fare_single_adult")),
+            "single_child": parse_float(row.get("fare_single_child")),
+            "single_elderly": parse_float(row.get("fare_single_elderly")),
+        },
+        "currency": "HKD",
+        "source": "MTR light rail fares CSV",
+    }
+
+
 def build_lrt_dataset():
     cache_key = "dataset:lrt"
     cached = get_cached_value(cache_key)
@@ -1236,6 +1270,7 @@ def build_lrt_dataset():
         return cached
 
     route_stop_rows = fetch_csv_rows(LIGHT_RAIL_ROUTES_STOPS_URL)
+    fare_rows = fetch_csv_rows(LIGHT_RAIL_FARES_URL)
     route_stops = [normalize_lrt_route_stop(row) for row in route_stop_rows]
 
     route_groups = {}
@@ -1298,16 +1333,17 @@ def build_lrt_dataset():
             "routes": LIGHT_RAIL_ROUTES_STOPS_URL,
             "route_stops": LIGHT_RAIL_ROUTES_STOPS_URL,
             "stops": LIGHT_RAIL_ROUTES_STOPS_URL,
+            "fares": LIGHT_RAIL_FARES_URL,
         },
         "routes": list(route_groups.values()),
         "route_stops": route_stops,
         "stops": enriched_stops,
-        "fares": [],
+        "fares": [normalize_lrt_fare(row) for row in fare_rows],
         "validation": build_coordinate_validation("lrt", enriched_stops, "stops"),
         "limitations": [
             "Light Rail CSV has route-stop topology but no coordinates; stops are enriched from manual seed.",
             "Optional LandsD Location Search enrichment is disabled by default for latency; set ENABLE_LRT_LOCATION_SEARCH=1 to refresh missing LRT coordinates.",
-            "No Light Rail fare table is attached yet in this pass.",
+            "Light Rail fare lookup uses static adult Octopus fare between matched stop IDs.",
         ],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
@@ -1451,10 +1487,171 @@ def normalize_route_label(value):
     return "".join(ch for ch in str(value or "").upper().strip() if ch.isalnum())
 
 
+def normalize_stop_label(value):
+    text = str(value or "").upper()
+    for token in ("MTR STATION", "LIGHT RAIL STOP", "LIGHT RAIL", "STATION", "STOP", "站"):
+        text = text.replace(token, " ")
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def name_block_values(name_block):
+    if isinstance(name_block, dict):
+        return [name_block.get("en"), name_block.get("tc"), name_block.get("sc")]
+    return [name_block]
+
+
+def find_stop_by_label(stops, label):
+    normalized = normalize_stop_label(label)
+    if not normalized:
+        return None
+
+    best_contains = None
+    for stop in stops or []:
+        values = [
+            stop.get("stop_id"),
+            stop.get("station_code"),
+            *name_block_values(stop.get("name")),
+            *name_block_values(stop.get("stop_name")),
+        ]
+        candidates = [normalize_stop_label(value) for value in values if value]
+        if normalized in candidates:
+            return stop
+        if not best_contains and any(
+            candidate and (normalized in candidate or candidate in normalized)
+            for candidate in candidates
+        ):
+            best_contains = stop
+    return best_contains
+
+
 def fare_amount_from_rows(rows):
     amounts = [parse_float(row.get("amount")) for row in rows or []]
     amounts = [amount for amount in amounts if amount is not None]
     return max(amounts) if amounts else None
+
+
+def fare_amount_from_station_pair(dataset, origin_stop_id, destination_stop_id):
+    origin_id = str(parse_int(origin_stop_id) or origin_stop_id or "").strip()
+    destination_id = str(parse_int(destination_stop_id) or destination_stop_id or "").strip()
+    for fare in dataset.get("fares") or []:
+        src = str(parse_int(fare.get("src_stop_id")) or fare.get("src_stop_id") or "").strip()
+        dest = str(parse_int(fare.get("dest_stop_id")) or fare.get("dest_stop_id") or "").strip()
+        if {src, dest} == {origin_id, destination_id}:
+            rule = fare.get("fare_rule") or {}
+            amount = parse_float(rule.get("octopus_adult"))
+            if amount is not None:
+                return amount, fare
+    return None, None
+
+
+def route_line_matches(route, line_label):
+    normalized_line = normalize_route_label(line_label)
+    if not normalized_line:
+        return True
+    route_values = [
+        route.get("route_id"),
+        route.get("route"),
+        route.get("line"),
+        route.get("display_route"),
+        *name_block_values(route.get("route_name")),
+    ]
+    normalized_values = [normalize_route_label(value) for value in route_values if value]
+    return any(
+        value and (normalized_line == value or normalized_line in value or value in normalized_line)
+        for value in normalized_values
+    )
+
+
+def find_route_stop_path(dataset, origin_stop_id, destination_stop_id, line_label=None):
+    origin_id = str(origin_stop_id or "").strip()
+    destination_id = str(destination_stop_id or "").strip()
+    route_by_variant = {route.get("id"): route for route in dataset.get("routes") or []}
+    groups = {}
+    for row in dataset.get("route_stops") or []:
+        groups.setdefault(row.get("route_variant_id"), []).append(row)
+
+    fallback_path = None
+    for route_variant_id, rows in groups.items():
+        ordered = sorted(rows, key=lambda item: item.get("sequence") or 0)
+        stop_ids = [str(row.get("stop_id") or "").strip() for row in ordered]
+        if origin_id not in stop_ids or destination_id not in stop_ids:
+            continue
+        origin_index = stop_ids.index(origin_id)
+        destination_index = stop_ids.index(destination_id)
+        if origin_index == destination_index:
+            continue
+        path_rows = ordered[min(origin_index, destination_index):max(origin_index, destination_index) + 1]
+        route = route_by_variant.get(route_variant_id) or {}
+        if route_line_matches(route, line_label):
+            return path_rows
+        if fallback_path is None:
+            fallback_path = path_rows
+    return fallback_path
+
+
+def build_static_rail_leg_lookup(operator, line_label, origin_label, destination_label):
+    op = str(operator or "").strip().lower().replace("_", "-")
+    if op == "mtr":
+        dataset = build_mtr_dataset()
+        source = "MTR lines and fares CSV"
+    elif op in ("lrt", "light-rail", "lightrail"):
+        dataset = build_lrt_dataset()
+        source = "MTR light rail routes/stops and fares CSV"
+    else:
+        return {
+            "operator": operator,
+            "line": line_label,
+            "origin": origin_label,
+            "destination": destination_label,
+            "status": "unsupported_operator",
+            "fare": None,
+            "intermediate_stops": [],
+            "source": "static rail leg lookup",
+        }
+
+    origin = find_stop_by_label(dataset.get("stops"), origin_label)
+    destination = find_stop_by_label(dataset.get("stops"), destination_label)
+    if not origin or not destination:
+        return {
+            "operator": operator,
+            "line": line_label,
+            "origin": origin_label,
+            "destination": destination_label,
+            "status": "stop_not_found",
+            "fare": None,
+            "intermediate_stops": [],
+            "source": source,
+        }
+
+    fare_amount, fare_row = fare_amount_from_station_pair(dataset, origin.get("stop_id"), destination.get("stop_id"))
+    path_rows = find_route_stop_path(dataset, origin.get("stop_id"), destination.get("stop_id"), line_label)
+    stop_by_id = {str(stop.get("stop_id") or ""): stop for stop in dataset.get("stops") or []}
+    path_stops = [
+        stop_by_id.get(str(row.get("stop_id") or ""))
+        for row in path_rows or []
+    ]
+    path_stops = [stop for stop in path_stops if stop]
+    intermediate_stops = path_stops[1:-1] if len(path_stops) > 2 else []
+
+    return {
+        "operator": operator,
+        "line": line_label,
+        "origin": origin_label,
+        "destination": destination_label,
+        "matched_origin_stop": origin,
+        "matched_destination_stop": destination,
+        "fare": {
+            "status": "available",
+            "amount": fare_amount,
+            "currency": "HKD",
+            "source": (fare_row or {}).get("source") or source,
+            "note": "Static adult Octopus fare between matched rail stops.",
+        } if fare_amount is not None else None,
+        "intermediate_stops": intermediate_stops,
+        "stop_count": len(path_stops) if path_stops else None,
+        "status": "available" if fare_amount is not None or intermediate_stops else "not_found",
+        "source": source,
+    }
 
 
 def build_operator_fare_lookup(operator, route_label):
@@ -1657,6 +1854,12 @@ class handler(BaseHTTPRequestHandler):
                 operator = (query_params.get("operator") or [""])[0]
                 route = (query_params.get("route") or [""])[0]
                 return self.send_json(build_operator_fare_lookup(operator, route))
+            if path == "/api/operators/rail-leg":
+                operator = (query_params.get("operator") or [""])[0]
+                line = (query_params.get("line") or [""])[0]
+                origin = (query_params.get("origin") or [""])[0]
+                destination = (query_params.get("destination") or [""])[0]
+                return self.send_json(build_static_rail_leg_lookup(operator, line, origin, destination))
             if path == "/api/operators/citybus/dataset":
                 if compact_requested:
                     prebuilt = load_prebuilt_compact_dataset("citybus")

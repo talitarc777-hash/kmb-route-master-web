@@ -123,7 +123,9 @@ Alternative timing model:
 - Fare enrichment avoids extra Google calls:
 - KMB legs are treated as `HKD 0.0` because of the monthly pass rule
 - Citybus / Tram / MTR Bus legs are priced through `/api/operators/fare`, which uses cached TD or MTR static fare data
-- LRT is kept separate from Hong Kong Tramways; LRT fare remains unavailable unless Google supplies a fare because no LRT fare table is attached yet
+- MTR rail and Light Rail legs are enriched through `/api/operators/rail-leg` using matched Google board/alight stops against MTR static station, route-stop, and fare CSVs
+- LRT is kept separate from Hong Kong Tramways; LRT fare uses the official Light Rail fare CSV when the app can match both stops
+- MTR/LRT intermediate stops are filled from static route-stop tables when the matched line contains both board and alight stops
 - Google `route.fare` is used only when static fare lookup cannot provide a better local value
 - Fare remains unavailable only when neither static fare data nor Google provides a usable fare
 

@@ -501,6 +501,13 @@ function staticFareOperatorKey(operator) {
   return null;
 }
 
+function staticRailOperatorKey(operator) {
+  const key = String(operator || '').trim().toUpperCase();
+  if (key === 'MTR') return 'mtr';
+  if (key === 'LRT') return 'lrt';
+  return null;
+}
+
 async function lookupStaticOperatorFare(operator, route) {
   const operatorKey = staticFareOperatorKey(operator);
   const routeLabel = String(route || '').trim();
@@ -513,6 +520,34 @@ async function lookupStaticOperatorFare(operator, route) {
     if (!response.ok) return null;
     const payload = await response.json();
     return payload?.fare || null;
+  });
+}
+
+async function lookupStaticRailLeg(leg) {
+  const operatorKey = staticRailOperatorKey(leg?.operator);
+  const lineLabel = String(leg?.route || leg?.line || '').trim();
+  const originLabel = getLegStopName(leg?.origin_stop);
+  const destinationLabel = getLegStopName(leg?.destination_stop);
+  if (!operatorKey || !originLabel || !destinationLabel) return null;
+
+  const cacheKey = [
+    'rail-leg',
+    operatorKey,
+    lineLabel.toUpperCase(),
+    originLabel.toUpperCase(),
+    destinationLabel.toUpperCase(),
+  ].join(':');
+
+  return fetchGcpWithCache(staticOperatorFareCacheState, cacheKey, async () => {
+    const query = new URLSearchParams({
+      operator: operatorKey,
+      line: lineLabel,
+      origin: originLabel,
+      destination: destinationLabel,
+    });
+    const response = await fetch(`/api/operators/rail-leg?${query.toString()}`);
+    if (!response.ok) return null;
+    return response.json();
   });
 }
 
@@ -611,6 +646,21 @@ async function enrichGoogleTransitLegFares(legs) {
           note: 'KMB treated as zero fare for this user.',
         },
       };
+    }
+
+    if (leg.operator === 'MTR' || leg.operator === 'LRT') {
+      const railLeg = await lookupStaticRailLeg(leg);
+      if (railLeg) {
+        return {
+          ...leg,
+          fare: railLeg.fare || leg.fare,
+          intermediate_stops: railLeg.intermediate_stops?.length
+            ? railLeg.intermediate_stops
+            : leg.intermediate_stops,
+          stop_count: railLeg.stop_count || leg.stop_count,
+          data_source: `${leg.data_source}; ${railLeg.source || 'static rail data'}`,
+        };
+      }
     }
 
     const staticFare = await lookupStaticOperatorFare(leg.operator, leg.route || leg.line);
