@@ -493,6 +493,39 @@ function googleLineLabel(step) {
   return line.short_name || line.name || line.vehicle?.name || 'Transit';
 }
 
+function decodeGooglePolyline(encoded) {
+  if (!encoded) return [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const coordinates = [];
+
+  while (index < encoded.length) {
+    let result = 0;
+    let shift = 0;
+    let byte = null;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length);
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+
+    result = 0;
+    shift = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length);
+    lng += result & 1 ? ~(result >> 1) : result >> 1;
+
+    coordinates.push([lng / 1e5, lat / 1e5]);
+  }
+
+  return coordinates;
+}
+
 function staticFareOperatorKey(operator) {
   const key = String(operator || '').trim().toUpperCase();
   if (key === 'CTB') return 'ctb';
@@ -622,6 +655,7 @@ function googleTransitLegsFromRoute(route, fallbackOrigin, fallbackDestination) 
       arrivalTime: details.arrival_time?.value ? new Date(details.arrival_time.value * 1000).toISOString() : null,
       headsign: details.headsign || null,
       intermediate_stops: [],
+      geometry: decodeGooglePolyline(step.polyline?.points),
       fare: {
         status: 'unavailable',
         amount: null,
@@ -1541,48 +1575,119 @@ const App = () => {
 
   const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
 
-  const drawFallbackRouteOnMap = (route) => {
+  const colorStringToRgba = (colorString, alpha = 0.9) => {
+    if (!colorString || !String(colorString).startsWith('#')) return [37, 99, 235, alpha];
+    const value = String(colorString).replace('#', '');
+    if (value.length !== 6) return [37, 99, 235, alpha];
+    return [
+      parseInt(value.slice(0, 2), 16),
+      parseInt(value.slice(2, 4), 16),
+      parseInt(value.slice(4, 6), 16),
+      alpha,
+    ];
+  };
+
+  const mapPointFromStop = (point) => {
+    const lat = Number(point?.lat);
+    const lng = Number(point?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { ...point, lat, lng };
+  };
+
+  const fallbackLegStopPath = (leg) => [
+    leg.origin_stop,
+    ...(leg.intermediate_stops || []),
+    leg.destination_stop,
+  ].map(mapPointFromStop).filter(Boolean);
+
+  const drawFallbackRouteOnMap = async (route) => {
     clearMapGraphics();
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = graphicsLayerRef.current;
     const view = viewRef.current;
     if (!layer || !view || !Graphic || !Polyline || !Point || !Extent) return;
 
-    const points = [
-      route.origin,
-      ...(route.legs || []).flatMap((leg) => [leg.origin_stop, leg.destination_stop]),
-      route.destination,
-    ].filter((point) => point?.lat != null && point?.lng != null);
-
-    if (points.length < 2) return;
-
-    layer.add(
-      new Graphic({
-        geometry: new Polyline({
-          paths: [points.map((point) => [point.lng, point.lat])],
-          spatialReference: { wkid: 4326 },
-        }),
-        symbol: { type: 'simple-line', color: [37, 99, 235, 0.85], width: 5, style: 'short-dash' },
-      }),
-    );
-
-    points.forEach((point, index) => {
+    const allPoints = [];
+    const drawPoly = (geometry, color, width = 5, style = 'solid') => {
+      if (!geometry || geometry.length < 2) return;
       layer.add(
         new Graphic({
-          geometry: new Point({ x: point.lng, y: point.lat, spatialReference: { wkid: 4326 } }),
-          symbol: {
-            type: 'simple-marker',
-            color: index === 0 ? [34, 197, 94] : index === points.length - 1 ? [239, 68, 68] : [255, 255, 255],
-            size: index === 0 || index === points.length - 1 ? 13 : 9,
-            outline: { color: [37, 99, 235], width: 2 },
-          },
-          popupTemplate: { title: point.name?.en || point.name || point.stop_id || 'Transport stop' },
+          geometry: new Polyline({
+            paths: [geometry],
+            spatialReference: { wkid: 4326 },
+          }),
+          symbol: { type: 'simple-line', color, width, style },
         }),
       );
-    });
+      geometry.forEach(([lng, lat]) => {
+        if (Number.isFinite(lat) && Number.isFinite(lng)) allPoints.push({ lat, lng });
+      });
+    };
 
-    const lats = points.map((point) => point.lat);
-    const lngs = points.map((point) => point.lng);
+    const addMarker = (point, color, size = 9, isTerminal = false) => {
+      const normalized = mapPointFromStop(point);
+      if (!normalized) return;
+      allPoints.push(normalized);
+      layer.add(
+        new Graphic({
+          geometry: new Point({ x: normalized.lng, y: normalized.lat, spatialReference: { wkid: 4326 } }),
+          symbol: {
+            type: 'simple-marker',
+            style: 'circle',
+            color: isTerminal ? color : [255, 255, 255, 0.95],
+            size,
+            outline: { color, width: isTerminal ? 3 : 2 },
+          },
+          popupTemplate: { title: getLegStopName(normalized), content: normalized.coordinate_source || normalized.data_source || '' },
+        }),
+      );
+    };
+
+    const searchOrigin = mapPointFromStop(route.origin || route.originLoc);
+    const searchDestination = mapPointFromStop(route.destination || route.destLoc);
+    if (searchOrigin) addMarker(searchOrigin, [34, 197, 94, 0.95], 14, true);
+
+    for (const leg of route.legs || []) {
+      const color = colorStringToRgba(getOperatorColor(leg.operator, '#2563EB'));
+      const stopPath = fallbackLegStopPath(leg);
+      const stationGeometry = stopPath.map((point) => [point.lng, point.lat]);
+      let geometry = Array.isArray(leg.geometry) && leg.geometry.length >= 2
+        ? leg.geometry
+        : stationGeometry;
+
+      if (leg.operator === 'KMB' && stopPath.length >= 2 && window.routeEngine?.fetchGCPRoute) {
+        try {
+          const start = stopPath[0];
+          const end = stopPath[stopPath.length - 1];
+          const intermediates = stopPath.slice(1, -1);
+          const roadInfo = await window.routeEngine.fetchGCPRoute(
+            start.lat,
+            start.lng,
+            end.lat,
+            end.lng,
+            'driving',
+            intermediates,
+          );
+          if (roadInfo?.geometry?.length >= 2) geometry = roadInfo.geometry;
+        } catch (err) {
+          console.warn('Fallback KMB map road geometry failed:', err);
+        }
+      }
+
+      const isWalking = leg.operator === 'WALK' || leg.mode === 'walking';
+      drawPoly(geometry, isWalking ? [100, 116, 139, 0.8] : color, isWalking ? 4 : 6, isWalking ? 'short-dot' : 'solid');
+      stopPath.forEach((point, index) => {
+        const isTerminal = index === 0 || index === stopPath.length - 1;
+        addMarker(point, color, isTerminal ? 11 : 7, isTerminal);
+      });
+    }
+
+    if (searchDestination) addMarker(searchDestination, [239, 68, 68, 0.95], 14, true);
+
+    if (allPoints.length < 2) return;
+
+    const lats = allPoints.map((point) => point.lat);
+    const lngs = allPoints.map((point) => point.lng);
     view.goTo(
       new Extent({
         xmin: Math.min(...lngs) - 0.005,
@@ -1771,7 +1876,7 @@ const App = () => {
   // Draw route on map
   const drawRouteOnMap = async (route) => {
     if (isFallbackRoute(route)) {
-      drawFallbackRouteOnMap(route);
+      await drawFallbackRouteOnMap(route);
       return;
     }
     clearMapGraphics();
@@ -2026,7 +2131,7 @@ const App = () => {
     const target = Point
       ? new Point({ x: lng, y: lat, spatialReference: { wkid: 4326 } })
       : { longitude: lng, latitude: lat };
-    view.goTo({ target, zoom: 16 }).catch(() => {});
+    view.goTo({ target, scale: 1000 }).catch(() => {});
   }, []);
 
   const handleUseCurrentLocation = async () => {
