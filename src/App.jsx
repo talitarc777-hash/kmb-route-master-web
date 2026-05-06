@@ -16,9 +16,11 @@ const GCP_CACHE_LIMIT = 200;
 const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
 const GCP_AUTOCOMPLETE_CACHE_KEY = 'kmb_gcp_autocomplete_cache_v1';
 const GCP_TRANSIT_GAP_CACHE_KEY = 'kmb_gcp_transit_gap_cache_v1';
+const STATIC_OPERATOR_FARE_CACHE_KEY = 'kmb_static_operator_fare_cache_v1';
 const GCP_GEOCODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GCP_AUTOCOMPLETE_TTL_MS = 12 * 60 * 60 * 1000;
 const GCP_TRANSIT_GAP_TTL_MS = 15 * 60 * 1000;
+const STATIC_OPERATOR_FARE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 const geocodeCacheState = {
   memory: new Map(),
@@ -42,6 +44,14 @@ const transitGapCacheState = {
   persisted: null,
   storageKey: GCP_TRANSIT_GAP_CACHE_KEY,
   ttlMs: GCP_TRANSIT_GAP_TTL_MS,
+};
+
+const staticOperatorFareCacheState = {
+  memory: new Map(),
+  inflight: new Map(),
+  persisted: null,
+  storageKey: STATIC_OPERATOR_FARE_CACHE_KEY,
+  ttlMs: STATIC_OPERATOR_FARE_TTL_MS,
 };
 
 function loadGcpCache(state) {
@@ -233,6 +243,17 @@ function formatFare(fare) {
   return `${fare.currency || 'HKD'} ${Number(fare.amount).toFixed(1)}`;
 }
 
+function formatHybridFare(route) {
+  if (!isFallbackRoute(route)) return formatFare(route?.fare);
+  if (route?.fare?.status === 'available') return formatFare(route.fare);
+  const hasKmb = (route?.legs || []).some((leg) => leg.operator === 'KMB');
+  const hasPaidUnknown = (route?.legs || []).some((leg) =>
+    leg.operator !== 'KMB' && leg.fare?.status !== 'available'
+  );
+  if (hasKmb && hasPaidUnknown) return 'KMB $0 + Google fare unavailable';
+  return formatFare(route?.fare);
+}
+
 function getOperatorDisplayName(code) {
   const key = String(code || '').trim().toUpperCase();
   if (key === 'KMB') return 'KMB';
@@ -257,6 +278,23 @@ function getOperatorBadgeClass(code) {
   if (key === 'WALK') return 'bg-slate-400 text-white';
   if (key === 'BUS') return 'bg-sky-600 text-white';
   return 'bg-slate-500 text-white';
+}
+
+function getOperatorColor(code, fallbackColor = '#64748B') {
+  const key = String(code || '').trim().toUpperCase();
+  if (key === 'KMB') return '#E1251B';
+  if (key === 'CTB') return '#2563EB';
+  if (key === 'TRAM') return '#059669';
+  if (key === 'MTR') return '#F59E0B';
+  if (key === 'MTR_BUS') return '#0891B2';
+  if (key === 'LRT') return '#65A30D';
+  if (key === 'WALK') return '#94A3B8';
+  if (key === 'BUS') return '#0284C7';
+  return fallbackColor;
+}
+
+function getLegStopName(stop) {
+  return stop?.name?.tc || stop?.name?.en || stop?.stop_id || stop?.id || 'Stop';
 }
 
 function parseOperatorCodes(value) {
@@ -454,6 +492,29 @@ function googleLineLabel(step) {
   return line.short_name || line.name || line.vehicle?.name || 'Transit';
 }
 
+function staticFareOperatorKey(operator) {
+  const key = String(operator || '').trim().toUpperCase();
+  if (key === 'CTB') return 'ctb';
+  if (key === 'TRAM') return 'tram';
+  if (key === 'MTR_BUS') return 'mtr-bus';
+  return null;
+}
+
+async function lookupStaticOperatorFare(operator, route) {
+  const operatorKey = staticFareOperatorKey(operator);
+  const routeLabel = String(route || '').trim();
+  if (!operatorKey || !routeLabel) return null;
+
+  const cacheKey = `${operatorKey}:${routeLabel.toUpperCase()}`;
+  return fetchGcpWithCache(staticOperatorFareCacheState, cacheKey, async () => {
+    const query = new URLSearchParams({ operator: operatorKey, route: routeLabel });
+    const response = await fetch(`/api/operators/fare?${query.toString()}`);
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.fare || null;
+  });
+}
+
 function googleFareFromRoute(route) {
   const fare = route?.fare;
   const amount = Number(fare?.value);
@@ -521,6 +582,10 @@ function googleTransitLegsFromRoute(route, fallbackOrigin, fallbackDestination) 
       stop_count: details.num_stops != null ? Number(details.num_stops) + 1 : null,
       estimated_ride_time_min: Math.max(1, Math.round((step.duration?.value || 60) / 60)),
       ride_time_source: 'google_transit_step_duration',
+      boardTime: details.departure_time?.value ? new Date(details.departure_time.value * 1000).toISOString() : null,
+      arrivalTime: details.arrival_time?.value ? new Date(details.arrival_time.value * 1000).toISOString() : null,
+      headsign: details.headsign || null,
+      intermediate_stops: [],
       fare: {
         status: 'unavailable',
         amount: null,
@@ -532,6 +597,34 @@ function googleTransitLegsFromRoute(route, fallbackOrigin, fallbackDestination) 
   });
 }
 
+async function enrichGoogleTransitLegFares(legs) {
+  const enriched = await Promise.all((legs || []).map(async (leg) => {
+    if (leg.operator === 'KMB') {
+      return {
+        ...leg,
+        fare: {
+          status: 'available',
+          amount: 0,
+          currency: 'HKD',
+          source: 'KMB monthly pass user preference',
+          note: 'KMB treated as zero fare for this user.',
+        },
+      };
+    }
+
+    const staticFare = await lookupStaticOperatorFare(leg.operator, leg.route || leg.line);
+    if (!staticFare) return leg;
+    return {
+      ...leg,
+      fare: {
+        ...staticFare,
+        source: staticFare.source || 'operator static fare data',
+      },
+    };
+  }));
+  return enriched;
+}
+
 function walkingDistanceFromGoogleRoute(route) {
   return (route?.legs || [])
     .flatMap((leg) => leg.steps || [])
@@ -541,6 +634,9 @@ function walkingDistanceFromGoogleRoute(route) {
 
 function kmbSegmentToGoogleGapLeg(segment, stopMap, index) {
   const rideInfo = getSegmentRideDisplay(segment);
+  const intermediateStops = (segment?.stops || [])
+    .slice(1, -1)
+    .map((stopId) => normalizeKmbStopForLeg(stopMap, stopId));
   return {
     operator: 'KMB',
     mode: 'kmb',
@@ -554,6 +650,10 @@ function kmbSegmentToGoogleGapLeg(segment, stopMap, index) {
     stop_count: Math.max(1, segment?.stops?.length || 1),
     estimated_ride_time_min: rideInfo.minutes,
     ride_time_source: rideInfo.source,
+    boardTime: segment?.boardTime || segment?.nextEta || null,
+    arrivalTime: segment?.arrivalTime || null,
+    intermediate_stops: intermediateStops,
+    source_segment: segment,
     fare: {
       status: 'available',
       amount: 0,
@@ -576,7 +676,6 @@ function transferStopsForLegs(legs) {
 }
 
 function combineGoogleGapFare(legs, googleFare) {
-  if (googleFare?.status === 'available') return googleFare;
   const nonKmbFares = legs
     .map((leg) => leg.fare)
     .filter((fare, index) => legs[index]?.operator !== 'KMB');
@@ -589,6 +688,7 @@ function combineGoogleGapFare(legs, googleFare) {
       source: knownNonKmb.map((fare) => fare.source).filter(Boolean).join('; '),
     };
   }
+  if (googleFare?.status === 'available') return googleFare;
   return googleFare || {
     status: 'unavailable',
     amount: null,
@@ -597,12 +697,31 @@ function combineGoogleGapFare(legs, googleFare) {
   };
 }
 
-function buildGoogleGapCandidate(route, routeIndex, gap) {
+function applyGoogleFareToTransitLegs(legs, googleFare) {
+  if (googleFare?.status !== 'available' || googleFare.amount == null) return legs;
+  let applied = false;
+  return legs.map((leg) => {
+    if (applied || leg.operator === 'KMB' || leg.operator === 'WALK') return leg;
+    if (leg.fare?.status === 'available' && leg.fare.amount != null) return leg;
+    applied = true;
+    return {
+      ...leg,
+      fare: {
+        ...googleFare,
+        note: 'Google provided this fare for the transit gap; per-leg split is not available.',
+      },
+    };
+  });
+}
+
+async function buildGoogleGapCandidate(route, routeIndex, gap) {
   const googleLeg = route?.legs?.[0] || {};
   const durationMin = Math.max(1, Math.round((googleLeg.duration?.value || 60) / 60));
   const originStop = normalizeGoogleStop(null, gap.originLoc, gap.originLoc?.name || 'Gap start');
   const destinationStop = normalizeGoogleStop(null, gap.destLoc, gap.destLoc?.name || 'Gap end');
-  const transitLegs = googleTransitLegsFromRoute(route, originStop, destinationStop);
+  const transitLegs = await enrichGoogleTransitLegFares(
+    googleTransitLegsFromRoute(route, originStop, destinationStop),
+  );
   const legs = transitLegs.length > 0
     ? transitLegs
     : [{
@@ -697,9 +816,11 @@ async function generateGoogleTransitGapCandidates(gap, options = {}) {
     return [];
   }
 
-  return data.routes
-    .slice(0, 3)
-    .map((route, index) => buildGoogleGapCandidate(route, index, gap));
+  return Promise.all(
+    data.routes
+      .slice(0, 3)
+      .map((route, index) => buildGoogleGapCandidate(route, index, gap)),
+  );
 }
 
 function annotateGapRepairCandidates(candidates, gap) {
@@ -721,7 +842,10 @@ function annotateGapRepairCandidates(candidates, gap) {
             gap.stopMap,
             gap.segmentIndex + 1 + index,
           ));
-    const fullLegs = [...kmbBefore, ...(candidate.legs || []), ...kmbAfter];
+    const fullLegs = applyGoogleFareToTransitLegs(
+      [...kmbBefore, ...(candidate.legs || []), ...kmbAfter],
+      candidate.fare,
+    );
     const routeText = fullLegs.map((leg) => leg.route || leg.line).filter(Boolean).join(' -> ') || candidate.route;
     const operators = Array.from(new Set(fullLegs.map((leg) => leg.operator).filter(Boolean)));
     const hybridTime = !gap.isWholeTrip && baseRouteTime > 0
@@ -2394,7 +2518,7 @@ const App = () => {
                             : `${card.representative.transfers} transfer${card.representative.transfers > 1 ? 's' : ''}`}
                         </span>
                         <span>{'\u00B7'} Walk {card.representative.walk_distance_m}m</span>
-                        <span>{'\u00B7'} {formatFare(card.representative.fare)}</span>
+                        <span>{'\u00B7'} {formatHybridFare(card.representative)}</span>
                       </div>
                       {card.representative.repairReason && (
                         <div className="mt-2 text-[11px] font-bold text-blue-600">
@@ -2510,9 +2634,14 @@ const App = () => {
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
               <div className="flex items-center gap-2 flex-wrap mb-2">
-                <span className="px-3 py-1 rounded-xl bg-blue-600 text-white font-black text-sm">
-                  {selectedRoute.operator}
-                </span>
+                {parseOperatorCodes(selectedRoute.operator).map((operatorCode) => (
+                  <span
+                    key={operatorCode}
+                    className={`px-3 py-1 rounded-xl font-black text-sm ${getOperatorBadgeClass(operatorCode)}`}
+                  >
+                    {getOperatorDisplayName(operatorCode)}
+                  </span>
+                ))}
                 <span className="font-black text-xl text-slate-800">
                   {selectedRoute.route || selectedRoute.line}
                 </span>
@@ -2523,7 +2652,7 @@ const App = () => {
             </div>
             <div className="text-right">
               <div className="text-blue-700 font-bold text-xl">~{selectedRoute.estimated_time_min}min</div>
-              <div className="text-sm font-black text-slate-700">{formatFare(selectedRoute.fare)}</div>
+              <div className="text-sm font-black text-slate-700">{formatHybridFare(selectedRoute)}</div>
             </div>
           </div>
 
@@ -2536,19 +2665,26 @@ const App = () => {
           </div>
 
           <div className="space-y-3">
-            {(selectedRoute.legs || []).map((leg, index) => (
-              <div key={`${leg.route_variant_id}-${index}`} className="pl-3 border-l-4 border-blue-500 py-2">
+            {(selectedRoute.legs || []).map((leg, index) => {
+              const color = getOperatorColor(leg.operator, ROUTE_COLORS[index % ROUTE_COLORS.length]);
+              const isExpanded = expandedSegments.has(`fallback-${index}`);
+              const boardClock = formatClockTime(leg.boardTime);
+              const arrivalClock = formatClockTime(leg.arrivalTime);
+              const intermediateStops = leg.intermediate_stops || [];
+              const canExpand = intermediateStops.length > 0;
+              return (
+              <div key={`${leg.route_variant_id}-${index}`} className="pl-3 border-l-4 py-2" style={{ borderColor: color }}>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <span className="px-2 py-0.5 rounded-lg bg-blue-600 text-white text-xs font-black">
-                    {leg.operator}
+                  <span className="px-2 py-0.5 rounded-lg text-white text-xs font-black" style={{ backgroundColor: color }}>
+                    {getOperatorDisplayName(leg.operator)}
                   </span>
                   <span className="text-sm font-black text-slate-800">{leg.route || leg.line}</span>
                   <span className="text-xs font-bold text-slate-500">{formatFare(leg.fare)}</span>
                 </div>
                 <div className="text-sm font-bold text-slate-700">
-                  {leg.origin_stop?.name?.tc || leg.origin_stop?.name?.en || leg.origin_stop?.stop_id}
+                  {getLegStopName(leg.origin_stop)}
                   <span className="mx-2 text-slate-300">{'\u2192'}</span>
-                  {leg.destination_stop?.name?.tc || leg.destination_stop?.name?.en || leg.destination_stop?.stop_id}
+                  {getLegStopName(leg.destination_stop)}
                 </div>
                 <div className="text-xs text-slate-400 mt-1">
                   {leg.stop_count != null ? `${leg.stop_count} stops` : 'Google segment'} {'\u00B7'} ride estimate {leg.estimated_ride_time_min} min
@@ -2556,13 +2692,78 @@ const App = () => {
                     ? ' (Google transit)'
                     : ''}
                 </div>
+                {(boardClock || arrivalClock || leg.headsign) && (
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold text-slate-600">
+                    {boardClock && (
+                      <span className="px-2 py-1 rounded-full border border-slate-200 bg-slate-50">
+                        Board {boardClock}
+                      </span>
+                    )}
+                    {arrivalClock && (
+                      <span className="px-2 py-1 rounded-full border border-red-100 bg-red-50 text-[#E1251B]">
+                        Arrive {arrivalClock}
+                      </span>
+                    )}
+                    {leg.headsign && (
+                      <span className="px-2 py-1 rounded-full border border-slate-200 bg-slate-50">
+                        To {leg.headsign}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  disabled={!canExpand}
+                  onClick={() => {
+                    if (!canExpand) return;
+                    const key = `fallback-${index}`;
+                    const next = new Set(expandedSegments);
+                    next.has(key) ? next.delete(key) : next.add(key);
+                    setExpandedSegments(next);
+                  }}
+                  className={`mt-2 text-xs font-bold ${canExpand ? 'text-slate-500 hover:text-slate-700' : 'text-slate-300 cursor-default'}`}
+                >
+                  {canExpand
+                    ? `${isExpanded ? '\u25B2' : '\u25BC'} ${intermediateStops.length} intermediate stops`
+                    : 'No intermediate stop list from this data source'}
+                </button>
+                {isExpanded && (
+                  <div className="mt-2 py-2 border-l-2 border-dashed border-slate-200 pl-3 ml-1 space-y-2">
+                    {intermediateStops.map((stop, stopIdx) => (
+                      <div key={`${stop.stop_id}-${stopIdx}`} className="flex items-center justify-between text-sm text-slate-600">
+                        <span>
+                          <span className="text-slate-300 mr-2">{'\u2022'}</span>
+                          {getLegStopName(stop)}
+                        </span>
+                        {leg.operator === 'KMB' && (
+                          <button
+                            onClick={() =>
+                              handleAddToBookmark(
+                                stop.stop_id,
+                                getLegStopName(stop),
+                                (stopRoutesRef.current[stop.stop_id] || []).map((r) => ({
+                                  route: r.route,
+                                  service_type: r.service_type,
+                                })),
+                              )
+                            }
+                            className="text-xs text-slate-300 hover:text-yellow-500"
+                          >
+                            {'\u2B50'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {index < (selectedRoute.transfer_stops || []).length && (
                   <div className="mt-2 text-xs font-bold text-slate-500">
                     Transfer walk: {selectedRoute.transfer_stops[index].walk_distance_m}m
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-4 text-xs text-slate-500 font-semibold">

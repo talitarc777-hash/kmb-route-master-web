@@ -119,10 +119,15 @@ Alternative timing model:
 - Google provides the replacement gap route and total gap duration
 - Google step durations are displayed for each transit leg
 - The app does not locally compute non-KMB stop matching, route topology, waiting time, or transfer routing
-- Fare is marked unavailable unless Google returns `route.fare`
+- Fare enrichment avoids extra Google calls:
+- KMB legs are treated as `HKD 0.0` because of the monthly pass rule
+- Citybus / Tram / MTR Bus legs are priced through `/api/operators/fare`, which uses cached TD or MTR static fare data
+- Google `route.fare` is used only when static fare lookup cannot provide a better local value
+- Fare remains unavailable only when neither static fare data nor Google provides a usable fare
 
 Alternative loading resilience:
 - Google Transit gap responses are cached in memory/localStorage for a short time window
+- Static operator fare lookups are cached in memory/localStorage for 14 days
 - If Google fails but KMB routes exist, the app keeps the KMB results
 - If no KMB route exists and Google also fails, the app shows a no-route error
 

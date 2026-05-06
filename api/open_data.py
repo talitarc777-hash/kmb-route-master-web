@@ -1447,6 +1447,86 @@ def build_operator_diagnostics(mode_filter=None):
     }
 
 
+def normalize_route_label(value):
+    return "".join(ch for ch in str(value or "").upper().strip() if ch.isalnum())
+
+
+def fare_amount_from_rows(rows):
+    amounts = [parse_float(row.get("amount")) for row in rows or []]
+    amounts = [amount for amount in amounts if amount is not None]
+    return max(amounts) if amounts else None
+
+
+def build_operator_fare_lookup(operator, route_label):
+    op = str(operator or "").strip().lower().replace("_", "-")
+    normalized_route = normalize_route_label(route_label)
+    if not normalized_route:
+        return {
+            "operator": operator,
+            "route": route_label,
+            "fare": None,
+            "status": "missing_route",
+            "source": "operator static fare lookup",
+        }
+
+    if op in ("ctb", "citybus", "bus"):
+        dataset = build_citybus_dataset(include_fares=True)
+        source = "TD bus routes and section fare XML"
+    elif op in ("tram", "hktram"):
+        dataset = build_tram_dataset(include_fares=True)
+        source = "TD tram routes and fare XML"
+    elif op in ("mtr-bus", "mtr_bus"):
+        dataset = build_mtr_bus_dataset()
+        source = "MTR bus fares CSV"
+    else:
+        return {
+            "operator": operator,
+            "route": route_label,
+            "fare": None,
+            "status": "unsupported_operator",
+            "source": "operator static fare lookup",
+        }
+
+    matching_routes = [
+        route for route in dataset.get("routes") or []
+        if normalize_route_label(route.get("display_route") or route.get("route") or route.get("line")) == normalized_route
+    ]
+    route_ids = {route.get("route_id") for route in matching_routes if route.get("route_id")}
+    matching_fares = [
+        fare for fare in dataset.get("fares") or []
+        if fare.get("route_id") in route_ids
+    ]
+
+    route_fares = [parse_float(route.get("fare")) for route in matching_routes]
+    route_fares = [fare for fare in route_fares if fare is not None]
+    amount = max(route_fares) if route_fares else fare_amount_from_rows(matching_fares)
+
+    if amount is None and op in ("mtr-bus", "mtr_bus"):
+        fare_values = [
+            parse_float((fare.get("fare_rule") or {}).get("octopus_adult"))
+            for fare in matching_fares
+        ]
+        fare_values = [fare for fare in fare_values if fare is not None]
+        amount = max(fare_values) if fare_values else None
+
+    return {
+        "operator": operator,
+        "route": route_label,
+        "normalized_route": normalized_route,
+        "fare": {
+            "status": "available",
+            "amount": amount,
+            "currency": "HKD",
+            "source": source,
+            "note": "Static adult fare lookup; section fare may be approximate.",
+        } if amount is not None else None,
+        "status": "available" if amount is not None else "not_found",
+        "matched_route_count": len(matching_routes),
+        "matched_fare_count": len(matching_fares),
+        "source": source,
+    }
+
+
 def compact_operator_dataset(dataset, include_fares=False):
     routes = []
     for route in dataset.get("routes") or []:
@@ -1573,6 +1653,10 @@ class handler(BaseHTTPRequestHandler):
             if path == "/api/operators/diagnostics":
                 mode_filter = (query_params.get("modes") or [""])[0]
                 return self.send_json(build_operator_diagnostics(mode_filter or None))
+            if path == "/api/operators/fare":
+                operator = (query_params.get("operator") or [""])[0]
+                route = (query_params.get("route") or [""])[0]
+                return self.send_json(build_operator_fare_lookup(operator, route))
             if path == "/api/operators/citybus/dataset":
                 if compact_requested:
                     prebuilt = load_prebuilt_compact_dataset("citybus")
