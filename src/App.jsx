@@ -411,6 +411,26 @@ function normalizeGoogleStop(stop, fallbackLoc, fallbackName = 'Google transit s
   };
 }
 
+function normalizeKmbStopForLeg(stopMap, stopId) {
+  const stop = stopMap?.[stopId];
+  const lat = Number(stop?.lat);
+  const lng = Number(stop?.lng);
+  return {
+    id: stopId,
+    stop_id: stopId,
+    station_code: null,
+    name: {
+      tc: stop?.name_tc || null,
+      en: stop?.name_en || stopId || 'KMB stop',
+      sc: null,
+    },
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null,
+    distance_km: 0,
+    coordinate_source: 'KMB Open Data',
+  };
+}
+
 function googleOperatorCode(step) {
   const details = step?.transit_details;
   const line = details?.line || {};
@@ -517,6 +537,64 @@ function walkingDistanceFromGoogleRoute(route) {
     .flatMap((leg) => leg.steps || [])
     .filter((step) => step?.travel_mode === 'WALKING')
     .reduce((sum, step) => sum + Number(step?.distance?.value || 0), 0);
+}
+
+function kmbSegmentToGoogleGapLeg(segment, stopMap, index) {
+  const rideInfo = getSegmentRideDisplay(segment);
+  return {
+    operator: 'KMB',
+    mode: 'kmb',
+    route: segment?.route || 'KMB',
+    line: segment?.route || 'KMB',
+    route_id: segment?.route || 'KMB',
+    route_variant_id: `kmb:${segment?.route || 'unknown'}:${index}`,
+    direction: segment?.routeInfo?.bound || null,
+    origin_stop: normalizeKmbStopForLeg(stopMap, segment?.fromStop),
+    destination_stop: normalizeKmbStopForLeg(stopMap, segment?.toStop),
+    stop_count: Math.max(1, segment?.stops?.length || 1),
+    estimated_ride_time_min: rideInfo.minutes,
+    ride_time_source: rideInfo.source,
+    fare: {
+      status: 'available',
+      amount: 0,
+      currency: 'HKD',
+      source: 'KMB monthly pass user preference',
+      note: 'KMB treated as zero fare for this user.',
+    },
+    data_source: 'KMB Open Data',
+    hasActiveEta: Boolean(segment?.hasActiveEta),
+    nextEta: segment?.nextEta || null,
+  };
+}
+
+function transferStopsForLegs(legs) {
+  return legs.slice(0, -1).map((leg, index) => ({
+    alight: leg.destination_stop,
+    board: legs[index + 1]?.origin_stop,
+    walk_distance_m: 0,
+  }));
+}
+
+function combineGoogleGapFare(legs, googleFare) {
+  if (googleFare?.status === 'available') return googleFare;
+  const nonKmbFares = legs
+    .map((leg) => leg.fare)
+    .filter((fare, index) => legs[index]?.operator !== 'KMB');
+  const knownNonKmb = nonKmbFares.filter((fare) => fare?.status === 'available' && fare.amount != null);
+  if (nonKmbFares.length > 0 && knownNonKmb.length === nonKmbFares.length) {
+    return {
+      status: 'available',
+      amount: Number(knownNonKmb.reduce((sum, fare) => sum + Number(fare.amount || 0), 0).toFixed(1)),
+      currency: knownNonKmb[0]?.currency || 'HKD',
+      source: knownNonKmb.map((fare) => fare.source).filter(Boolean).join('; '),
+    };
+  }
+  return googleFare || {
+    status: 'unavailable',
+    amount: null,
+    currency: 'HKD',
+    source: 'Google Directions Transit',
+  };
 }
 
 function buildGoogleGapCandidate(route, routeIndex, gap) {
@@ -628,6 +706,24 @@ function annotateGapRepairCandidates(candidates, gap) {
   const originalSegmentMinutes = estimateKmbSegmentMinutes(gap.segment);
   const baseRouteTime = gap.route?.estimatedTime ?? 0;
   return (candidates || []).map((candidate) => {
+    const kmbSegments = gap.route?.segments || [];
+    const kmbBefore = gap.isWholeTrip
+      ? []
+      : kmbSegments
+          .slice(0, gap.segmentIndex)
+          .map((segment, index) => kmbSegmentToGoogleGapLeg(segment, gap.stopMap, index));
+    const kmbAfter = gap.isWholeTrip
+      ? []
+      : kmbSegments
+          .slice(gap.segmentIndex + 1)
+          .map((segment, index) => kmbSegmentToGoogleGapLeg(
+            segment,
+            gap.stopMap,
+            gap.segmentIndex + 1 + index,
+          ));
+    const fullLegs = [...kmbBefore, ...(candidate.legs || []), ...kmbAfter];
+    const routeText = fullLegs.map((leg) => leg.route || leg.line).filter(Boolean).join(' -> ') || candidate.route;
+    const operators = Array.from(new Set(fullLegs.map((leg) => leg.operator).filter(Boolean)));
     const hybridTime = !gap.isWholeTrip && baseRouteTime > 0
       ? Math.max(1, Math.round(baseRouteTime - originalSegmentMinutes + candidate.estimated_time_min))
       : candidate.estimated_time_min;
@@ -635,7 +731,10 @@ function annotateGapRepairCandidates(candidates, gap) {
       ...candidate,
       id: `gap-repair-${gap.route?.id || gap.routeIndex}-${gap.segmentIndex}-${candidate.id}`,
       isFallback: true,
-      optionLabel: 'Google transit gap option',
+      operator: operators.join('+') || candidate.operator,
+      route: routeText,
+      line: routeText,
+      optionLabel: gap.isWholeTrip ? 'Google transit option' : 'KMB + Google transit option',
       alternativeRole: gap.isWholeTrip ? 'google_transit_whole_trip' : 'google_transit_gap_repair',
       repairReason: gap.isWholeTrip
         ? 'KMB route is unavailable; Google Transit suggested this whole-trip option'
@@ -645,8 +744,17 @@ function annotateGapRepairCandidates(candidates, gap) {
       baseKmbRouteId: gap.route?.id || null,
       original_gap_time_min: originalSegmentMinutes,
       alternative_gap_time_min: candidate.estimated_time_min,
+      legs: fullLegs,
+      transfer_stops: transferStopsForLegs(fullLegs),
+      transfers: Math.max(0, fullLegs.length - 1),
       estimated_time_min: hybridTime,
       estimatedTime: hybridTime,
+      origin: gap.isWholeTrip ? candidate.origin : (gap.searchOriginLoc || candidate.origin),
+      destination: gap.isWholeTrip ? candidate.destination : (gap.searchDestLoc || candidate.destination),
+      origin_stop: fullLegs[0]?.origin_stop || candidate.origin_stop,
+      destination_stop: fullLegs[fullLegs.length - 1]?.destination_stop || candidate.destination_stop,
+      ride_time_min: fullLegs.reduce((sum, leg) => sum + Number(leg.estimated_ride_time_min || 0), 0),
+      fare: combineGoogleGapFare(fullLegs, candidate.fare),
       notes: [
         ...(candidate.notes || []),
         gap.isWholeTrip
@@ -1385,7 +1493,12 @@ const App = () => {
       if (searchAllowFallback) {
         const hasValidKmb = filteredCandidates.length > 0;
         const kmbGaps = hasValidKmb
-          ? findKmbEtaGaps(filteredCandidates, stopMapRef.current, 3)
+          ? findKmbEtaGaps(filteredCandidates, stopMapRef.current, 3).map((gap) => ({
+              ...gap,
+              stopMap: stopMapRef.current,
+              searchOriginLoc: originLoc,
+              searchDestLoc: destLoc,
+            }))
           : [{
               isWholeTrip: true,
               route: null,
@@ -1394,6 +1507,9 @@ const App = () => {
               segmentIndex: 0,
               originLoc,
               destLoc,
+              stopMap: stopMapRef.current,
+              searchOriginLoc: originLoc,
+              searchDestLoc: destLoc,
             }];
 
         try {
@@ -2435,7 +2551,7 @@ const App = () => {
                   {leg.destination_stop?.name?.tc || leg.destination_stop?.name?.en || leg.destination_stop?.stop_id}
                 </div>
                 <div className="text-xs text-slate-400 mt-1">
-                  {leg.stop_count} stops {'\u00B7'} ride estimate {leg.estimated_ride_time_min} min
+                  {leg.stop_count != null ? `${leg.stop_count} stops` : 'Google segment'} {'\u00B7'} ride estimate {leg.estimated_ride_time_min} min
                   {String(leg.ride_time_source || '').startsWith('google_transit_')
                     ? ' (Google transit)'
                     : ''}

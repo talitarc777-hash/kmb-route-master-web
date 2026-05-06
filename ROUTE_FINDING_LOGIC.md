@@ -82,7 +82,8 @@ When the checkbox is on:
 - It inspects the first 3 fastest KMB candidates for no-ETA / unavailable KMB segments
 - For each missing KMB segment, the app calls `/api/google/directions/json` with `mode=transit`
 - Google is asked only for the gap between the KMB segment's start stop and end stop
-- The returned Google route is shown as a gap option, with the transit legs, operators, route/line labels, Google duration, and fare only if Google provides one
+- The returned Google route is inserted into the original KMB journey, so the card shows the whole method such as `KMB -> MTR -> KMB`
+- The card/detail panel includes KMB legs before the gap, Google Transit legs for the gap, and KMB legs after the gap
 - The displayed hybrid time is: original KMB route time minus the missing KMB segment estimate plus the Google gap duration
 - If no KMB route is available at all, Google Transit is asked for the whole origin-to-destination journey
 - The old local Citybus / Tram / MTR / MTR Bus / Light Rail dataset search is no longer used in the live app flow
@@ -92,6 +93,7 @@ When the checkbox is on:
 Google gap candidates are generated from the Google Directions response:
 - `routes[].legs[].steps[]` is scanned for `TRANSIT` steps
 - Each transit step becomes one displayed leg
+- KMB segments before and after the missing segment are converted into displayed legs and merged around the Google legs
 - Operator labels are inferred from Google vehicle type, line name, and agency name
 - Walking steps are not separately routed by our code; Google route duration already includes its own walking/waiting/transit timing
 - If Google returns a walking-only option, it can be shown as a walk gap option
