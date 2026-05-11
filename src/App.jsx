@@ -24,6 +24,7 @@ const GCP_GEOCODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GCP_AUTOCOMPLETE_TTL_MS = 12 * 60 * 60 * 1000;
 const GCP_TRANSIT_GAP_TTL_MS = 15 * 60 * 1000;
 const STATIC_OPERATOR_FARE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 
 const geocodeCacheState = {
   memory: new Map(),
@@ -177,18 +178,77 @@ function parseLocationInput(input) {
   return { type: 'text', query: trimmed };
 }
 
+function parseNominatimPlaceId(placeId) {
+  if (typeof placeId !== 'string' || !placeId.startsWith('nominatim:')) return null;
+  const pair = placeId.slice('nominatim:'.length).split(',');
+  if (pair.length !== 2) return null;
+  const lat = Number(pair[0]);
+  const lng = Number(pair[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function buildNominatimSuggestion(row) {
+  const lat = Number(row?.lat);
+  const lng = Number(row?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const label = String(row?.display_name || '').trim();
+  if (!label) return null;
+  const pieces = label.split(',').map((part) => part.trim()).filter(Boolean);
+  return {
+    place_id: `nominatim:${lat},${lng}`,
+    description: label,
+    structured_formatting: {
+      main_text: pieces[0] || label,
+      secondary_text: pieces.slice(1).join(', '),
+    },
+  };
+}
+
+async function searchNominatim(query, limit = 1) {
+  const search = new URLSearchParams({
+    format: 'jsonv2',
+    countrycodes: 'hk',
+    addressdetails: '0',
+    limit: String(Math.max(1, limit)),
+    q: query,
+  });
+  const response = await fetch(`${NOMINATIM_SEARCH_URL}?${search.toString()}`);
+  if (!response.ok) return [];
+  const payload = await response.json();
+  if (!Array.isArray(payload)) return [];
+  return payload;
+}
+
 async function geocode(query, placeId = null) {
+  const selectedNominatim = parseNominatimPlaceId(placeId);
+  if (selectedNominatim) return { ...selectedNominatim, name: query };
+
   const normalizedQuery = query.trim().toLowerCase();
   const cacheKey = placeId ? `pid:${placeId}` : `q:${normalizedQuery}`;
   return fetchGcpWithCache(geocodeCacheState, cacheKey, async () => {
     const queryPart = placeId
       ? `place_id=${encodeURIComponent(placeId)}`
       : `address=${encodeURIComponent(query)}&components=country:hk`;
-    const res = await fetch(toApiUrl(`/api/google/geocode/json?${queryPart}`));
-    const data = await res.json();
-    if (!data || data.status !== 'OK' || data.results.length === 0) return null;
-    const loc = data.results[0].geometry.location;
-    return { lat: loc.lat, lng: loc.lng, name: query };
+
+    try {
+      const res = await fetch(toApiUrl(`/api/google/geocode/json?${queryPart}`));
+      const data = await res.json();
+      if (data?.status === 'OK' && Array.isArray(data.results) && data.results.length > 0) {
+        const loc = data.results[0]?.geometry?.location;
+        if (loc?.lat != null && loc?.lng != null) {
+          return { lat: loc.lat, lng: loc.lng, name: query };
+        }
+      }
+    } catch {
+      // Continue to fallback geocoder below.
+    }
+
+    const fallbackRows = await searchNominatim(query, 1);
+    const fallback = buildNominatimSuggestion(fallbackRows[0]);
+    if (!fallback) return null;
+    const loc = parseNominatimPlaceId(fallback.place_id);
+    return loc ? { ...loc, name: query } : null;
   });
 }
 
@@ -999,11 +1059,20 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
           autocompleteCacheState,
           key,
           async () => {
-            const res = await fetch(
-              toApiUrl(`/api/google/place/autocomplete/json?input=${encodeURIComponent(trimmedValue)}&components=country:hk`),
-            );
-            const data = await res.json();
-            return data.status === 'OK' ? data.predictions.slice(0, 5) : [];
+            try {
+              const res = await fetch(
+                toApiUrl(`/api/google/place/autocomplete/json?input=${encodeURIComponent(trimmedValue)}&components=country:hk`),
+              );
+              const data = await res.json();
+              if (data?.status === 'OK' && Array.isArray(data.predictions)) {
+                return data.predictions.slice(0, 5);
+              }
+            } catch {
+              // Continue to fallback autocomplete below.
+            }
+
+            const rows = await searchNominatim(trimmedValue, 5);
+            return rows.map(buildNominatimSuggestion).filter(Boolean).slice(0, 5);
           },
         );
         setSuggestions(predictions || []);
@@ -1047,7 +1116,7 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
         <div className="absolute top-full left-0 right-0 z-50 bg-white border border-slate-200 rounded-xl shadow-xl mt-1 overflow-hidden">
           {suggestions.map((s) => (
             <div
-              key={s.place_id}
+              key={`${s.place_id}:${s.description}`}
               onMouseDown={() => {
                 onChange({ name: s.description, place_id: s.place_id });
                 setShow(false);
@@ -1549,7 +1618,8 @@ const App = () => {
       setDataLoaded(true);
     } catch (err) {
       console.error("Data Load Error:", err);
-      setLoadingStatus('Connection failed. Please check your internet and refresh.');
+      const details = err?.message ? ` (${err.message})` : '';
+      setLoadingStatus(`Connection failed${details}. Please refresh or verify your API host settings.`);
     }
   };
 
