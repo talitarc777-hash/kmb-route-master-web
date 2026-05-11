@@ -1,3 +1,5 @@
+import { toApiUrl } from '../utils/apiBase.js';
+
 const STATIC_CACHE_PREFIX = 'kmb_operator_static_cache_v6';
 const STATIC_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const ETA_TTL_MS = 20 * 1000;
@@ -70,7 +72,7 @@ function isUsableStaticDataset(value) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetch(toApiUrl(url));
   if (!response.ok) {
     throw new Error(`Failed to load ${url}: ${response.status}`);
   }

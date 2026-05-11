@@ -1,4 +1,5 @@
 import { buildGeoResolver, buildOperatorSummary, createEtaLoader, createStaticDatasetLoader } from './operatorCommon.js';
+import { toApiUrl } from '../utils/apiBase.js';
 
 const loadCitybusDatasetInternal = createStaticDatasetLoader('citybus', '/operator-data/citybus.compact.json');
 const loadCitybusEtaInternal = createEtaLoader('citybus-eta', ({ stopId, route }) =>
@@ -14,7 +15,7 @@ export async function getCitybusETA(stopId, route) {
 }
 
 export async function getCitybusStop(stopId) {
-  const response = await fetch(`/api/operators/citybus/stop/${encodeURIComponent(stopId)}`);
+  const response = await fetch(toApiUrl(`/api/operators/citybus/stop/${encodeURIComponent(stopId)}`));
   if (!response.ok) {
     throw new Error(`Failed to load Citybus stop ${stopId}: ${response.status}`);
   }

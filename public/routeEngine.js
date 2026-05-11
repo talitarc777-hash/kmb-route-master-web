@@ -31,6 +31,22 @@ const GCP_CACHE_MAX_ENTRIES = 180;
 const GCP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 let GCP_PERSISTED_CACHE = null;
 
+function getApiBaseUrl() {
+    const base = (window.__KMB_API_BASE_URL__ || '').trim();
+    return base.replace(/\/+$/, '');
+}
+
+function toApiUrl(path) {
+    if (typeof path !== 'string') return path;
+    if (!path.startsWith('/api/')) return path;
+    const base = getApiBaseUrl();
+    if (!base) return path;
+    if (base.endsWith('/api')) {
+        return `${base}${path.slice('/api'.length)}`;
+    }
+    return `${base}${path}`;
+}
+
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // MATH
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -183,7 +199,7 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
                     : intermediateStops;
                 wpStr = '&waypoints=' + s.map(p => `${p.lat},${p.lng}`).join('%7C');
             }
-            const url = `/api/google/directions/json?origin=${lat1},${lng1}&destination=${lat2},${lng2}&mode=${mode}${wpStr}`;
+            const url = toApiUrl(`/api/google/directions/json?origin=${lat1},${lng1}&destination=${lat2},${lng2}&mode=${mode}${wpStr}`);
             const data = await (await fetch(url)).json();
             if (data.status === 'OK' && data.routes.length > 0) {
                 const r = data.routes[0];
@@ -371,7 +387,7 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
                 query.set('departure_time', String(Math.floor(referenceTime.getTime() / 1000)));
             }
 
-            const response = await fetch(`/api/google/directions/json?${query.toString()}`);
+            const response = await fetch(toApiUrl(`/api/google/directions/json?${query.toString()}`));
             const data = await response.json();
             if (data?.status === 'OK' && Array.isArray(data.routes) && data.routes.length > 0) {
                 const legs = data.routes[0]?.legs || [];

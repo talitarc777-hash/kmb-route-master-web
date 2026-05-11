@@ -1,4 +1,5 @@
 import { loadExternalOperatorDatasets } from './operatorAdapters.js';
+import { toApiUrl } from '../utils/apiBase.js';
 
 const DEFAULT_WALK_RADIUS_KM = 0.75;
 const DEFAULT_TRANSFER_RADIUS_KM = 0.25;
@@ -332,7 +333,7 @@ async function fetchGoogleRideDuration(index, fromStop, toStop, routeLabel, opti
         query.set('departure_time', String(Math.floor(referenceTime.getTime() / 1000)));
       }
 
-      const response = await fetch(`/api/google/directions/json?${query.toString()}`);
+      const response = await fetch(toApiUrl(`/api/google/directions/json?${query.toString()}`));
       const data = await response.json();
       if (data?.status === 'OK' && Array.isArray(data.routes) && data.routes.length > 0) {
         const transitSteps = (data.routes[0]?.legs || [])

@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { publishApiBaseUrl, toApiUrl } from './utils/apiBase.js';
+
+publishApiBaseUrl();
 
 // Constants
 const ROUTE_COLORS = [
@@ -181,7 +184,7 @@ async function geocode(query, placeId = null) {
     const queryPart = placeId
       ? `place_id=${encodeURIComponent(placeId)}`
       : `address=${encodeURIComponent(query)}&components=country:hk`;
-    const res = await fetch(`/api/google/geocode/json?${queryPart}`);
+    const res = await fetch(toApiUrl(`/api/google/geocode/json?${queryPart}`));
     const data = await res.json();
     if (!data || data.status !== 'OK' || data.results.length === 0) return null;
     const loc = data.results[0].geometry.location;
@@ -549,7 +552,7 @@ async function lookupStaticOperatorFare(operator, route) {
   const cacheKey = `${operatorKey}:${routeLabel.toUpperCase()}`;
   return fetchGcpWithCache(staticOperatorFareCacheState, cacheKey, async () => {
     const query = new URLSearchParams({ operator: operatorKey, route: routeLabel });
-    const response = await fetch(`/api/operators/fare?${query.toString()}`);
+    const response = await fetch(toApiUrl(`/api/operators/fare?${query.toString()}`));
     if (!response.ok) return null;
     const payload = await response.json();
     return payload?.fare || null;
@@ -578,7 +581,7 @@ async function lookupStaticRailLeg(leg) {
       origin: originLabel,
       destination: destinationLabel,
     });
-    const response = await fetch(`/api/operators/rail-leg?${query.toString()}`);
+    const response = await fetch(toApiUrl(`/api/operators/rail-leg?${query.toString()}`));
     if (!response.ok) return null;
     return response.json();
   });
@@ -892,7 +895,7 @@ async function generateGoogleTransitGapCandidates(gap, options = {}) {
   ].join('|');
 
   const data = await fetchGcpWithCache(transitGapCacheState, cacheKey, async () => {
-    const response = await fetch(`/api/google/directions/json?${query.toString()}`);
+    const response = await fetch(toApiUrl(`/api/google/directions/json?${query.toString()}`));
     return response.json();
   });
 
@@ -997,7 +1000,7 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
           key,
           async () => {
             const res = await fetch(
-              `/api/google/place/autocomplete/json?input=${encodeURIComponent(trimmedValue)}&components=country:hk`,
+              toApiUrl(`/api/google/place/autocomplete/json?input=${encodeURIComponent(trimmedValue)}&components=country:hk`),
             );
             const data = await res.json();
             return data.status === 'OK' ? data.predictions.slice(0, 5) : [];
@@ -1461,9 +1464,9 @@ const App = () => {
       setLoadingStatus('Connecting to KMB Open Data...');
       
       const [stopsRes, routesRes, routeStopsRes] = await Promise.all([
-        fetch('/api/kmb/stop'),
-        fetch('/api/kmb/route'),
-        fetch('/api/kmb/route-stop')
+        fetch(toApiUrl('/api/kmb/stop')),
+        fetch(toApiUrl('/api/kmb/route')),
+        fetch(toApiUrl('/api/kmb/route-stop'))
       ]);
 
       if (!stopsRes.ok || !routesRes.ok || !routeStopsRes.ok) {

@@ -41,6 +41,9 @@ Edit `.env` with your keys:
 ```env
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
 GCP_API_KEY=your_gcp_api_key_here
+# Optional: set only when API is hosted on a different domain
+# Leave empty when frontend and API share the same host
+VITE_API_BASE_URL=
 ```
 
 Get your free Gemini API key at: https://ai.google.dev/
