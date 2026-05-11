@@ -1462,16 +1462,36 @@ const App = () => {
   const loadKMBData = async () => {
     try {
       setLoadingStatus('Connecting to KMB Open Data...');
-      
-      const [stopsRes, routesRes, routeStopsRes] = await Promise.all([
-        fetch(toApiUrl('/api/kmb/stop')),
-        fetch(toApiUrl('/api/kmb/route')),
-        fetch(toApiUrl('/api/kmb/route-stop'))
-      ]);
 
+      const proxyEndpoints = [
+        toApiUrl('/api/kmb/stop'),
+        toApiUrl('/api/kmb/route'),
+        toApiUrl('/api/kmb/route-stop'),
+      ];
+      const directEndpoints = [
+        'https://data.etabus.gov.hk/v1/transport/kmb/stop',
+        'https://data.etabus.gov.hk/v1/transport/kmb/route',
+        'https://data.etabus.gov.hk/v1/transport/kmb/route-stop',
+      ];
+
+      let responses = [];
+      let sourceLabel = 'proxy';
+      try {
+        responses = await Promise.all(proxyEndpoints.map((url) => fetch(url)));
+      } catch {
+        responses = [];
+      }
+
+      if (responses.length !== 3 || !responses.every((res) => res.ok)) {
+        setLoadingStatus('Primary API unavailable, trying direct KMB feed...');
+        responses = await Promise.all(directEndpoints.map((url) => fetch(url)));
+        sourceLabel = 'direct';
+      }
+
+      const [stopsRes, routesRes, routeStopsRes] = responses;
       if (!stopsRes.ok || !routesRes.ok || !routeStopsRes.ok) {
         throw new Error(
-          `KMB API response error: stop=${stopsRes.status}, route=${routesRes.status}, route-stop=${routeStopsRes.status}`,
+          `KMB API response error (${sourceLabel}): stop=${stopsRes.status}, route=${routesRes.status}, route-stop=${routeStopsRes.status}`,
         );
       }
 
