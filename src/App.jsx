@@ -1375,6 +1375,8 @@ const App = () => {
   const mapRef = useRef(null);
   const viewRef = useRef(null);
   const graphicsLayerRef = useRef(null);
+  const currentLocationLayerRef = useRef(null);
+  const currentLocationRef = useRef(null);
   const arcgisModulesRef = useRef(null);
   const stopMapRef = useRef({});
   const routeMapRef = useRef({});
@@ -1677,16 +1679,42 @@ const App = () => {
           zoom: 12,
         });
         const layer = new GraphicsLayer();
+        const currentLocationLayer = new GraphicsLayer();
         map.add(layer);
+        map.add(currentLocationLayer);
         graphicsLayerRef.current = layer;
+        currentLocationLayerRef.current = currentLocationLayer;
         viewRef.current = view;
         view.ui.padding = { top: 80 };
+        const currentLocation = currentLocationRef.current;
+        if (currentLocation) {
+          renderCurrentLocationMarker(currentLocation.lat, currentLocation.lng);
+        }
         view.when(() => setMapLoaded(true));
       },
     );
   };
 
   const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
+
+  const renderCurrentLocationMarker = useCallback((lat, lng) => {
+    const { Point, Graphic } = arcgisModulesRef.current || {};
+    const layer = currentLocationLayerRef.current;
+    if (!layer || !Point || !Graphic) return;
+    layer.removeAll();
+    layer.add(
+      new Graphic({
+        geometry: new Point({ x: lng, y: lat, spatialReference: { wkid: 4326 } }),
+        symbol: {
+          type: 'simple-marker',
+          style: 'circle',
+          color: [37, 99, 235, 0.9],
+          size: 12,
+          outline: { color: [255, 255, 255, 1], width: 2 },
+        },
+      }),
+    );
+  }, []);
 
   const colorStringToRgba = (colorString, alpha = 0.9) => {
     if (!colorString || !String(colorString).startsWith('#')) return [37, 99, 235, alpha];
@@ -2265,6 +2293,8 @@ const App = () => {
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
       setOrigin(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+      currentLocationRef.current = { lat, lng };
+      renderCurrentLocationMarker(lat, lng);
       zoomToLocation(lat, lng);
     } catch (err) {
       const msg =
