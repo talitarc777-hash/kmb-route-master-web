@@ -220,6 +220,35 @@ async function searchNominatim(query, limit = 1) {
   return payload;
 }
 
+async function fetchJsonEndpoint(url, label) {
+  const response = await fetch(url, { headers: { Accept: 'application/json' } });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${label} returned HTTP ${response.status}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const preview = text.slice(0, 40).replace(/\s+/g, ' ');
+    throw new Error(`${label} returned non-JSON content: ${preview}`);
+  }
+}
+
+async function loadKmbPayloads(endpoints, sourceLabel) {
+  const [stopsData, routesData, routeStopsData] = await Promise.all([
+    fetchJsonEndpoint(endpoints[0], `${sourceLabel} stop`),
+    fetchJsonEndpoint(endpoints[1], `${sourceLabel} route`),
+    fetchJsonEndpoint(endpoints[2], `${sourceLabel} route-stop`),
+  ]);
+
+  if (!Array.isArray(stopsData?.data) || !Array.isArray(routesData?.data) || !Array.isArray(routeStopsData?.data)) {
+    throw new Error(`${sourceLabel} KMB payload format error (missing data arrays).`);
+  }
+
+  return { stopsData, routesData, routeStopsData };
+}
+
 async function geocode(query, placeId = null) {
   const selectedNominatim = parseNominatimPlaceId(placeId);
   if (selectedNominatim) return { ...selectedNominatim, name: query };
@@ -1543,37 +1572,28 @@ const App = () => {
         'https://data.etabus.gov.hk/v1/transport/kmb/route-stop',
       ];
 
-      let responses = [];
-      let sourceLabel = 'proxy';
+      let payloads = null;
+      let proxyError = null;
       try {
-        responses = await Promise.all(proxyEndpoints.map((url) => fetch(url)));
-      } catch {
-        responses = [];
+        payloads = await loadKmbPayloads(proxyEndpoints, 'primary API');
+      } catch (err) {
+        proxyError = err;
+        console.warn('Primary KMB API unavailable, falling back to direct feed:', err);
       }
 
-      if (responses.length !== 3 || !responses.every((res) => res.ok)) {
+      if (!payloads) {
         setLoadingStatus('Primary API unavailable, trying direct KMB feed...');
-        responses = await Promise.all(directEndpoints.map((url) => fetch(url)));
-        sourceLabel = 'direct';
-      }
-
-      const [stopsRes, routesRes, routeStopsRes] = responses;
-      if (!stopsRes.ok || !routesRes.ok || !routeStopsRes.ok) {
-        throw new Error(
-          `KMB API response error (${sourceLabel}): stop=${stopsRes.status}, route=${routesRes.status}, route-stop=${routeStopsRes.status}`,
-        );
+        try {
+          payloads = await loadKmbPayloads(directEndpoints, 'direct KMB');
+        } catch (directError) {
+          throw new Error(
+            `Primary API failed: ${proxyError?.message || 'unknown error'}; direct KMB failed: ${directError?.message || 'unknown error'}`,
+          );
+        }
       }
 
       setLoadingStatus('Processing Map Data...');
-      const [stopsData, routesData, routeStopsData] = await Promise.all([
-        stopsRes.json(),
-        routesRes.json(),
-        routeStopsRes.json(),
-      ]);
-
-      if (!Array.isArray(stopsData?.data) || !Array.isArray(routesData?.data) || !Array.isArray(routeStopsData?.data)) {
-        throw new Error('KMB API payload format error (missing data arrays).');
-      }
+      const { stopsData, routesData, routeStopsData } = payloads;
 
       // 1. Process Stops (ID -> Name/Lat/Long)
       const sm = {};
