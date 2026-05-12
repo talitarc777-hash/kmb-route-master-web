@@ -60,6 +60,15 @@ KMB timing rules:
 - In-vehicle ride time now prefers Google transit bus duration for each segment and falls back to the per-stop heuristic if Google cannot provide a usable match
 - Final time includes walk, wait, ride, transfer walk, and destination walk
 
+Historical KMB operation slots:
+- Planned `leave at` / `arrive by` searches load `/operator-data/kmb_operation_time_slots.compact.json`
+- The compact file is generated from `KMB csv time slot/kmb_eta_observations_full.csv`
+- It records route-stop availability by `weekday`, `saturday`, and `sunday_public_holiday`
+- Each route-stop profile stores observed `start_time`, `end_time`, and 15-minute active slots
+- After planned board times are computed, each segment is checked against the matching route-stop profile
+- If a route-stop profile is missing, the route-level profile is used as fallback
+- `now` mode still uses live ETA as the primary source and does not require the historical slot database
+
 Final KMB sort:
 1. `estimatedTime`
 2. `transfers`

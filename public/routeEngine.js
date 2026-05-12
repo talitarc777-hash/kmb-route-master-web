@@ -29,7 +29,11 @@ const GCP_CACHE = new Map(); // in-memory promise cache
 const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
 const GCP_CACHE_MAX_ENTRIES = 180;
 const GCP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const KMB_OPERATION_SCHEDULE_URL = '/operator-data/kmb_operation_time_slots.compact.json';
+const KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN = 45;
+const KMB_ROUTE_SLOT_TOLERANCE_MIN = 75;
 let GCP_PERSISTED_CACHE = null;
+let KMB_OPERATION_SCHEDULE_PROMISE = null;
 
 function getApiBaseUrl() {
     const base = (window.__KMB_API_BASE_URL__ || '').trim();
@@ -322,6 +326,180 @@ function bucketTimestamp(date) {
     return String(Math.floor(date.getTime() / RIDE_TIME_CACHE_BUCKET_MS));
 }
 
+async function loadKmbOperationSchedule() {
+    if (KMB_OPERATION_SCHEDULE_PROMISE) return KMB_OPERATION_SCHEDULE_PROMISE;
+    KMB_OPERATION_SCHEDULE_PROMISE = (async () => {
+        try {
+            const response = await fetch(KMB_OPERATION_SCHEDULE_URL);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        } catch (error) {
+            console.warn('KMB historical operation schedule unavailable:', error);
+            return null;
+        }
+    })();
+    return KMB_OPERATION_SCHEDULE_PROMISE;
+}
+
+function timeStringToMinutes(value) {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    return hours * 60 + minutes;
+}
+
+function dateToMinutes(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    return date.getHours() * 60 + date.getMinutes();
+}
+
+function getPlannedDayClass(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return 'weekday';
+    const dateKey = [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0'),
+    ].join('-');
+    const hkGeneralHolidays2026 = new Set([
+        '2026-01-01',
+        '2026-02-17',
+        '2026-02-18',
+        '2026-02-19',
+        '2026-04-03',
+        '2026-04-04',
+        '2026-04-06',
+        '2026-04-07',
+        '2026-05-01',
+        '2026-05-25',
+        '2026-06-19',
+        '2026-07-01',
+        '2026-09-26',
+        '2026-10-01',
+        '2026-10-19',
+        '2026-12-25',
+        '2026-12-26',
+    ]);
+    if (hkGeneralHolidays2026.has(dateKey)) return 'sunday_public_holiday';
+    if (date.getDay() === 6) return 'saturday';
+    if (date.getDay() === 0) return 'sunday_public_holiday';
+    return 'weekday';
+}
+
+function isMinuteWithinPeriod(minute, startMinute, endMinute) {
+    if (minute == null || startMinute == null || endMinute == null) return false;
+    if (startMinute <= endMinute) return minute >= startMinute && minute <= endMinute;
+    return minute >= startMinute || minute <= endMinute;
+}
+
+function circularMinuteDelta(a, b) {
+    const diff = Math.abs(a - b);
+    return Math.min(diff, 1440 - diff);
+}
+
+function nearestSlotDistance(minute, slots = []) {
+    let best = null;
+    for (const slot of slots) {
+        const slotMinute = timeStringToMinutes(slot);
+        if (slotMinute == null) continue;
+        const delta = circularMinuteDelta(minute, slotMinute);
+        if (best == null || delta < best.deltaMin) best = { slot, deltaMin: delta };
+    }
+    return best;
+}
+
+function validateSchedulePeriod(period, plannedDate, toleranceMin) {
+    if (!period) return { valid: false, reason: 'missing_period' };
+    const minute = dateToMinutes(plannedDate);
+    const startMinute = timeStringToMinutes(period.s);
+    const endMinute = timeStringToMinutes(period.e);
+    if (!isMinuteWithinPeriod(minute, startMinute, endMinute)) {
+        return {
+            valid: false,
+            reason: 'outside_operation_window',
+            startTime: period.s,
+            endTime: period.e,
+        };
+    }
+    const nearest = nearestSlotDistance(minute, period.a || []);
+    if (nearest && nearest.deltaMin > toleranceMin) {
+        return {
+            valid: false,
+            reason: 'outside_observed_slots',
+            startTime: period.s,
+            endTime: period.e,
+            nearestSlot: nearest.slot,
+            nearestSlotDeltaMin: nearest.deltaMin,
+        };
+    }
+    return {
+        valid: true,
+        reason: 'matched_historical_operation',
+        startTime: period.s,
+        endTime: period.e,
+        nearestSlot: nearest?.slot || null,
+        nearestSlotDeltaMin: nearest?.deltaMin ?? null,
+        sampleCount: period.n,
+        sampleDays: period.d,
+    };
+}
+
+function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
+    if (!schedule || !segment || !boardTime) {
+        return { valid: true, status: 'schedule_unavailable' };
+    }
+    const boardDate = boardTime instanceof Date ? boardTime : new Date(boardTime);
+    if (Number.isNaN(boardDate.getTime())) return { valid: true, status: 'invalid_board_time' };
+
+    const dayClass = getPlannedDayClass(boardDate);
+    const routeKey = [
+        segment.route,
+        segment.bound,
+        segment.service_type,
+    ].map((part) => String(part || '').trim()).join('|');
+    const routeStopKey = `${routeKey}|${String(segment.fromStop || '').trim()}`;
+    const routeStopPeriod = schedule.route_stops?.[routeStopKey]?.[dayClass];
+    if (routeStopPeriod) {
+        return {
+            ...validateSchedulePeriod(routeStopPeriod, boardDate, KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN),
+            status: 'route_stop_profile',
+            dayClass,
+        };
+    }
+
+    const routePeriod = schedule.routes?.[routeKey]?.[dayClass];
+    if (routePeriod) {
+        return {
+            ...validateSchedulePeriod(routePeriod, boardDate, KMB_ROUTE_SLOT_TOLERANCE_MIN),
+            status: 'route_profile',
+            dayClass,
+        };
+    }
+
+    return { valid: true, status: 'profile_missing', dayClass };
+}
+
+async function validateRouteHistoricalSchedule(route) {
+    const schedule = await loadKmbOperationSchedule();
+    if (!schedule) {
+        route.historicalScheduleStatus = 'schedule_unavailable';
+        return true;
+    }
+
+    for (const segment of route.segments || []) {
+        const result = validateSegmentHistoricalSchedule(segment, segment.boardTime, schedule);
+        segment.historicalSchedule = result;
+        if (!result.valid) {
+            route.historicalScheduleStatus = 'rejected';
+            route.historicalScheduleRejectReason = result.reason;
+            return false;
+        }
+    }
+    route.historicalScheduleStatus = 'matched';
+    return true;
+}
+
 function getSegmentOperator(segment) {
     return String(segment?.routeInfo?.co || 'KMB').toUpperCase();
 }
@@ -604,11 +782,15 @@ async function applyRouteTiming(route, options = {}) {
     }
 
     const plannedAnchorTime = buildPlannedDateTime(dateValue, timeValue, now);
+    let isValid = false;
     if (timeMode === 'leave') {
-        return applyLeaveTiming(route, plannedAnchorTime);
+        isValid = applyLeaveTiming(route, plannedAnchorTime);
+    } else {
+        isValid = applyArriveTiming(route, plannedAnchorTime, now);
     }
 
-    return applyArriveTiming(route, plannedAnchorTime, now);
+    if (!isValid) return false;
+    return validateRouteHistoricalSchedule(route);
 }
 
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€

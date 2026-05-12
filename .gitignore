@@ -29,6 +29,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Large local analysis inputs
+KMB csv time slot/
+
 # Editor
 .vscode/
 .idea/
