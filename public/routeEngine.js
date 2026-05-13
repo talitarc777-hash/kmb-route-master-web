@@ -477,7 +477,7 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
         };
     }
 
-    return { valid: true, status: 'profile_missing', dayClass };
+    return { valid: false, status: 'profile_missing', reason: 'historical_profile_missing', dayClass };
 }
 
 async function validateRouteHistoricalSchedule(route) {
