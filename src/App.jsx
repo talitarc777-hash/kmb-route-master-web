@@ -397,6 +397,27 @@ function parseOperatorCodes(value) {
     .filter(Boolean);
 }
 
+function plannedTimeValidity(route, timeMode) {
+  if (timeMode === 'now' || isFallbackRoute(route)) return null;
+  const status = String(route?.historicalScheduleStatus || '').trim();
+  if (status === 'matched') {
+    return {
+      label: 'Valid for selected time',
+      className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    };
+  }
+  if (status === 'schedule_unavailable') {
+    return {
+      label: 'Historical slots unavailable',
+      className: 'bg-amber-50 text-amber-700 border-amber-200',
+    };
+  }
+  return {
+    label: 'Time validity not confirmed',
+    className: 'bg-slate-100 text-slate-600 border-slate-200',
+  };
+}
+
 function knownFareForRanking(route) {
   if (isFallbackRoute(route)) {
     return route.fare?.status === 'available' ? parseMoney(route.fare.amount) : null;
@@ -2841,6 +2862,19 @@ const App = () => {
                   className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
                   onClick={() => handleSelectRoute(card)}
                 >
+                  {(() => {
+                    const validity = plannedTimeValidity(card.representative, timeMode);
+                    if (!validity) return null;
+                    return (
+                      <div className="mb-2">
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${validity.className}`}
+                        >
+                          {validity.label}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   <div className="flex justify-between items-center">
                     <div>
                       <div className="font-black text-lg flex items-center gap-2 flex-wrap">
@@ -3123,6 +3157,19 @@ const App = () => {
               ~{selectedRoute.estimatedTime}min
             </span>
           </div>
+          {(() => {
+            const validity = plannedTimeValidity(selectedRoute, timeMode);
+            if (!validity) return null;
+            return (
+              <div className="mb-3">
+                <span
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${validity.className}`}
+                >
+                  {validity.label}
+                </span>
+              </div>
+            );
+          })()}
 
           {selectedRoute.walkTimeOrigin > 0 && (
             <div className="flex items-center gap-2 text-sm text-slate-500 mb-2 pl-2 border-l-2 border-dashed border-slate-300">
