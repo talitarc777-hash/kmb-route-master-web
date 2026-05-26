@@ -2241,6 +2241,45 @@ const App = () => {
     return (route.segments || [])[0]?.route || '';
   };
 
+  const getOverlayVariantScore = (key, routeNumber) => {
+    const stops = routeStopsRef.current[key] || [];
+    const selectedSegments = selectedRoute && !isFallbackRoute(selectedRoute)
+      ? selectedRoute.segments || []
+      : [];
+    const sameRouteSegment = selectedSegments.find(
+      (seg) => String(seg.route || '').toUpperCase() === routeNumber,
+    );
+    if (sameRouteSegment?.routeKey === key) return 100000;
+
+    let score = 0;
+    if (sameRouteSegment) {
+      const fromIndex = stops.indexOf(sameRouteSegment.fromStop);
+      const toIndex = stops.indexOf(sameRouteSegment.toStop);
+      if (fromIndex !== -1) score += 500;
+      if (toIndex !== -1) score += 500;
+      if (fromIndex !== -1 && toIndex !== -1 && fromIndex < toIndex) score += 5000;
+    }
+
+    const selectedDestinationStop = selectedSegments[selectedSegments.length - 1]?.toStop;
+    const destinationIndex = selectedDestinationStop
+      ? stops.indexOf(selectedDestinationStop)
+      : -1;
+    if (destinationIndex !== -1) {
+      score += 250 + destinationIndex;
+    }
+
+    const selectedRouteNumber = routeNumberFromRoute(selectedRoute).toUpperCase();
+    if (selectedRouteNumber === routeNumber) score += 100;
+    return score;
+  };
+
+  const selectBestOverlayVariant = (variantKeys, routeNumber) => {
+    const ranked = variantKeys
+      .map((key) => ({ key, score: getOverlayVariantScore(key, routeNumber) }))
+      .sort((a, b) => b.score - a.score);
+    return ranked[0]?.key || variantKeys[0];
+  };
+
   const drawFullKmbRouteOverlay = async (e) => {
     if (e?.preventDefault) e.preventDefault();
     const routeNumber = (overlayRouteNumber || routeNumberFromRoute(selectedRoute)).trim().toUpperCase();
@@ -2269,8 +2308,9 @@ const App = () => {
         return;
       }
 
+      const selectedVariant = selectBestOverlayVariant(uniqueVariants, routeNumber);
       const pointsForExtent = [];
-      for (const key of uniqueVariants) {
+      for (const key of [selectedVariant]) {
         const stops = (routeStopsRef.current[key] || [])
           .map((stopId) => ({ id: stopId, ...stopMapRef.current[stopId] }))
           .filter((stop) => Number.isFinite(stop.lat) && Number.isFinite(stop.lng));
@@ -2302,11 +2342,11 @@ const App = () => {
             }),
             symbol: {
               type: 'simple-line',
-              color: [225, 37, 27, 0.28],
+              color: [124, 58, 237, 0.32],
               width: 7,
               style: 'solid',
             },
-            attributes: { type: 'route-overlay', route: routeNumber },
+            attributes: { type: 'route-overlay', route: routeNumber, routeKey: key },
           }),
         );
 
@@ -2319,10 +2359,10 @@ const App = () => {
                 type: 'simple-marker',
                 style: 'circle',
                 color: index === 0 || index === stops.length - 1
-                  ? [225, 37, 27, 0.45]
+                  ? [124, 58, 237, 0.48]
                   : [255, 255, 255, 0.5],
                 size: index === 0 || index === stops.length - 1 ? 9 : 6,
-                outline: { color: [225, 37, 27, 0.5], width: 1.5 },
+                outline: { color: [124, 58, 237, 0.58], width: 1.5 },
               },
               attributes: {
                 type: 'station-stop',
@@ -2347,7 +2387,7 @@ const App = () => {
           }).expand(1.15),
         ).catch(() => {});
       }
-      setOverlayFeedback(`Showing full KMB ${routeNumber}`);
+      setOverlayFeedback(`Showing ${routeNumber} ${selectedVariant.split('|')[1] || ''}`.trim());
     } finally {
       setIsOverlayLoading(false);
     }
