@@ -1386,6 +1386,9 @@ const App = () => {
   const [isRefreshingEta, setIsRefreshingEta] = useState(false);
   const [lastEtaRefreshAt, setLastEtaRefreshAt] = useState(null);
   const [refreshFeedback, setRefreshFeedback] = useState(null);
+  const [overlayRouteNumber, setOverlayRouteNumber] = useState('');
+  const [isOverlayLoading, setIsOverlayLoading] = useState(false);
+  const [overlayFeedback, setOverlayFeedback] = useState(null);
 
   // Add-to-bookmark modal state
   const [addToBookmark, setAddToBookmark] = useState(null);
@@ -1396,6 +1399,8 @@ const App = () => {
   const mapRef = useRef(null);
   const viewRef = useRef(null);
   const graphicsLayerRef = useRef(null);
+  const routeOverlayLayerRef = useRef(null);
+  const stationLabelLayerRef = useRef(null);
   const currentLocationLayerRef = useRef(null);
   const currentLocationRef = useRef(null);
   const arcgisModulesRef = useRef(null);
@@ -1699,11 +1704,18 @@ const App = () => {
           }),
           zoom: 12,
         });
+        view.popupEnabled = false;
         const layer = new GraphicsLayer();
+        const routeOverlayLayer = new GraphicsLayer();
+        const stationLabelLayer = new GraphicsLayer();
         const currentLocationLayer = new GraphicsLayer();
+        map.add(routeOverlayLayer);
         map.add(layer);
+        map.add(stationLabelLayer);
         map.add(currentLocationLayer);
         graphicsLayerRef.current = layer;
+        routeOverlayLayerRef.current = routeOverlayLayer;
+        stationLabelLayerRef.current = stationLabelLayer;
         currentLocationLayerRef.current = currentLocationLayer;
         viewRef.current = view;
         view.ui.padding = { top: 80 };
@@ -1711,12 +1723,55 @@ const App = () => {
         if (currentLocation) {
           renderCurrentLocationMarker(currentLocation.lat, currentLocation.lng);
         }
+        view.on('click', async (event) => {
+          const hit = await view.hitTest(event);
+          const stopGraphic = hit.results
+            .map((result) => result.graphic)
+            .find((graphic) => graphic?.attributes?.type === 'station-stop');
+          if (stopGraphic) showStationNameOnMap(stopGraphic);
+        });
         view.when(() => setMapLoaded(true));
       },
     );
   };
 
   const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
+  const clearRouteOverlay = () => {
+    routeOverlayLayerRef.current?.removeAll();
+    setOverlayFeedback(null);
+  };
+  const clearStationLabel = () => stationLabelLayerRef.current?.removeAll();
+
+  const getStopDisplayName = (stop) =>
+    stop?.name_tc || stop?.name_en || stop?.name?.tc || stop?.name?.en || stop?.stop_id || stop?.id || 'Station';
+
+  const showStationNameOnMap = (graphic) => {
+    const { Point, Graphic } = arcgisModulesRef.current || {};
+    const layer = stationLabelLayerRef.current;
+    const geometry = graphic?.geometry;
+    const stationName = graphic?.attributes?.stationName;
+    if (!layer || !Point || !Graphic || !geometry || !stationName) return;
+    layer.removeAll();
+    layer.add(
+      new Graphic({
+        geometry: new Point({
+          x: geometry.longitude ?? geometry.x,
+          y: geometry.latitude ?? geometry.y,
+          spatialReference: { wkid: 4326 },
+        }),
+        symbol: {
+          type: 'text',
+          text: stationName,
+          color: '#0f172a',
+          haloColor: '#ffffff',
+          haloSize: 2,
+          font: { size: 13, weight: 'bold' },
+          yoffset: 18,
+        },
+        attributes: { type: 'station-label' },
+      }),
+    );
+  };
 
   const renderCurrentLocationMarker = useCallback((lat, lng) => {
     const { Point, Graphic } = arcgisModulesRef.current || {};
@@ -1801,6 +1856,10 @@ const App = () => {
             outline: { color, width: isTerminal ? 3 : 2 },
           },
           popupTemplate: { title: getLegStopName(normalized), content: normalized.coordinate_source || normalized.data_source || '' },
+          attributes: {
+            type: 'station-stop',
+            stationName: getLegStopName(normalized),
+          },
         }),
       );
     };
@@ -1875,6 +1934,8 @@ const App = () => {
     if (!preserveExistingResults) setResults([]);
     setSelectedRoute(null);
     clearMapGraphics();
+    clearRouteOverlay();
+    clearStationLabel();
 
     try {
       let kmbSearchError = null;
@@ -2076,6 +2137,10 @@ const App = () => {
             outline: { color, width: isTerminal ? 3 : 2 },
           },
           popupTemplate: { title: nameEn, content: nameTc },
+          attributes: {
+            type: 'station-stop',
+            stationName: nameTc || nameEn || 'Station',
+          },
         }),
       );
       allLats.push(lat);
@@ -2170,6 +2235,124 @@ const App = () => {
     }
   };
 
+  const routeNumberFromRoute = (route) => {
+    if (!route) return '';
+    if (isFallbackRoute(route)) return route.route || route.line || '';
+    return (route.segments || [])[0]?.route || '';
+  };
+
+  const drawFullKmbRouteOverlay = async (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    const routeNumber = (overlayRouteNumber || routeNumberFromRoute(selectedRoute)).trim().toUpperCase();
+    const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
+    const layer = routeOverlayLayerRef.current;
+    const view = viewRef.current;
+    if (!routeNumber || !layer || !view || !Graphic || !Polyline || !Point || !Extent) return;
+
+    setIsOverlayLoading(true);
+    setOverlayFeedback(null);
+    layer.removeAll();
+
+    try {
+      const variantKeys = Object.keys(routeStopsRef.current || {})
+        .filter((key) => key.split('|')[0]?.toUpperCase() === routeNumber);
+      const seenPatterns = new Set();
+      const uniqueVariants = variantKeys.filter((key) => {
+        const pattern = (routeStopsRef.current[key] || []).join('>');
+        if (!pattern || seenPatterns.has(pattern)) return false;
+        seenPatterns.add(pattern);
+        return true;
+      });
+
+      if (uniqueVariants.length === 0) {
+        setOverlayFeedback(`No KMB route found for ${routeNumber}`);
+        return;
+      }
+
+      const pointsForExtent = [];
+      for (const key of uniqueVariants) {
+        const stops = (routeStopsRef.current[key] || [])
+          .map((stopId) => ({ id: stopId, ...stopMapRef.current[stopId] }))
+          .filter((stop) => Number.isFinite(stop.lat) && Number.isFinite(stop.lng));
+        if (stops.length < 2) continue;
+
+        const start = stops[0];
+        const end = stops[stops.length - 1];
+        const intermediates = stops.slice(1, -1);
+        let geometry = stops.map((stop) => [stop.lng, stop.lat]);
+        try {
+          const roadInfo = await window.routeEngine.fetchGCPRoute(
+            start.lat,
+            start.lng,
+            end.lat,
+            end.lng,
+            'driving',
+            intermediates,
+          );
+          if (roadInfo?.geometry?.length >= 2) geometry = roadInfo.geometry;
+        } catch {
+          // Keep the stop-to-stop geometry if Google road geometry fails.
+        }
+
+        layer.add(
+          new Graphic({
+            geometry: new Polyline({
+              paths: [geometry],
+              spatialReference: { wkid: 4326 },
+            }),
+            symbol: {
+              type: 'simple-line',
+              color: [225, 37, 27, 0.28],
+              width: 7,
+              style: 'solid',
+            },
+            attributes: { type: 'route-overlay', route: routeNumber },
+          }),
+        );
+
+        stops.forEach((stop, index) => {
+          pointsForExtent.push(stop);
+          layer.add(
+            new Graphic({
+              geometry: new Point({ x: stop.lng, y: stop.lat, spatialReference: { wkid: 4326 } }),
+              symbol: {
+                type: 'simple-marker',
+                style: 'circle',
+                color: index === 0 || index === stops.length - 1
+                  ? [225, 37, 27, 0.45]
+                  : [255, 255, 255, 0.5],
+                size: index === 0 || index === stops.length - 1 ? 9 : 6,
+                outline: { color: [225, 37, 27, 0.5], width: 1.5 },
+              },
+              attributes: {
+                type: 'station-stop',
+                stationName: getStopDisplayName(stop),
+              },
+              popupTemplate: { title: getStopDisplayName(stop) },
+            }),
+          );
+        });
+      }
+
+      if (pointsForExtent.length > 1) {
+        const lats = pointsForExtent.map((point) => point.lat);
+        const lngs = pointsForExtent.map((point) => point.lng);
+        view.goTo(
+          new Extent({
+            xmin: Math.min(...lngs) - 0.005,
+            ymin: Math.min(...lats) - 0.005,
+            xmax: Math.max(...lngs) + 0.005,
+            ymax: Math.max(...lats) + 0.005,
+            spatialReference: { wkid: 4326 },
+          }).expand(1.15),
+        ).catch(() => {});
+      }
+      setOverlayFeedback(`Showing full KMB ${routeNumber}`);
+    } finally {
+      setIsOverlayLoading(false);
+    }
+  };
+
   // Select route handler
   const handleSelectRoute = (cardOrRoute) => {
     const isCard = Boolean(cardOrRoute?.representative && cardOrRoute?.segmentDisplay);
@@ -2178,6 +2361,8 @@ const App = () => {
     const initialSegmentDisplay = isCard ? cardOrRoute.segmentDisplay : baseRoute.segments || [];
 
     setSelectedRoute({ ...baseRoute, segmentDisplay: initialSegmentDisplay });
+    setOverlayRouteNumber(routeNumberFromRoute(baseRoute));
+    setOverlayFeedback(null);
     setExpandedSegments(new Set());
     drawRouteOnMap(baseRoute);
   };
@@ -2516,6 +2701,43 @@ const App = () => {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 bg-white/90 backdrop-blur px-6 py-4 rounded-2xl shadow-xl text-sm font-bold text-slate-600">
           {'\u{1F5FA}\uFE0F'} {loadingStatus}
         </div>
+      )}
+
+      {selectedRoute && !showBookmarks && (
+        <form
+          onSubmit={drawFullKmbRouteOverlay}
+          className="absolute top-[88px] right-3 z-30 w-[min(92vw,300px)] rounded-2xl border border-slate-200 bg-white/90 backdrop-blur p-2 shadow-xl"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              value={overlayRouteNumber}
+              onChange={(e) => setOverlayRouteNumber(e.target.value.toUpperCase())}
+              placeholder="Bus route"
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black uppercase text-slate-700 outline-none focus:border-[#E1251B]"
+            />
+            <button
+              type="submit"
+              disabled={isOverlayLoading || !overlayRouteNumber.trim()}
+              className="shrink-0 rounded-xl bg-[#E1251B] px-3 py-2 text-xs font-black text-white shadow-sm disabled:opacity-50"
+              title="Show full route transparently on map"
+            >
+              {isOverlayLoading ? '...' : 'View'}
+            </button>
+            <button
+              type="button"
+              onClick={clearRouteOverlay}
+              className="shrink-0 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-black text-slate-500"
+              title="Clear full-route overlay"
+            >
+              Clear
+            </button>
+          </div>
+          {overlayFeedback && (
+            <div className="mt-1 truncate px-1 text-[10px] font-bold text-slate-500">
+              {overlayFeedback}
+            </div>
+          )}
+        </form>
       )}
 
       {/* Bookmark panel */}
@@ -2954,6 +3176,8 @@ const App = () => {
               onClick={() => {
                 setSelectedRoute(null);
                 clearMapGraphics();
+                clearRouteOverlay();
+                clearStationLabel();
               }}
               className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"
             >
@@ -3113,6 +3337,8 @@ const App = () => {
               onClick={() => {
                 setSelectedRoute(null);
                 clearMapGraphics();
+                clearRouteOverlay();
+                clearStationLabel();
               }}
               className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"
             >
