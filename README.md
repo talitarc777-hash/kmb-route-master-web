@@ -84,11 +84,20 @@ When you push to the `main` branch:
 2. Builds only if all dependencies install correctly
 3. Deploys to GitHub Pages
 
-**Note:** Ensure your GitHub repository Secrets include:
+**Note for GitHub Pages:** Ensure your GitHub repository Secrets include:
 - `VITE_GEMINI_API_KEY` - Required for AI features
-- `GCP_API_KEY` - Optional for additional features
+- `GCP_API_KEY` - Available during the GitHub Actions build only
 
 Set secrets in: Settings → Secrets and variables → Actions → New repository secret
+
+**Note for Cloudflare Pages:** GitHub secrets are not passed to Cloudflare when Cloudflare clones and builds the repository. Add `GCP_API_KEY` again in Cloudflare Pages:
+
+1. Open Cloudflare Dashboard → Workers & Pages → your Pages project
+2. Go to Settings → Environment variables
+3. Add `GCP_API_KEY` for Production, and Preview if needed
+4. Redeploy
+
+The location autocomplete calls `/api/google/...`, so `GCP_API_KEY` must be available to the Cloudflare Pages Function at runtime.
 
 ## **Project Structure**
 

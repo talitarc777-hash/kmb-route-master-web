@@ -25,6 +25,37 @@ const GCP_AUTOCOMPLETE_TTL_MS = 12 * 60 * 60 * 1000;
 const GCP_TRANSIT_GAP_TTL_MS = 15 * 60 * 1000;
 const STATIC_OPERATOR_FARE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
+const ARCGIS_JS_URL = 'https://js.arcgis.com/4.29/';
+
+let arcgisApiPromise = null;
+
+function loadArcGISApi() {
+  if (window.require) return Promise.resolve(window.require);
+  if (arcgisApiPromise) return arcgisApiPromise;
+
+  arcgisApiPromise = new Promise((resolve, reject) => {
+    const existingScript = Array.from(document.scripts).find((script) =>
+      script.src === ARCGIS_JS_URL || script.src === `${ARCGIS_JS_URL}init.js`,
+    );
+    const script = existingScript || document.createElement('script');
+
+    const handleLoad = () => {
+      if (window.require) resolve(window.require);
+      else reject(new Error('ArcGIS API loaded without window.require.'));
+    };
+
+    script.addEventListener('load', handleLoad, { once: true });
+    script.addEventListener('error', () => reject(new Error('ArcGIS API failed to load.')), { once: true });
+
+    if (!existingScript) {
+      script.src = ARCGIS_JS_URL;
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  });
+
+  return arcgisApiPromise;
+}
 
 const geocodeCacheState = {
   memory: new Map(),
@@ -1671,68 +1702,66 @@ const App = () => {
     }
   };
 
-  const initArcGIS = () => {
-    window.require(
-      [
-        'esri/Map',
-        'esri/Basemap',
-        'esri/layers/VectorTileLayer',
-        'esri/views/MapView',
-        'esri/geometry/Point',
-        'esri/layers/GraphicsLayer',
-        'esri/Graphic',
-        'esri/geometry/Polyline',
-        'esri/geometry/Extent',
-      ],
-      (Map, Basemap, VectorTileLayer, MapView, Point, GraphicsLayer, Graphic, Polyline, Extent) => {
-        arcgisModulesRef.current = { Point, Graphic, Polyline, Extent };
-        const vtLayer = new VectorTileLayer({
-          url: 'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/vt/basemap/HK80',
-        });
-        const labelLayer = new VectorTileLayer({
-          url: 'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/vt/label/hk/tc/HK80',
-        });
-        const map = new Map({ basemap: new Basemap({ baseLayers: [vtLayer] }) });
-        map.add(labelLayer);
-        const view = new MapView({
-          container: mapRef.current,
-          map,
-          center: new Point({
-            x: 833359.88,
-            y: 822961.98,
-            spatialReference: { wkid: 2326 },
-          }),
-          zoom: 12,
-        });
-        view.popupEnabled = false;
-        const layer = new GraphicsLayer();
-        const routeOverlayLayer = new GraphicsLayer();
-        const stationLabelLayer = new GraphicsLayer();
-        const currentLocationLayer = new GraphicsLayer();
-        map.add(routeOverlayLayer);
-        map.add(layer);
-        map.add(stationLabelLayer);
-        map.add(currentLocationLayer);
-        graphicsLayerRef.current = layer;
-        routeOverlayLayerRef.current = routeOverlayLayer;
-        stationLabelLayerRef.current = stationLabelLayer;
-        currentLocationLayerRef.current = currentLocationLayer;
-        viewRef.current = view;
-        view.ui.padding = { top: 80 };
-        const currentLocation = currentLocationRef.current;
-        if (currentLocation) {
-          renderCurrentLocationMarker(currentLocation.lat, currentLocation.lng);
-        }
-        view.on('click', async (event) => {
-          const hit = await view.hitTest(event);
-          const stopGraphic = hit.results
-            .map((result) => result.graphic)
-            .find((graphic) => graphic?.attributes?.type === 'station-stop');
-          if (stopGraphic) showStationNameOnMap(stopGraphic);
-        });
-        view.when(() => setMapLoaded(true));
-      },
-    );
+  const initArcGIS = async () => {
+    try {
+      const arcgisRequire = await loadArcGISApi();
+      arcgisRequire(
+        [
+          'esri/Map',
+          'esri/views/MapView',
+          'esri/geometry/Point',
+          'esri/layers/GraphicsLayer',
+          'esri/Graphic',
+          'esri/geometry/Polyline',
+          'esri/geometry/Extent',
+        ],
+        (Map, MapView, Point, GraphicsLayer, Graphic, Polyline, Extent) => {
+          if (!mapRef.current) return;
+          arcgisModulesRef.current = { Point, Graphic, Polyline, Extent };
+          const map = new Map({ basemap: 'streets-vector' });
+          const view = new MapView({
+            container: mapRef.current,
+            map,
+            center: [114.1694, 22.3193],
+            zoom: 12,
+          });
+          view.popupEnabled = false;
+          const layer = new GraphicsLayer();
+          const routeOverlayLayer = new GraphicsLayer();
+          const stationLabelLayer = new GraphicsLayer();
+          const currentLocationLayer = new GraphicsLayer();
+          map.add(routeOverlayLayer);
+          map.add(layer);
+          map.add(stationLabelLayer);
+          map.add(currentLocationLayer);
+          graphicsLayerRef.current = layer;
+          routeOverlayLayerRef.current = routeOverlayLayer;
+          stationLabelLayerRef.current = stationLabelLayer;
+          currentLocationLayerRef.current = currentLocationLayer;
+          viewRef.current = view;
+          view.ui.padding = { top: 80 };
+          const currentLocation = currentLocationRef.current;
+          if (currentLocation) {
+            renderCurrentLocationMarker(currentLocation.lat, currentLocation.lng);
+          }
+          view.on('click', async (event) => {
+            const hit = await view.hitTest(event);
+            const stopGraphic = hit.results
+              .map((result) => result.graphic)
+              .find((graphic) => graphic?.attributes?.type === 'station-stop');
+            if (stopGraphic) showStationNameOnMap(stopGraphic);
+          });
+          view.when(() => setMapLoaded(true));
+        },
+        (error) => {
+          console.error('ArcGIS module load error:', error);
+          setLoadingStatus('Map failed to load. Please refresh.');
+        },
+      );
+    } catch (error) {
+      console.error('ArcGIS load error:', error);
+      setLoadingStatus('Map failed to load. Please refresh.');
+    }
   };
 
   const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
