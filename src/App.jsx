@@ -1708,6 +1708,8 @@ const App = () => {
       arcgisRequire(
         [
           'esri/Map',
+          'esri/Basemap',
+          'esri/layers/VectorTileLayer',
           'esri/views/MapView',
           'esri/geometry/Point',
           'esri/layers/GraphicsLayer',
@@ -1715,14 +1717,25 @@ const App = () => {
           'esri/geometry/Polyline',
           'esri/geometry/Extent',
         ],
-        (Map, MapView, Point, GraphicsLayer, Graphic, Polyline, Extent) => {
+        (Map, Basemap, VectorTileLayer, MapView, Point, GraphicsLayer, Graphic, Polyline, Extent) => {
           if (!mapRef.current) return;
           arcgisModulesRef.current = { Point, Graphic, Polyline, Extent };
-          const map = new Map({ basemap: 'streets-vector' });
+          const vtLayer = new VectorTileLayer({
+            url: 'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/vt/basemap/HK80',
+          });
+          const labelLayer = new VectorTileLayer({
+            url: 'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/vt/label/hk/tc/HK80',
+          });
+          const map = new Map({ basemap: new Basemap({ baseLayers: [vtLayer] }) });
+          map.add(labelLayer);
           const view = new MapView({
             container: mapRef.current,
             map,
-            center: [114.1694, 22.3193],
+            center: new Point({
+              x: 833359.88,
+              y: 822961.98,
+              spatialReference: { wkid: 2326 },
+            }),
             zoom: 12,
           });
           view.popupEnabled = false;
