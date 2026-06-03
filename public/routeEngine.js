@@ -29,7 +29,7 @@ const GCP_CACHE = new Map(); // in-memory promise cache
 const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
 const GCP_CACHE_MAX_ENTRIES = 180;
 const GCP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const KMB_OPERATION_SCHEDULE_URL = '/operator-data/kmb_operation_time_slots.compact.json';
+const KMB_OPERATION_SCHEDULE_URL = '/operator-data/kmb_operation_time_slots.runtime.json';
 const KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN = 45;
 const KMB_ROUTE_SLOT_TOLERANCE_MIN = 75;
 let GCP_PERSISTED_CACHE = null;
@@ -342,12 +342,19 @@ async function loadKmbOperationSchedule() {
 }
 
 function timeStringToMinutes(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
     const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
     if (!match) return null;
     const hours = Number(match[1]);
     const minutes = Number(match[2]);
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
     return hours * 60 + minutes;
+}
+
+function formatMinutesAsTime(minutes) {
+    if (!Number.isFinite(minutes)) return null;
+    const normalized = Math.max(0, Math.min(1439, Math.round(minutes)));
+    return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
 }
 
 function dateToMinutes(date) {
@@ -414,12 +421,14 @@ function validateSchedulePeriod(period, plannedDate, toleranceMin) {
     const minute = dateToMinutes(plannedDate);
     const startMinute = timeStringToMinutes(period.s);
     const endMinute = timeStringToMinutes(period.e);
+    const startTime = formatMinutesAsTime(startMinute) || period.s;
+    const endTime = formatMinutesAsTime(endMinute) || period.e;
     if (!isMinuteWithinPeriod(minute, startMinute, endMinute)) {
         return {
             valid: false,
             reason: 'outside_operation_window',
-            startTime: period.s,
-            endTime: period.e,
+            startTime,
+            endTime,
         };
     }
     const nearest = nearestSlotDistance(minute, period.a || []);
@@ -427,8 +436,8 @@ function validateSchedulePeriod(period, plannedDate, toleranceMin) {
         return {
             valid: false,
             reason: 'outside_observed_slots',
-            startTime: period.s,
-            endTime: period.e,
+            startTime,
+            endTime,
             nearestSlot: nearest.slot,
             nearestSlotDeltaMin: nearest.deltaMin,
         };
@@ -436,12 +445,35 @@ function validateSchedulePeriod(period, plannedDate, toleranceMin) {
     return {
         valid: true,
         reason: 'matched_historical_operation',
-        startTime: period.s,
-        endTime: period.e,
+        startTime,
+        endTime,
         nearestSlot: nearest?.slot || null,
         nearestSlotDeltaMin: nearest?.deltaMin ?? null,
         sampleCount: period.n,
         sampleDays: period.d,
+    };
+}
+
+function getSchedulePeriod(schedule, collectionName, key, dayClass) {
+    if (!schedule || !key || !dayClass) return null;
+
+    const legacyCollection = collectionName === 'route_stops' ? schedule.route_stops : schedule.routes;
+    const legacyPeriod = legacyCollection?.[key]?.[dayClass];
+    if (legacyPeriod) return legacyPeriod;
+
+    const runtimeCollection = collectionName === 'route_stops' ? schedule.rs : schedule.r;
+    const dayClasses = Array.isArray(schedule.d)
+        ? schedule.d
+        : (Array.isArray(schedule.summary?.day_classes) ? schedule.summary.day_classes : []);
+    const dayIndex = dayClasses.indexOf(dayClass);
+    const row = dayIndex >= 0 ? runtimeCollection?.[key]?.[dayIndex] : null;
+    if (!Array.isArray(row)) return null;
+
+    return {
+        s: row[0],
+        e: row[1],
+        n: row[2],
+        d: row[3],
     };
 }
 
@@ -459,7 +491,7 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
         segment.service_type,
     ].map((part) => String(part || '').trim()).join('|');
     const routeStopKey = `${routeKey}|${String(segment.fromStop || '').trim()}`;
-    const routeStopPeriod = schedule.route_stops?.[routeStopKey]?.[dayClass];
+    const routeStopPeriod = getSchedulePeriod(schedule, 'route_stops', routeStopKey, dayClass);
     if (routeStopPeriod) {
         return {
             ...validateSchedulePeriod(routeStopPeriod, boardDate, KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN),
@@ -468,7 +500,7 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
         };
     }
 
-    const routePeriod = schedule.routes?.[routeKey]?.[dayClass];
+    const routePeriod = getSchedulePeriod(schedule, 'routes', routeKey, dayClass);
     if (routePeriod) {
         return {
             ...validateSchedulePeriod(routePeriod, boardDate, KMB_ROUTE_SLOT_TOLERANCE_MIN),
@@ -477,7 +509,7 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
         };
     }
 
-    return { valid: false, status: 'profile_missing', reason: 'historical_profile_missing', dayClass };
+    return { valid: true, status: 'profile_missing', reason: 'historical_profile_missing', dayClass };
 }
 
 async function validateRouteHistoricalSchedule(route) {
@@ -487,16 +519,22 @@ async function validateRouteHistoricalSchedule(route) {
         return true;
     }
 
+    let missingProfileCount = 0;
     for (const segment of route.segments || []) {
         const result = validateSegmentHistoricalSchedule(segment, segment.boardTime, schedule);
         segment.historicalSchedule = result;
+        if (result.status === 'profile_missing') {
+            missingProfileCount += 1;
+            continue;
+        }
         if (!result.valid) {
             route.historicalScheduleStatus = 'rejected';
             route.historicalScheduleRejectReason = result.reason;
             return false;
         }
     }
-    route.historicalScheduleStatus = 'matched';
+    route.historicalScheduleStatus = missingProfileCount > 0 ? 'matched_with_missing_profiles' : 'matched';
+    route.historicalScheduleMissingProfileCount = missingProfileCount;
     return true;
 }
 
@@ -1028,6 +1066,10 @@ async function findRoutes(params) {
     }
 
     // ?€?€ Parallel GCP walking times
+    if (timeMode !== 'now') {
+        loadKmbOperationSchedule();
+    }
+
     onProgress?.('Calculating walking times...');
     await Promise.all(candidates.map(async route => {
         const [wO, wD] = await Promise.all([

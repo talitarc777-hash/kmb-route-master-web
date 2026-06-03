@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const oversizedAssets = [
   path.join(rootDir, 'dist', 'operator-data', 'kmb_operation_time_slots.json'),
+  path.join(rootDir, 'dist', 'operator-data', 'kmb_operation_time_slots.compact.json'),
 ];
 
 for (const assetPath of oversizedAssets) {

@@ -437,6 +437,12 @@ function plannedTimeValidity(route, timeMode) {
       className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     };
   }
+  if (status === 'matched_with_missing_profiles') {
+    return {
+      label: 'Valid for selected time; some station slots unavailable',
+      className: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+    };
+  }
   if (status === 'schedule_unavailable') {
     return {
       label: 'Historical slots unavailable',
@@ -447,6 +453,44 @@ function plannedTimeValidity(route, timeMode) {
     label: 'Not validated for selected time',
     className: 'bg-slate-100 text-slate-600 border-slate-200',
   };
+}
+
+function historicalScheduleSourceLabel(status) {
+  if (status === 'route_stop_profile') return 'station profile';
+  if (status === 'route_profile') return 'route profile';
+  if (status === 'profile_missing') return 'profile unavailable';
+  if (status === 'schedule_unavailable') return 'schedule unavailable';
+  return 'historical profile';
+}
+
+function dayClassLabel(dayClass) {
+  if (dayClass === 'saturday') return 'Saturday';
+  if (dayClass === 'sunday_public_holiday') return 'Sunday/holiday';
+  return 'Weekday';
+}
+
+function formatHistoricalSchedule(schedule) {
+  if (!schedule) return null;
+  if (schedule.status === 'profile_missing') {
+    return `${dayClassLabel(schedule.dayClass)} service window unavailable for this station`;
+  }
+  if (schedule.status === 'schedule_unavailable') return 'Historical service slots unavailable';
+  if (!schedule.startTime || !schedule.endTime) return null;
+
+  const pieces = [
+    `${dayClassLabel(schedule.dayClass)} observed ${schedule.startTime}-${schedule.endTime}`,
+    historicalScheduleSourceLabel(schedule.status),
+  ];
+  if (Number.isFinite(schedule.sampleCount)) pieces.push(`${schedule.sampleCount} ETA samples`);
+  return pieces.join(' · ');
+}
+
+function historicalScheduleClass(schedule) {
+  if (!schedule) return 'bg-slate-50 text-slate-500 border-slate-200';
+  if (schedule.valid === false) return 'bg-red-50 text-red-700 border-red-200';
+  if (schedule.status === 'profile_missing') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (schedule.status === 'route_profile') return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+  return 'bg-emerald-50 text-emerald-700 border-emerald-200';
 }
 
 function knownFareForRanking(route) {
@@ -3504,6 +3548,8 @@ const App = () => {
               nextSegment?.boardTime || nextSegment?.nextEta,
             );
             const color = ROUTE_COLORS[si % ROUTE_COLORS.length];
+            const scheduleText = timeMode === 'now' ? null : formatHistoricalSchedule(displaySeg.historicalSchedule || seg.historicalSchedule);
+            const scheduleClass = historicalScheduleClass(displaySeg.historicalSchedule || seg.historicalSchedule);
             const routesAtFromStop = (stopRoutesRef.current[seg.fromStop] || []).map((r) => ({
               route: r.route,
               service_type: r.service_type,
@@ -3531,6 +3577,11 @@ const App = () => {
                       {'\u2B50'}
                     </button>
                   </div>
+                  {scheduleText && (
+                    <div className={`mt-1 inline-flex max-w-full rounded-full border px-2 py-1 text-[11px] font-bold ${scheduleClass}`}>
+                      {scheduleText}
+                    </div>
+                  )}
                   <div className="text-xs font-semibold text-slate-500 mt-1">
                     Ride time: ~{rideInfo.minutes} min
                     {rideInfo.source === 'google_transit_bus_duration' ? ' (Google transit)' : ''}
