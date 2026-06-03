@@ -27,8 +27,9 @@ const ETA_ACTIVE_WINDOW_MIN = 120; // ETA must be within this window to be consi
 const RIDE_TIME_CACHE_BUCKET_MS = 30 * 60 * 1000;
 const GCP_CACHE = new Map(); // in-memory promise cache
 const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
-const GCP_CACHE_MAX_ENTRIES = 180;
+const GCP_CACHE_MAX_ENTRIES = 400;
 const GCP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const GCP_DRIVING_ROUTE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const KMB_OPERATION_SCHEDULE_URL = '/operator-data/kmb_operation_time_slots.runtime.json';
 const KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN = 45;
 const KMB_ROUTE_SLOT_TOLERANCE_MIN = 75;
@@ -188,6 +189,10 @@ function setGcpCachedValue(cacheKey, value, ttlMs = GCP_CACHE_TTL_MS) {
     savePersistedGcpCache(cache);
 }
 
+function getGcpRouteCacheTtl(mode) {
+    return mode === 'driving' ? GCP_DRIVING_ROUTE_CACHE_TTL_MS : GCP_CACHE_TTL_MS;
+}
+
 async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermediateStops = [], _gcpKey) {
     const wpSig = getWaypointSignature(intermediateStops);
     const cacheKey = `${mode}|${lat1.toFixed(4)},${lng1.toFixed(4)}->${lat2.toFixed(4)},${lng2.toFixed(4)}|${wpSig}`;
@@ -212,7 +217,7 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
                     duration: Math.ceil(r.legs.reduce((s, l) => s + l.duration.value, 0) / 60),
                     geometry: decodePolyline(r.overview_polyline.points),
                 };
-                setGcpCachedValue(cacheKey, out);
+                setGcpCachedValue(cacheKey, out, getGcpRouteCacheTtl(mode));
                 return out;
             }
             console.warn(`GCP ${mode}:`, data.status);

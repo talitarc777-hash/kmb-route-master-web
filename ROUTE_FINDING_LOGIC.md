@@ -86,7 +86,19 @@ Final return:
 - `filteredCandidates.slice(0, MAX_FINAL)`
 - `originStops`, `destStops`
 
-## 4. Alternative Transport Options
+## 4. Map Route-Line Rendering
+
+KMB route-line display uses cached road-snapped geometry:
+- The app treats KMB `routeStops` plus `stopMap` as the fixed local fallback route-line database
+- When a result card is clicked, each KMB segment asks `fetchGCPRoute(..., 'driving')` for road-snapped display geometry
+- When the full-route overlay button is used, the selected inbound/outbound route variant uses the same road-snapped display path
+- KMB legs inside alternative journeys also use their original KMB segment stop sequence when available
+- Successful Google `driving` geometry is persisted by the route-engine GCP cache for up to 30 days to prevent duplicate calls
+- Derived road geometries are also cached in `kmbRoadGeometryCacheRef` for reuse during the current browser session
+- If Google route geometry is unavailable, the app falls back to the local stop-to-stop route geometry
+- This is temporary cache storage, not a permanent bundled database of Google Directions results
+
+## 5. Alternative Transport Options
 
 Optional gap repair is handled directly in `src/App.jsx` through Google Directions Transit.
 
@@ -105,7 +117,7 @@ When the checkbox is on:
 - If no KMB route is available at all, Google Transit is asked for the whole origin-to-destination journey
 - The old local Citybus / Tram / MTR / MTR Bus / Light Rail dataset search is no longer used in the live app flow
 
-## 5. Alternative Candidate Generation
+## 6. Alternative Candidate Generation
 
 Google gap candidates are generated from the Google Directions response:
 - `routes[].legs[].steps[]` is scanned for `TRANSIT` steps

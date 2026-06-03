@@ -1484,6 +1484,8 @@ const App = () => {
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
   const searchCacheRef = useRef(new Map());
+  const kmbRouteGeometryCacheRef = useRef(new Map());
+  const kmbRoadGeometryCacheRef = useRef(new Map());
 
   const displayedResults = useMemo(() => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
@@ -1902,6 +1904,51 @@ const App = () => {
     return { ...point, lat, lng };
   };
 
+  const getKmbStopSequenceGeometry = (stopIds = [], cacheKey = '') => {
+    const key = cacheKey || stopIds.join('>');
+    const cached = kmbRouteGeometryCacheRef.current.get(key);
+    if (cached) return cached;
+
+    const stops = stopIds
+      .map((stopId) => ({ id: stopId, ...stopMapRef.current[stopId] }))
+      .filter((stop) => Number.isFinite(stop.lat) && Number.isFinite(stop.lng));
+    const geometry = stops.map((stop) => [stop.lng, stop.lat]);
+    const value = { stops, geometry };
+    if (geometry.length >= 2 && key) {
+      kmbRouteGeometryCacheRef.current.set(key, value);
+    }
+    return value;
+  };
+
+  const getKmbRoadGeometry = async (stopIds = [], cacheKey = '') => {
+    const key = cacheKey || stopIds.join('>');
+    const cached = kmbRoadGeometryCacheRef.current.get(key);
+    if (cached) return cached;
+
+    const local = getKmbStopSequenceGeometry(stopIds, key);
+    if (local.stops.length < 2 || !window.routeEngine?.fetchGCPRoute) return local.geometry;
+
+    try {
+      const start = local.stops[0];
+      const end = local.stops[local.stops.length - 1];
+      const intermediates = local.stops.slice(1, -1);
+      const roadInfo = await window.routeEngine.fetchGCPRoute(
+        start.lat,
+        start.lng,
+        end.lat,
+        end.lng,
+        'driving',
+        intermediates,
+      );
+      const geometry = roadInfo?.geometry?.length >= 2 ? roadInfo.geometry : local.geometry;
+      kmbRoadGeometryCacheRef.current.set(key, geometry);
+      return geometry;
+    } catch (err) {
+      console.warn('KMB road-snapped route geometry failed:', err);
+      return local.geometry;
+    }
+  };
+
   const fallbackLegStopPath = (leg) => [
     leg.origin_stop,
     ...(leg.intermediate_stops || []),
@@ -1967,23 +2014,11 @@ const App = () => {
         ? leg.geometry
         : stationGeometry;
 
-      if (leg.operator === 'KMB' && stopPath.length >= 2 && window.routeEngine?.fetchGCPRoute) {
-        try {
-          const start = stopPath[0];
-          const end = stopPath[stopPath.length - 1];
-          const intermediates = stopPath.slice(1, -1);
-          const roadInfo = await window.routeEngine.fetchGCPRoute(
-            start.lat,
-            start.lng,
-            end.lat,
-            end.lng,
-            'driving',
-            intermediates,
-          );
-          if (roadInfo?.geometry?.length >= 2) geometry = roadInfo.geometry;
-        } catch (err) {
-          console.warn('Fallback KMB map road geometry failed:', err);
-        }
+      if (leg.operator === 'KMB' && leg.source_segment?.stops?.length >= 2) {
+        geometry = await getKmbRoadGeometry(
+          leg.source_segment.stops,
+          leg.source_segment.routeKey || leg.source_segment.stops.join('>'),
+        );
       }
 
       const isWalking = leg.operator === 'WALK' || leg.mode === 'walking';
@@ -2263,22 +2298,16 @@ const App = () => {
     for (let si = 0; si < routeSegments.length; si++) {
       const seg = routeSegments[si];
       const color = ROUTE_COLORS[si % ROUTE_COLORS.length];
-      const segStops = seg.stops.map((id) => stopMapRef.current[id]).filter(Boolean);
+      const { stops: segStops } = getKmbStopSequenceGeometry(
+        seg.stops || [],
+        seg.routeKey || (seg.stops || []).join('>'),
+      );
+      const routeGeometry = await getKmbRoadGeometry(
+        seg.stops || [],
+        seg.routeKey || (seg.stops || []).join('>'),
+      );
 
-      if (segStops.length >= 2) {
-        const start = segStops[0];
-        const end = segStops[segStops.length - 1];
-        const intermediates = segStops.slice(1, -1);
-        const roadInfo = await window.routeEngine.fetchGCPRoute(
-          start.lat,
-          start.lng,
-          end.lat,
-          end.lng,
-          'driving',
-          intermediates,
-        );
-        drawPoly(roadInfo.geometry, color, 6, 'solid');
-      }
+      if (routeGeometry.length >= 2) drawPoly(routeGeometry, color, 6, 'solid');
       segStops.forEach((s, idx) => {
         const isTerm = idx === 0 || idx === segStops.length - 1;
         addMarker(s.lat, s.lng, color, s.name_en, s.name_tc, isTerm ? 12 : 8, isTerm);
@@ -2402,28 +2431,10 @@ const App = () => {
       const selectedVariant = selectBestOverlayVariant(uniqueVariants, routeNumber);
       const pointsForExtent = [];
       for (const key of [selectedVariant]) {
-        const stops = (routeStopsRef.current[key] || [])
-          .map((stopId) => ({ id: stopId, ...stopMapRef.current[stopId] }))
-          .filter((stop) => Number.isFinite(stop.lat) && Number.isFinite(stop.lng));
+        const stopIds = routeStopsRef.current[key] || [];
+        const { stops } = getKmbStopSequenceGeometry(stopIds, key);
+        const geometry = await getKmbRoadGeometry(stopIds, key);
         if (stops.length < 2) continue;
-
-        const start = stops[0];
-        const end = stops[stops.length - 1];
-        const intermediates = stops.slice(1, -1);
-        let geometry = stops.map((stop) => [stop.lng, stop.lat]);
-        try {
-          const roadInfo = await window.routeEngine.fetchGCPRoute(
-            start.lat,
-            start.lng,
-            end.lat,
-            end.lng,
-            'driving',
-            intermediates,
-          );
-          if (roadInfo?.geometry?.length >= 2) geometry = roadInfo.geometry;
-        } catch {
-          // Keep the stop-to-stop geometry if Google road geometry fails.
-        }
 
         layer.add(
           new Graphic({
