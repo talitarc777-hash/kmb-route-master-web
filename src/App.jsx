@@ -437,12 +437,6 @@ function plannedTimeValidity(route, timeMode) {
       className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     };
   }
-  if (status === 'matched_with_missing_profiles') {
-    return {
-      label: 'Valid for selected time; some station slots unavailable',
-      className: 'bg-cyan-50 text-cyan-700 border-cyan-200',
-    };
-  }
   if (status === 'schedule_unavailable') {
     return {
       label: 'Historical slots unavailable',

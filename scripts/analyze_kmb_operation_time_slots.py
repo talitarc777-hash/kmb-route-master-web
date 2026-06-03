@@ -554,7 +554,7 @@ def main():
         handle.write("- For planned time searches, lookup route + bound + service_type + stop_id + day class.\n")
         handle.write("- Reject a candidate when a known profile says the planned board time is outside `start_time`/`end_time`.\n")
         handle.write("- Use route-level profiles as fallback if a specific route-stop profile is missing.\n")
-        handle.write("- Keep candidates with missing historical profiles, but mark them as partially validated in the app.\n")
+        handle.write("- Reject candidates with missing station and route-level historical profiles.\n")
         handle.write("- In Now mode, live ETA should still override this historical profile.\n")
 
     print(f"  wrote {args.db_output}")

@@ -32,5 +32,5 @@
 - For planned time searches, lookup route + bound + service_type + stop_id + day class.
 - Reject a candidate when a known profile says the planned board time is outside `start_time`/`end_time`.
 - Use route-level profiles as fallback if a specific route-stop profile is missing.
-- Keep candidates with missing historical profiles, but mark them as partially validated in the app.
+- Reject candidates with missing station and route-level historical profiles.
 - In Now mode, live ETA should still override this historical profile.

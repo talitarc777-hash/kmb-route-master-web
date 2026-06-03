@@ -514,32 +514,27 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
         };
     }
 
-    return { valid: true, status: 'profile_missing', reason: 'historical_profile_missing', dayClass };
+    return { valid: false, status: 'profile_missing', reason: 'historical_profile_missing', dayClass };
 }
 
 async function validateRouteHistoricalSchedule(route) {
     const schedule = await loadKmbOperationSchedule();
     if (!schedule) {
         route.historicalScheduleStatus = 'schedule_unavailable';
-        return true;
+        route.historicalScheduleRejectReason = 'schedule_unavailable';
+        return false;
     }
 
-    let missingProfileCount = 0;
     for (const segment of route.segments || []) {
         const result = validateSegmentHistoricalSchedule(segment, segment.boardTime, schedule);
         segment.historicalSchedule = result;
-        if (result.status === 'profile_missing') {
-            missingProfileCount += 1;
-            continue;
-        }
         if (!result.valid) {
             route.historicalScheduleStatus = 'rejected';
             route.historicalScheduleRejectReason = result.reason;
             return false;
         }
     }
-    route.historicalScheduleStatus = missingProfileCount > 0 ? 'matched_with_missing_profiles' : 'matched';
-    route.historicalScheduleMissingProfileCount = missingProfileCount;
+    route.historicalScheduleStatus = 'matched';
     return true;
 }
 

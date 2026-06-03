@@ -71,9 +71,9 @@ Historical KMB operation slots:
 - For planned searches, the runtime file fetch starts before walking-time enrichment so schedule loading overlaps with other route calculations
 - After planned board times are computed, each segment is checked against the matching route-stop profile
 - If a route-stop profile is missing, the route-level profile is used as fallback
-- If both station and route profiles are missing, the candidate is kept but marked as having missing historical station slots
+- If both station and route profiles are missing, the planned candidate is rejected
 - If a known station/route profile says the computed board time is outside the observed operation window, the planned candidate is rejected
-- Planned route cards show whether the selected time was fully validated or partially validated
+- Planned route cards show only options validated inside the selected service window
 - KMB route details show each boarding station's observed service window where the historical profile exists
 - `now` mode still uses live ETA as the primary source and does not require the historical slot database
 
