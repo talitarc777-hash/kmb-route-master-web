@@ -3,14 +3,21 @@ from http.server import BaseHTTPRequestHandler
 import urllib.request
 import urllib.parse
 import json
+import re
 import time
 
+CSDI_BUS_ROUTE_QUERY_URL = (
+    "https://portal.csdi.gov.hk/server/rest/services/common/"
+    "td_rcd_1638844988873_41214/FeatureServer/0/query"
+)
+
 class handler(BaseHTTPRequestHandler):
-    def send_json(self, payload, status_code=200):
+    def send_json(self, payload, status_code=200, cache_control="no-store"):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status_code)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Cache-Control', cache_control)
         self.end_headers()
         self.wfile.write(body)
 
@@ -31,6 +38,7 @@ class handler(BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         query_params = urllib.parse.parse_qs(parsed_path.query)
         path = parsed_path.path
+        cache_control = "no-store"
         
         # Determine the target URL based on the path
         if '/api/google/' in path:
@@ -52,8 +60,32 @@ class handler(BaseHTTPRequestHandler):
             
             target_url = f"https://maps.googleapis.com/maps/api/{google_subpath}?{new_query}"
         
+        elif path.endswith('/api/kmb/route-geometry'):
+            route = str(query_params.get('route', [''])[0]).strip().upper()
+            if not re.fullmatch(r'[A-Z0-9]{1,8}', route):
+                return self.send_json({
+                    "status": "INVALID_REQUEST",
+                    "error_message": "A valid KMB route number is required.",
+                    "features": [],
+                }, status_code=400)
+
+            csdi_query = {
+                "f": "geojson",
+                "where": f"ROUTE_NAMEE='{route}'",
+                "outFields": (
+                    "ROUTE_ID,ROUTE_SEQ,COMPANY_CODE,ROUTE_NAMEE,"
+                    "ST_STOP_ID,ED_STOP_ID,ST_STOP_NAMEE,ED_STOP_NAMEE"
+                ),
+                "returnGeometry": "true",
+                "outSR": "4326",
+                "orderByFields": "ROUTE_ID,ROUTE_SEQ",
+            }
+            target_url = f"{CSDI_BUS_ROUTE_QUERY_URL}?{urllib.parse.urlencode(csdi_query)}"
+            cache_control = "public, max-age=86400, s-maxage=604800"
+
         elif '/api/kmb/' in path:
             # Keep your existing KMB Open Data logic here
+            cache_control = "public, max-age=60"
             if 'route-stop' in path:
                 target_url = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop"
             elif 'stop' in path:
@@ -81,6 +113,7 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', cache_control)
             self.end_headers()
             self.wfile.write(data)
         except Exception as e:

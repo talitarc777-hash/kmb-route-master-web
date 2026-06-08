@@ -20,12 +20,17 @@ const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
 const GCP_AUTOCOMPLETE_CACHE_KEY = 'kmb_gcp_autocomplete_cache_v1';
 const GCP_TRANSIT_GAP_CACHE_KEY = 'kmb_gcp_transit_gap_cache_v1';
 const STATIC_OPERATOR_FARE_CACHE_KEY = 'kmb_static_operator_fare_cache_v1';
+const CSDI_ROUTE_GEOMETRY_CACHE_KEY = 'kmb_csdi_route_geometry_cache_v1';
 const GCP_GEOCODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GCP_AUTOCOMPLETE_TTL_MS = 12 * 60 * 60 * 1000;
 const GCP_TRANSIT_GAP_TTL_MS = 15 * 60 * 1000;
 const STATIC_OPERATOR_FARE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const CSDI_ROUTE_GEOMETRY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ARCGIS_JS_URL = 'https://js.arcgis.com/4.29/';
+const CSDI_BUS_ROUTE_QUERY_URL =
+  'https://portal.csdi.gov.hk/server/rest/services/common/' +
+  'td_rcd_1638844988873_41214/FeatureServer/0/query';
 
 let arcgisApiPromise = null;
 
@@ -87,6 +92,14 @@ const staticOperatorFareCacheState = {
   persisted: null,
   storageKey: STATIC_OPERATOR_FARE_CACHE_KEY,
   ttlMs: STATIC_OPERATOR_FARE_TTL_MS,
+};
+
+const csdiRouteGeometryCacheState = {
+  memory: new Map(),
+  inflight: new Map(),
+  persisted: null,
+  storageKey: CSDI_ROUTE_GEOMETRY_CACHE_KEY,
+  ttlMs: CSDI_ROUTE_GEOMETRY_TTL_MS,
 };
 
 function loadGcpCache(state) {
@@ -191,6 +204,178 @@ function haversine(lat1, lon1, lat2, lon2) {
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function validCsdiCoordinate(point) {
+  if (!Array.isArray(point) || point.length < 2) return null;
+  const lng = Number(point[0]);
+  const lat = Number(point[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < 21.5 || lat > 23.5 || lng < 113 || lng > 115.5) return null;
+  return [lng, lat];
+}
+
+function stitchCsdiLineParts(geometry) {
+  if (!geometry) return [];
+  const rawParts = geometry.type === 'LineString'
+    ? [geometry.coordinates]
+    : geometry.type === 'MultiLineString'
+      ? geometry.coordinates
+      : [];
+  const parts = rawParts
+    .map((part) => (part || []).map(validCsdiCoordinate).filter(Boolean))
+    .filter((part) => part.length >= 2);
+  if (parts.length === 0) return [];
+
+  const stitched = [...parts[0]];
+  for (const originalPart of parts.slice(1)) {
+    const currentEnd = stitched[stitched.length - 1];
+    const startDistance = haversine(
+      currentEnd[1],
+      currentEnd[0],
+      originalPart[0][1],
+      originalPart[0][0],
+    );
+    const endDistance = haversine(
+      currentEnd[1],
+      currentEnd[0],
+      originalPart[originalPart.length - 1][1],
+      originalPart[originalPart.length - 1][0],
+    );
+    const part = endDistance < startDistance ? [...originalPart].reverse() : originalPart;
+    stitched.push(...part);
+  }
+  return stitched;
+}
+
+function simplifyCsdiGeometry(geometry, minDistanceKm = 0.005) {
+  if (geometry.length <= 2) return geometry;
+  const simplified = [geometry[0]];
+  for (let index = 1; index < geometry.length - 1; index += 1) {
+    const previous = simplified[simplified.length - 1];
+    const current = geometry[index];
+    if (haversine(previous[1], previous[0], current[1], current[0]) >= minDistanceKm) {
+      simplified.push(current);
+    }
+  }
+  simplified.push(geometry[geometry.length - 1]);
+  return simplified;
+}
+
+function sliceCsdiGeometry(geometry, startStop, endStop) {
+  if (geometry.length < 2) return null;
+  const endDistances = geometry.map(([lng, lat]) =>
+    haversine(endStop.lat, endStop.lng, lat, lng));
+  const suffixEnd = new Array(geometry.length);
+  let nearestEnd = { index: geometry.length - 1, distance: endDistances[geometry.length - 1] };
+  for (let index = geometry.length - 1; index >= 0; index -= 1) {
+    if (endDistances[index] <= nearestEnd.distance) {
+      nearestEnd = { index, distance: endDistances[index] };
+    }
+    suffixEnd[index] = nearestEnd;
+  }
+
+  let best = null;
+  for (let startIndex = 0; startIndex < geometry.length - 1; startIndex += 1) {
+    const [lng, lat] = geometry[startIndex];
+    const startDistance = haversine(startStop.lat, startStop.lng, lat, lng);
+    const end = suffixEnd[startIndex + 1];
+    if (!end || end.index <= startIndex) continue;
+    const score = startDistance + end.distance;
+    if (!best || score < best.score) {
+      best = {
+        geometry: geometry.slice(startIndex, end.index + 1),
+        score,
+        startDistance,
+        endDistance: end.distance,
+      };
+    }
+  }
+  return best;
+}
+
+function selectCsdiRouteGeometry(features, startStop, endStop, operator = 'KMB') {
+  const requestedOperator = String(operator || 'KMB').toUpperCase();
+  const candidates = (features || []).map((feature) => {
+    const geometry = stitchCsdiLineParts(feature?.geometry);
+    if (geometry.length < 2) return null;
+    const sliced = sliceCsdiGeometry(geometry, startStop, endStop);
+    if (!sliced) return null;
+    const company = String(feature?.properties?.COMPANY_CODE || '').toUpperCase();
+    const operatorMismatch = requestedOperator && !company.includes(requestedOperator);
+    return {
+      ...sliced,
+      score: sliced.score,
+      operatorMismatch,
+    };
+  }).filter(Boolean).sort((a, b) => a.score - b.score);
+
+  const best = candidates.find((candidate) => !candidate.operatorMismatch);
+  if (!best || best.startDistance > 1 || best.endDistance > 1) return null;
+  return best.geometry;
+}
+
+function compactCsdiRouteFeatures(features) {
+  return (features || []).map((feature) => {
+    const geometry = simplifyCsdiGeometry(stitchCsdiLineParts(feature?.geometry));
+    if (geometry.length < 2) return null;
+    return {
+      type: 'Feature',
+      properties: feature.properties || {},
+      geometry: {
+        type: 'LineString',
+        coordinates: geometry,
+      },
+    };
+  }).filter(Boolean);
+}
+
+function buildDirectCsdiRouteUrl(routeNumber) {
+  const query = new URLSearchParams({
+    f: 'geojson',
+    where: `ROUTE_NAMEE='${routeNumber}'`,
+    outFields: [
+      'ROUTE_ID',
+      'ROUTE_SEQ',
+      'COMPANY_CODE',
+      'ROUTE_NAMEE',
+      'ST_STOP_ID',
+      'ED_STOP_ID',
+      'ST_STOP_NAMEE',
+      'ED_STOP_NAMEE',
+    ].join(','),
+    returnGeometry: 'true',
+    outSR: '4326',
+    orderByFields: 'ROUTE_ID,ROUTE_SEQ',
+  });
+  return `${CSDI_BUS_ROUTE_QUERY_URL}?${query.toString()}`;
+}
+
+async function fetchCsdiRouteFeatures(routeNumber) {
+  const route = String(routeNumber || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{1,8}$/.test(route)) return [];
+
+  return fetchGcpWithCache(csdiRouteGeometryCacheState, route, async () => {
+    const urls = [
+      toApiUrl(`/api/kmb/route-geometry?route=${encodeURIComponent(route)}`),
+      buildDirectCsdiRouteUrl(route),
+    ];
+    let lastError = null;
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, { headers: { Accept: 'application/geo+json, application/json' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        if (payload?.type === 'FeatureCollection' && Array.isArray(payload.features)) {
+          return compactCsdiRouteFeatures(payload.features);
+        }
+        throw new Error('CSDI returned an invalid GeoJSON payload.');
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('CSDI route geometry is unavailable.');
+  });
 }
 
 function parseLocationInput(input) {
@@ -1914,13 +2099,36 @@ const App = () => {
     return value;
   };
 
-  const getKmbRoadGeometry = async (stopIds = [], cacheKey = '') => {
+  const getKmbRoadGeometry = async (
+    stopIds = [],
+    cacheKey = '',
+    routeNumber = '',
+    operator = 'KMB',
+  ) => {
     const key = cacheKey || stopIds.join('>');
     const cached = kmbRoadGeometryCacheRef.current.get(key);
     if (cached) return cached;
 
     const local = getKmbStopSequenceGeometry(stopIds, key);
-    if (local.stops.length < 2 || !window.routeEngine?.fetchGCPRoute) return local.geometry;
+    if (local.stops.length < 2) return local.geometry;
+
+    try {
+      const features = await fetchCsdiRouteFeatures(routeNumber || key.split('|')[0]);
+      const csdiGeometry = selectCsdiRouteGeometry(
+        features,
+        local.stops[0],
+        local.stops[local.stops.length - 1],
+        operator,
+      );
+      if (csdiGeometry?.length >= 2) {
+        kmbRoadGeometryCacheRef.current.set(key, csdiGeometry);
+        return csdiGeometry;
+      }
+    } catch (err) {
+      console.warn('CSDI bus route geometry unavailable:', err);
+    }
+
+    if (!window.routeEngine?.fetchGCPRoute) return local.geometry;
 
     try {
       const start = local.stops[0];
@@ -1938,7 +2146,7 @@ const App = () => {
       kmbRoadGeometryCacheRef.current.set(key, geometry);
       return geometry;
     } catch (err) {
-      console.warn('KMB road-snapped route geometry failed:', err);
+      console.warn('Google fallback route geometry failed:', err);
       return local.geometry;
     }
   };
@@ -2012,6 +2220,8 @@ const App = () => {
         geometry = await getKmbRoadGeometry(
           leg.source_segment.stops,
           leg.source_segment.routeKey || leg.source_segment.stops.join('>'),
+          leg.source_segment.route,
+          leg.source_segment.routeInfo?.co || leg.operator,
         );
       }
 
@@ -2299,6 +2509,8 @@ const App = () => {
       const routeGeometry = await getKmbRoadGeometry(
         seg.stops || [],
         seg.routeKey || (seg.stops || []).join('>'),
+        seg.route,
+        seg.routeInfo?.co || 'KMB',
       );
 
       if (routeGeometry.length >= 2) drawPoly(routeGeometry, color, 6, 'solid');
@@ -2427,7 +2639,12 @@ const App = () => {
       for (const key of [selectedVariant]) {
         const stopIds = routeStopsRef.current[key] || [];
         const { stops } = getKmbStopSequenceGeometry(stopIds, key);
-        const geometry = await getKmbRoadGeometry(stopIds, key);
+        const geometry = await getKmbRoadGeometry(
+          stopIds,
+          key,
+          routeNumber,
+          routeMapRef.current[key]?.co || 'KMB',
+        );
         if (stops.length < 2) continue;
 
         layer.add(

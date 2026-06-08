@@ -13,7 +13,8 @@ A React route planner for Hong Kong. It searches KMB routes locally, validates l
 - KMB monthly-pass treatment: KMB legs are ranked as zero additional fare
 - Citybus, Tram, MTR, Light Rail, and MTR Bus fare/rail metadata from cached or official open data
 - ArcGIS-based route and stop map display
-- Persistent browser caching for fixed road geometry to reduce repeated Directions calls
+- Official CSDI bus-route geometry with persistent browser caching
+- Google driving geometry only when no usable CSDI route shape is available
 - Installable Progressive Web App
 
 ## Quick Start
@@ -124,7 +125,9 @@ KMB legs count as HKD 0 for this user's monthly pass. Options with unknown non-K
 
 ### 8. Draw the selected route
 
-The selected result is drawn on the ArcGIS map. KMB road geometry is requested from Google Directions when needed and cached in browser storage for up to 30 days because fixed bus route shapes are reusable. If road geometry is unavailable, the app falls back to the local stop sequence.
+The selected result is drawn on the ArcGIS map. The app first requests the Transport Department **Bus Route** geometry from the official CSDI ArcGIS FeatureServer. It chooses the direction/variant whose line is closest to the selected KMB boarding and alighting stops, then trims the official shape to that travelled section.
+
+CSDI responses are cached in browser storage for up to 30 days, while the server proxy exposes a seven-day shared cache. Google Directions driving geometry is requested only when CSDI is unavailable or has no safely matched line. If both sources fail, the app draws the local KMB stop sequence.
 
 ## Operation-Time Data
 
@@ -186,7 +189,7 @@ src/App.jsx                         Main UI, search orchestration, ranking, map 
 src/utils/apiBase.js               Same-origin or external API URL handling
 public/routeEngine.js              KMB graph search, ETA/schedule validation, timing
 public/operator-data/              Runtime schedules and compact operator datasets
-api/kmb.py                         Vercel KMB and Google proxy
+api/kmb.py                         Vercel KMB, CSDI geometry, and Google proxy
 api/open_data.py                   Operator datasets, coordinates, fares, rail metadata
 functions/api/                     Optional Cloudflare Pages proxies
 scripts/                           Data generation, validation, and API checks
@@ -195,6 +198,7 @@ scripts/                           Data generation, validation, and API checks
 ## Data Sources and Limits
 
 - KMB route, stop, route-stop, and ETA data: KMB open data
+- Franchised-bus route geometry: Transport Department Bus Route dataset on CSDI
 - Citybus, Tram, and road transport data: Hong Kong Transport Department open data
 - MTR and Light Rail data: MTR open data
 - Geocoding, walking/driving geometry, and transit duration: Google Maps Platform when configured
