@@ -12,10 +12,7 @@ from datetime import datetime, timezone
 
 DEFAULT_INPUT_DIR = "KMB csv time slot"
 DEFAULT_LEGACY_INPUT = os.path.join(DEFAULT_INPUT_DIR, "kmb_eta_observations_full.csv")
-DEFAULT_DB_OUTPUT = os.path.join("public", "operator-data", "kmb_operation_time_slots.json")
-DEFAULT_COMPACT_OUTPUT = os.path.join("public", "operator-data", "kmb_operation_time_slots.compact.json")
 DEFAULT_RUNTIME_OUTPUT = os.path.join("public", "operator-data", "kmb_operation_time_slots.runtime.json")
-DEFAULT_SUMMARY_OUTPUT = os.path.join("logs", "kmb_operation_time_slot_summary.md")
 DAY_CLASSES = ("weekday", "saturday", "sunday_public_holiday")
 
 # 2026 Hong Kong general holidays, from GovHK's gazetted public holiday list.
@@ -119,10 +116,19 @@ def parse_args():
             "Defaults to JSONL files in 'KMB csv time slot', then the legacy CSV if present."
         ),
     )
-    parser.add_argument("--db-output", default=DEFAULT_DB_OUTPUT)
-    parser.add_argument("--compact-output", default=DEFAULT_COMPACT_OUTPUT)
+    parser.add_argument(
+        "--db-output",
+        help="Optional verbose review JSON output. Omit for the smaller production-only build.",
+    )
+    parser.add_argument(
+        "--compact-output",
+        help="Optional compact review JSON output. Omit for the smaller production-only build.",
+    )
     parser.add_argument("--runtime-output", default=DEFAULT_RUNTIME_OUTPUT)
-    parser.add_argument("--summary-output", default=DEFAULT_SUMMARY_OUTPUT)
+    parser.add_argument(
+        "--summary-output",
+        help="Optional Markdown analysis report output.",
+    )
     parser.add_argument("--slot-minutes", type=int, default=15)
     parser.add_argument("--min-samples", type=int, default=4)
     parser.add_argument("--min-slot-samples", type=int, default=1)
@@ -501,66 +507,75 @@ def main():
     }
 
     print("[4/4] Writing outputs")
-    os.makedirs(os.path.dirname(os.path.abspath(args.db_output)), exist_ok=True)
-    with open(args.db_output, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+    if args.db_output:
+        os.makedirs(os.path.dirname(os.path.abspath(args.db_output)), exist_ok=True)
+        with open(args.db_output, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
 
-    os.makedirs(os.path.dirname(os.path.abspath(args.compact_output)), exist_ok=True)
-    with open(args.compact_output, "w", encoding="utf-8") as handle:
-        json.dump(compact_payload, handle, ensure_ascii=False, separators=(",", ":"))
+    if args.compact_output:
+        os.makedirs(os.path.dirname(os.path.abspath(args.compact_output)), exist_ok=True)
+        with open(args.compact_output, "w", encoding="utf-8") as handle:
+            json.dump(compact_payload, handle, ensure_ascii=False, separators=(",", ":"))
 
     os.makedirs(os.path.dirname(os.path.abspath(args.runtime_output)), exist_ok=True)
     with open(args.runtime_output, "w", encoding="utf-8") as handle:
         json.dump(runtime_payload, handle, ensure_ascii=False, separators=(",", ":"))
 
-    os.makedirs(os.path.dirname(os.path.abspath(args.summary_output)), exist_ok=True)
-    generated_files = [
-        ("Full review JSON", args.db_output),
-        ("Compact review JSON", args.compact_output),
-        ("Runtime app JSON", args.runtime_output),
-    ]
-    with open(args.summary_output, "w", encoding="utf-8") as handle:
-        handle.write("# KMB Operation Time Slot Study\n\n")
-        handle.write("- Input files:\n")
-        for input_path in input_paths:
-            handle.write(f"  - `{input_path}`\n")
-        handle.write(f"- Observed ETA range: `{summary['observed_eta_range']['from']}` to `{summary['observed_eta_range']['to']}`\n")
-        handle.write(f"- Total rows: **{total_rows:,}**\n")
-        handle.write(f"- Usable ETA rows: **{usable_rows:,}**\n")
-        handle.write(f"- Blank ETA rows skipped: **{blank_eta_rows:,}**\n")
-        handle.write(f"- `no_eta` rows skipped: **{no_eta_rows:,}**\n")
-        handle.write(f"- Route profiles: **{len(routes):,}**\n")
-        handle.write(f"- Route-stop profiles: **{len(records):,}**\n")
-        handle.write(f"- Slot size: **{args.slot_minutes} minutes**\n\n")
-        handle.write("## Generated Files\n\n")
-        for label, path in generated_files:
-            size_mb = os.path.getsize(path) / 1024 / 1024
-            handle.write(f"- {label}: `{path}` (**{size_mb:.2f} MB**)\n")
-        handle.write("- Runtime JSON is the only operation-slot file fetched by the app.\n")
-        handle.write("- Runtime JSON stores start/end times as minutes since midnight.\n")
-        handle.write("- Runtime JSON omits stop names, coordinates, active slots, and verbose metadata to reduce planned-search load time.\n\n")
-        handle.write("## Day-Class Trends\n\n")
-        for day_class in DAY_CLASSES:
-            row = summary["day_class_summary"].get(day_class)
-            if not row:
-                handle.write(f"- {day_class}: no sufficient samples\n")
-                continue
-            handle.write(
-                f"- {day_class}: profiles={row['profile_count']:,}, "
-                f"median start={row['median_start']} (P10 {row['p10_start']} / P90 {row['p90_start']}), "
-                f"median end={row['median_end']} (P10 {row['p10_end']} / P90 {row['p90_end']})\n"
+    if args.summary_output:
+        os.makedirs(os.path.dirname(os.path.abspath(args.summary_output)), exist_ok=True)
+        generated_files = [("Runtime app JSON", args.runtime_output)]
+        if args.db_output:
+            generated_files.insert(0, ("Full review JSON", args.db_output))
+        if args.compact_output:
+            generated_files.insert(
+                len(generated_files) - 1,
+                ("Compact review JSON", args.compact_output),
             )
-        handle.write("\n## Route Planning Use\n\n")
-        handle.write("- For planned time searches, lookup route + bound + service_type + stop_id + day class.\n")
-        handle.write("- Reject a candidate when a known profile says the planned board time is outside `start_time`/`end_time`.\n")
-        handle.write("- Use route-level profiles as fallback if a specific route-stop profile is missing.\n")
-        handle.write("- Reject candidates with missing station and route-level historical profiles.\n")
-        handle.write("- In Now mode, live ETA should still override this historical profile.\n")
+        with open(args.summary_output, "w", encoding="utf-8") as handle:
+            handle.write("# KMB Operation Time Slot Study\n\n")
+            handle.write("- Input files:\n")
+            for input_path in input_paths:
+                handle.write(f"  - `{input_path}`\n")
+            handle.write(f"- Observed ETA range: `{summary['observed_eta_range']['from']}` to `{summary['observed_eta_range']['to']}`\n")
+            handle.write(f"- Total rows: **{total_rows:,}**\n")
+            handle.write(f"- Usable ETA rows: **{usable_rows:,}**\n")
+            handle.write(f"- Blank ETA rows skipped: **{blank_eta_rows:,}**\n")
+            handle.write(f"- `no_eta` rows skipped: **{no_eta_rows:,}**\n")
+            handle.write(f"- Route profiles: **{len(routes):,}**\n")
+            handle.write(f"- Route-stop profiles: **{len(records):,}**\n")
+            handle.write(f"- Slot size: **{args.slot_minutes} minutes**\n\n")
+            handle.write("## Generated Files\n\n")
+            for label, path in generated_files:
+                size_mb = os.path.getsize(path) / 1024 / 1024
+                handle.write(f"- {label}: `{path}` (**{size_mb:.2f} MB**)\n")
+            handle.write("- Runtime JSON is the only operation-slot file fetched by the app.\n")
+            handle.write("- Runtime JSON stores start/end times as minutes since midnight.\n")
+            handle.write("- Runtime JSON omits stop names, coordinates, active slots, and verbose metadata to reduce planned-search load time.\n\n")
+            handle.write("## Day-Class Trends\n\n")
+            for day_class in DAY_CLASSES:
+                row = summary["day_class_summary"].get(day_class)
+                if not row:
+                    handle.write(f"- {day_class}: no sufficient samples\n")
+                    continue
+                handle.write(
+                    f"- {day_class}: profiles={row['profile_count']:,}, "
+                    f"median start={row['median_start']} (P10 {row['p10_start']} / P90 {row['p90_start']}), "
+                    f"median end={row['median_end']} (P10 {row['p10_end']} / P90 {row['p90_end']})\n"
+                )
+            handle.write("\n## Route Planning Use\n\n")
+            handle.write("- For planned time searches, lookup route + bound + service_type + stop_id + day class.\n")
+            handle.write("- Reject a candidate when a known profile says the planned board time is outside `start_time`/`end_time`.\n")
+            handle.write("- Use route-level profiles as fallback if a specific route-stop profile is missing.\n")
+            handle.write("- Reject candidates with missing station and route-level historical profiles.\n")
+            handle.write("- In Now mode, live ETA should still override this historical profile.\n")
 
-    print(f"  wrote {args.db_output}")
-    print(f"  wrote {args.compact_output}")
+    if args.db_output:
+        print(f"  wrote {args.db_output}")
+    if args.compact_output:
+        print(f"  wrote {args.compact_output}")
     print(f"  wrote {args.runtime_output}")
-    print(f"  wrote {args.summary_output}")
+    if args.summary_output:
+        print(f"  wrote {args.summary_output}")
 
 
 if __name__ == "__main__":

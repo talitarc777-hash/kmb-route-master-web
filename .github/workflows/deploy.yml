@@ -33,13 +33,13 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build
         run: npm run build
         env:
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
-          GCP_API_KEY: ${{ secrets.GCP_API_KEY }}
+          # GitHub Pages is static. Point this at a separately deployed API.
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -47,7 +47,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # We changed this back to just 'dist'
           path: './dist'
       
       - name: Deploy to GitHub Pages

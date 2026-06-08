@@ -13,7 +13,7 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 4000000, // Raise limit to 4MB
       },
-      includeAssets: ['pwa-192x192.png', 'pwa-512x512.png', 'arcgis.css'],
+      includeAssets: ['pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
         name: 'KMB Route Master',
         short_name: 'KMB Master',

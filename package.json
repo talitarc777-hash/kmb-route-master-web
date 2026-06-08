@@ -2,11 +2,11 @@
     "name": "kmb-route-master-web",
     "private": true,
     "version": "1.0.0",
-    "description": "KMB Route Master — Hong Kong bus navigation with React, ArcGIS, and Gemini AI",
+    "description": "Hong Kong route planner with KMB search and optional Google Transit gap options",
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "vite build && node scripts/remove-oversize-pages-assets.mjs",
+        "build": "vite build",
         "check:gcp": "node scripts/check-gcp-api-key.mjs",
         "preview": "vite preview"
     },
