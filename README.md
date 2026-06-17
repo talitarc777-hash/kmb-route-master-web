@@ -95,7 +95,7 @@ The lookup key is route, bound, service type, and boarding stop. Service windows
 - Saturday
 - Sunday and public holiday
 
-A route-stop profile is preferred. A route-level profile is used only when the stop profile is missing. Candidates outside a known service window, or without enough schedule evidence, are rejected so invalid planned-time choices are not shown.
+A route-stop profile has highest priority because it is the most specific evidence for the boarding station. If the station profile confirms the selected time, the segment is valid immediately. Because observed stop-level ETA samples can still be sparse, a valid route-level profile is used only as a recovery path when the station profile is missing or rejects a time that the broader route profile supports. Candidates are rejected only when neither source supports the selected time; when both reject, the station-level reason is shown.
 
 ### 5. Estimate journey time
 

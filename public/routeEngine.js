@@ -497,23 +497,41 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
     ].map((part) => String(part || '').trim()).join('|');
     const routeStopKey = `${routeKey}|${String(segment.fromStop || '').trim()}`;
     const routeStopPeriod = getSchedulePeriod(schedule, 'route_stops', routeStopKey, dayClass);
+    let routeStopResult = null;
     if (routeStopPeriod) {
-        return {
+        routeStopResult = {
             ...validateSchedulePeriod(routeStopPeriod, boardDate, KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN),
             status: 'route_stop_profile',
             dayClass,
         };
+        // Station-level evidence is the most specific source. If it confirms
+        // the requested time, accept the segment without consulting route-level
+        // summaries that may be broader or noisier.
+        if (routeStopResult.valid) return routeStopResult;
     }
 
     const routePeriod = getSchedulePeriod(schedule, 'routes', routeKey, dayClass);
     if (routePeriod) {
-        return {
+        const routeResult = {
             ...validateSchedulePeriod(routePeriod, boardDate, KMB_ROUTE_SLOT_TOLERANCE_MIN),
             status: 'route_profile',
             dayClass,
         };
+        if (routeResult.valid && routeStopResult) {
+            routeResult.stationProfileFallback = {
+                status: routeStopResult.status,
+                reason: routeStopResult.reason,
+                startTime: routeStopResult.startTime,
+                endTime: routeStopResult.endTime,
+                sampleCount: routeStopResult.sampleCount,
+                sampleDays: routeStopResult.sampleDays,
+            };
+        }
+        if (!routeResult.valid && routeStopResult) return routeStopResult;
+        return routeResult;
     }
 
+    if (routeStopResult) return routeStopResult;
     return { valid: false, status: 'profile_missing', reason: 'historical_profile_missing', dayClass };
 }
 

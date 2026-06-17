@@ -660,6 +660,7 @@ function formatHistoricalSchedule(schedule) {
     `${dayClassLabel(schedule.dayClass)} observed ${schedule.startTime}-${schedule.endTime}`,
     historicalScheduleSourceLabel(schedule.status),
   ];
+  if (schedule.stationProfileFallback) pieces.push('station profile sparse');
   if (Number.isFinite(schedule.sampleCount)) pieces.push(`${schedule.sampleCount} ETA samples`);
   return pieces.join(' · ');
 }
