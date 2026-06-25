@@ -1796,6 +1796,17 @@ const App = () => {
     });
   }, []);
 
+  const plannedJourneyClock = useCallback(
+    (route) => {
+      if (timeMode !== 'arrive' || !route) return null;
+      const depart = formatClockTime(route.plannedDepartureTime);
+      const arrive = formatClockTime(route.plannedArrivalTime);
+      if (!depart && !arrive) return null;
+      return { depart, arrive };
+    },
+    [formatClockTime, timeMode],
+  );
+
   const refreshStatusClass = useMemo(() => {
     if (!refreshFeedback) return '';
     if (refreshFeedback.type === 'success')
@@ -3421,6 +3432,24 @@ const App = () => {
                           {card.representative.repairReason}
                         </div>
                       )}
+                      {(() => {
+                        const plannedClock = plannedJourneyClock(card.representative);
+                        if (!plannedClock) return null;
+                        return (
+                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-black text-blue-700">
+                            {plannedClock.depart && (
+                              <span className="rounded-full border border-blue-200 bg-white px-2 py-1">
+                                Depart by {plannedClock.depart}
+                              </span>
+                            )}
+                            {plannedClock.arrive && (
+                              <span className="rounded-full border border-blue-200 bg-white px-2 py-1">
+                                Arrive {plannedClock.arrive}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-blue-700 font-bold text-lg">
@@ -3506,6 +3535,24 @@ const App = () => {
                           <span>{'\u00B7'} {'\u23F1'} {card.representative.originWaitTime}min wait</span>
                         )}
                       </div>
+                      {(() => {
+                        const plannedClock = plannedJourneyClock(card.representative);
+                        if (!plannedClock) return null;
+                        return (
+                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-black text-slate-600">
+                            {plannedClock.depart && (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
+                                Depart by {plannedClock.depart}
+                              </span>
+                            )}
+                            {plannedClock.arrive && (
+                              <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+                                Arrive {plannedClock.arrive}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="text-right">
                       <div className="text-[#E1251B] font-bold text-lg">
@@ -3566,6 +3613,23 @@ const App = () => {
               <div className="text-sm font-black text-slate-700">{formatHybridFare(selectedRoute)}</div>
             </div>
           </div>
+
+          {(() => {
+            const plannedClock = plannedJourneyClock(selectedRoute);
+            if (!plannedClock) return null;
+            return (
+              <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs font-black text-blue-800">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-blue-500">Depart by</div>
+                  <div className="text-base">{plannedClock.depart || '-'}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wide text-blue-500">Arrive by</div>
+                  <div className="text-base">{plannedClock.arrive || '-'}</div>
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs font-bold text-blue-800">
             {selectedRoute.repairReason
@@ -3737,6 +3801,22 @@ const App = () => {
               ~{selectedRoute.estimatedTime}min
             </span>
           </div>
+          {(() => {
+            const plannedClock = plannedJourneyClock(selectedRoute);
+            if (!plannedClock) return null;
+            return (
+              <div className="mb-3 grid grid-cols-2 gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-xs font-black text-emerald-800">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-emerald-600">Depart by</div>
+                  <div className="text-base">{plannedClock.depart || '-'}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wide text-emerald-600">Arrive by</div>
+                  <div className="text-base">{plannedClock.arrive || '-'}</div>
+                </div>
+              </div>
+            );
+          })()}
           {(() => {
             const validity = plannedTimeValidity(selectedRoute, timeMode);
             if (!validity) return null;
