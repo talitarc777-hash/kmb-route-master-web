@@ -1,6 +1,6 @@
 /**
  * KMB Bookmarks Module
- * Handles stop bookmarks, group management, and live ETA polling.
+ * Handles stop bookmarks, group management, and user-triggered ETA refresh.
  * Persists to localStorage under key 'kmb_bookmarks'.
  *
  * Exposed as window.bookmarkEngine for CDN/Babel usage.
@@ -9,7 +9,6 @@
 'use strict';
 
 const STORAGE_KEY = 'kmb_bookmarks';
-const POLL_INTERVAL_MS = 30000; // 30 seconds
 
 // ─────────────────────────────────────────────────────────────────────
 // PERSISTENCE
@@ -120,53 +119,26 @@ async function fetchStopETAs(stopId, routes) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// POLLING MANAGER
+// ETA REFRESH HELPERS
 // ─────────────────────────────────────────────────────────────────────
 
-class ETAPoller {
-    constructor(onUpdate) {
-        this.onUpdate = onUpdate; // (updates: Map<stopId, ETAs[]>) => void
-        this.intervalId = null;
-        this.bookmarks = [];
-    }
-
-    start(bookmarks) {
-        this.bookmarks = bookmarks;
-        this._poll(); // immediate first poll
-        this.intervalId = setInterval(() => this._poll(), POLL_INTERVAL_MS);
-    }
-
-    update(bookmarks) {
-        this.bookmarks = bookmarks;
-    }
-
-    stop() {
-        if (this.intervalId) {
-            clearInterval(this.intervalId);
-            this.intervalId = null;
-        }
-    }
-
-    async _poll() {
-        const allStops = [];
-        for (const group of this.bookmarks) {
-            for (const s of group.stops) {
-                if (!allStops.find(x => x.stopId === s.stopId)) {
-                    allStops.push(s);
-                }
+async function refreshBookmarkETAs(bookmarks) {
+    const allStops = [];
+    for (const group of bookmarks || []) {
+        for (const s of group.stops || []) {
+            if (!allStops.find(x => x.stopId === s.stopId)) {
+                allStops.push(s);
             }
         }
-        if (allStops.length === 0) return;
-
-        const updates = new Map();
-        await Promise.all(
-            allStops.map(async (s) => {
-                const etas = await fetchStopETAs(s.stopId, s.routes);
-                updates.set(s.stopId, etas);
-            })
-        );
-        this.onUpdate(updates);
     }
+    const updates = new Map();
+    await Promise.all(
+        allStops.map(async (s) => {
+            const etas = await fetchStopETAs(s.stopId, s.routes || []);
+            updates.set(s.stopId, etas);
+        })
+    );
+    return updates;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -181,5 +153,5 @@ window.bookmarkEngine = {
     addStop,
     removeStop,
     fetchStopETAs,
-    ETAPoller,
+    refreshBookmarkETAs,
 };

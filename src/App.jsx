@@ -1458,21 +1458,31 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
   const [etaMap, setEtaMap] = useState(new Map());
   const [editing, setEditing] = useState(null);
   const [newGroupName, setNewGroupName] = useState('');
-  const pollerRef = useRef(null);
+  const [isUpdatingEtas, setIsUpdatingEtas] = useState(false);
+  const [lastEtaUpdateAt, setLastEtaUpdateAt] = useState(null);
+  const [etaUpdateError, setEtaUpdateError] = useState(null);
 
-  useEffect(() => {
-    pollerRef.current = new window.bookmarkEngine.ETAPoller((updates) => {
-      setEtaMap(new Map(updates));
-    });
-    pollerRef.current.start(bookmarks);
-    return () => pollerRef.current.stop();
-  }, []);
-
-  useEffect(() => {
-    if (pollerRef.current) pollerRef.current.update(bookmarks);
-  }, [bookmarks]);
+  const totalBookmarkedStops = useMemo(
+    () => bookmarks.reduce((sum, group) => sum + (group.stops?.length || 0), 0),
+    [bookmarks],
+  );
 
   const update = (newBm) => setBookmarks(newBm);
+
+  const handleUpdateEtas = async () => {
+    if (isUpdatingEtas || totalBookmarkedStops === 0) return;
+    setIsUpdatingEtas(true);
+    setEtaUpdateError(null);
+    try {
+      const updates = await window.bookmarkEngine.refreshBookmarkETAs(bookmarks);
+      setEtaMap(new Map(updates));
+      setLastEtaUpdateAt(new Date());
+    } catch (error) {
+      setEtaUpdateError(error?.message || 'Could not update bookmark ETAs.');
+    } finally {
+      setIsUpdatingEtas(false);
+    }
+  };
 
   const handleAddGroup = () => {
     if (!newGroupName.trim()) return;
@@ -1485,10 +1495,34 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-black text-lg">{'\u2B50'} Bookmarks</h2>
-        <button onClick={onClose} className="text-slate-400 text-xl font-bold">
-          {'\u2715'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleUpdateEtas}
+            disabled={isUpdatingEtas || totalBookmarkedStops === 0}
+            className="rounded-xl border border-[#E1251B]/30 px-3 py-1.5 text-xs font-black text-[#E1251B] hover:bg-[#E1251B]/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isUpdatingEtas ? 'Updating...' : 'Update ETA'}
+          </button>
+          <button onClick={onClose} className="text-slate-400 text-xl font-bold">
+            {'\u2715'}
+          </button>
+        </div>
       </div>
+      {lastEtaUpdateAt && (
+        <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+          ETA updated at {lastEtaUpdateAt.toLocaleTimeString('en-HK', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+          })}
+        </div>
+      )}
+      {etaUpdateError && (
+        <div className="mb-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+          {etaUpdateError}
+        </div>
+      )}
 
       {/* Add group */}
       <div className="flex gap-2 mb-4">
@@ -1577,7 +1611,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
                     <div className="text-xs text-slate-400">{stopInfo?.name_en}</div>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {!hasEtaData && (
-                        <span className="text-xs text-slate-300">Fetching ETAs...</span>
+                        <span className="text-xs text-slate-300">Click Update ETA to refresh</span>
                       )}
                       {hasEtaData && etas.length === 0 && (
                         <span className="text-xs text-slate-400">No ETA available now</span>
