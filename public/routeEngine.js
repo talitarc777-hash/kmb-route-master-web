@@ -691,11 +691,14 @@ function resetSegmentTiming(segment, defaultFrequency) {
     segment.boardTime = null;
     segment.arrivalTime = null;
     segment.waitMinutes = null;
+    segment.timingFallbackReason = null;
+    segment.historicalSchedule = null;
 }
 
 async function applyNowTiming(route, now, options = {}) {
-    const { allowNoEta = false } = options;
+    const { allowNoEta = false, allowTransferScheduleFallback = true } = options;
     let cursor = new Date(now);
+    let schedule = null;
 
     for (let i = 0; i < route.segments.length; i++) {
         const segment = route.segments[i];
@@ -710,11 +713,23 @@ async function applyNowTiming(route, now, options = {}) {
         segment.readyTime = readyTime.toISOString();
 
         if (!nextValidEta) {
-            if (!allowNoEta) return false;
+            const canUseScheduledTransferFallback = (
+                !allowNoEta &&
+                allowTransferScheduleFallback &&
+                i > 0
+            );
+            if (!allowNoEta && !canUseScheduledTransferFallback) return false;
             const boardTime = new Date(readyTime.getTime() + defaultFrequency * 60000);
             const arrivalTime = new Date(
                 boardTime.getTime() + getRideDurationMinutes(segment) * 60000
             );
+            if (canUseScheduledTransferFallback) {
+                schedule = schedule || await loadKmbOperationSchedule();
+                const historicalResult = validateSegmentHistoricalSchedule(segment, boardTime, schedule);
+                segment.historicalSchedule = historicalResult;
+                if (!historicalResult.valid) return false;
+                segment.timingFallbackReason = 'transfer_eta_unavailable_historical_schedule';
+            }
             segment.activeEtaCount = getActiveEtas(etaList, now).filter(
                 (eta) => new Date(eta.eta) >= readyTime
             ).length;

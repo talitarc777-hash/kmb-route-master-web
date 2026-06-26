@@ -541,6 +541,11 @@ function isFallbackRoute(route) {
   return route?.type === 'fallback_candidate' || route?.isFallback;
 }
 
+function hasUsableNowTiming(segment, index) {
+  if (segment?.hasActiveEta === true) return true;
+  return index > 0 && segment?.timingFallbackReason === 'transfer_eta_unavailable_historical_schedule';
+}
+
 function parseMoney(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -1705,7 +1710,7 @@ const App = () => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
     return results.filter((route) =>
       isFallbackRoute(route) ||
-      (route.segments || []).every((seg) => seg.hasActiveEta === true),
+      (route.segments || []).every((seg, index) => hasUsableNowTiming(seg, index)),
     );
   }, [results, strictEtaOnly, timeMode]);
 
