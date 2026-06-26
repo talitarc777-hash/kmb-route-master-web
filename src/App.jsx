@@ -1466,6 +1466,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
   const [isUpdatingEtas, setIsUpdatingEtas] = useState(false);
   const [lastEtaUpdateAt, setLastEtaUpdateAt] = useState(null);
   const [etaUpdateError, setEtaUpdateError] = useState(null);
+  const didInitialEtaRefreshRef = useRef(false);
 
   const totalBookmarkedStops = useMemo(
     () => bookmarks.reduce((sum, group) => sum + (group.stops?.length || 0), 0),
@@ -1474,7 +1475,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
 
   const update = (newBm) => setBookmarks(newBm);
 
-  const handleUpdateEtas = async () => {
+  const refreshBookmarkEtas = useCallback(async () => {
     if (isUpdatingEtas || totalBookmarkedStops === 0) return;
     setIsUpdatingEtas(true);
     setEtaUpdateError(null);
@@ -1487,6 +1488,18 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
     } finally {
       setIsUpdatingEtas(false);
     }
+  }, [bookmarks, isUpdatingEtas, totalBookmarkedStops]);
+
+  useEffect(() => {
+    if (didInitialEtaRefreshRef.current) return;
+    didInitialEtaRefreshRef.current = true;
+    if (totalBookmarkedStops > 0) {
+      refreshBookmarkEtas();
+    }
+  }, [refreshBookmarkEtas, totalBookmarkedStops]);
+
+  const handleUpdateEtas = () => {
+    refreshBookmarkEtas();
   };
 
   const handleAddGroup = () => {
@@ -1513,7 +1526,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
           {isUpdatingEtas ? 'Updating bookmark ETAs...' : 'Update bookmark ETAs'}
         </button>
         <p className="mt-2 text-[11px] font-bold text-slate-400">
-          ETAs refresh only when you tap this button.
+          ETAs refresh once when opened, then only when you tap this button.
         </p>
       </div>
       {lastEtaUpdateAt && (
