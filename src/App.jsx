@@ -1514,14 +1514,23 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
       <div className="mb-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
         <div className="flex items-center justify-between">
           <h2 className="font-black text-lg">{'\u2B50'} Bookmarks</h2>
-          <button onClick={onClose} className="text-slate-400 text-xl font-bold">
-            {'\u2715'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleUpdateEtas}
+              disabled={isUpdatingEtas || totalBookmarkedStops === 0}
+              className="rounded-xl border border-[#E1251B]/30 bg-white px-3 py-1.5 text-[11px] font-black text-[#E1251B] shadow-sm disabled:cursor-not-allowed disabled:opacity-40 sm:hidden"
+            >
+              {isUpdatingEtas ? 'Updating...' : 'Update ETA'}
+            </button>
+            <button onClick={onClose} className="text-slate-400 text-xl font-bold">
+              {'\u2715'}
+            </button>
+          </div>
         </div>
         <button
           onClick={handleUpdateEtas}
           disabled={isUpdatingEtas || totalBookmarkedStops === 0}
-          className="mt-3 w-full rounded-xl bg-[#E1251B] px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-[#B71C14] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+          className="mt-3 hidden w-full rounded-xl bg-[#E1251B] px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-[#B71C14] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:block"
         >
           {isUpdatingEtas ? 'Updating bookmark ETAs...' : 'Update bookmark ETAs'}
         </button>
