@@ -1498,20 +1498,23 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-black text-lg">{'\u2B50'} Bookmarks</h2>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleUpdateEtas}
-            disabled={isUpdatingEtas || totalBookmarkedStops === 0}
-            className="rounded-xl border border-[#E1251B]/30 px-3 py-1.5 text-xs font-black text-[#E1251B] hover:bg-[#E1251B]/10 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {isUpdatingEtas ? 'Updating...' : 'Update ETA'}
-          </button>
+      <div className="mb-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-black text-lg">{'\u2B50'} Bookmarks</h2>
           <button onClick={onClose} className="text-slate-400 text-xl font-bold">
             {'\u2715'}
           </button>
         </div>
+        <button
+          onClick={handleUpdateEtas}
+          disabled={isUpdatingEtas || totalBookmarkedStops === 0}
+          className="mt-3 w-full rounded-xl bg-[#E1251B] px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-[#B71C14] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+        >
+          {isUpdatingEtas ? 'Updating bookmark ETAs...' : 'Update bookmark ETAs'}
+        </button>
+        <p className="mt-2 text-[11px] font-bold text-slate-400">
+          ETAs refresh only when you tap this button.
+        </p>
       </div>
       {lastEtaUpdateAt && (
         <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
