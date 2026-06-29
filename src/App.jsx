@@ -1459,7 +1459,7 @@ const SkeletonCard = () => (
 );
 
 // Bookmark Panel Component
-const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
+const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }) => {
   const [etaMap, setEtaMap] = useState(new Map());
   const [editing, setEditing] = useState(null);
   const [newGroupName, setNewGroupName] = useState('');
@@ -1467,6 +1467,7 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
   const [lastEtaUpdateAt, setLastEtaUpdateAt] = useState(null);
   const [etaUpdateError, setEtaUpdateError] = useState(null);
   const didInitialEtaRefreshRef = useRef(false);
+  const [expandedStopKey, setExpandedStopKey] = useState(null);
 
   const totalBookmarkedStops = useMemo(
     () => bookmarks.reduce((sum, group) => sum + (group.stops?.length || 0), 0),
@@ -1509,6 +1510,42 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
     setNewGroupName('');
   };
 
+  const getAvailableRoutesForStop = (stopId) => {
+    const grouped = new Map();
+    for (const item of stopRoutes?.[stopId] || []) {
+      const route = String(item.route || '').trim();
+      if (!route) continue;
+      if (!grouped.has(route)) grouped.set(route, []);
+      const variants = grouped.get(route);
+      if (!variants.some((v) => v.service_type === item.service_type)) {
+        variants.push({ route, service_type: item.service_type || '1' });
+      }
+    }
+    return Array.from(grouped.entries())
+      .map(([route, variants]) => ({ route, variants }))
+      .sort((a, b) => a.route.localeCompare(b.route, undefined, { numeric: true }));
+  };
+
+  const toggleBookmarkRoute = (groupIndex, stopId, routeName, variants, currentRoutes = []) => {
+    const selected = currentRoutes.some((r) => r.route === routeName);
+    const nextRoutes = selected
+      ? currentRoutes.filter((r) => r.route !== routeName)
+      : [...currentRoutes, ...variants];
+    const deduped = Array.from(
+      new Map(nextRoutes.map((r) => [`${r.route}|${r.service_type || '1'}`, {
+        route: r.route,
+        service_type: r.service_type || '1',
+      }])).values(),
+    );
+    const updated = window.bookmarkEngine.updateStopRoutes(bookmarks, groupIndex, stopId, deduped);
+    update(updated);
+    setEtaMap((prev) => {
+      const next = new Map(prev);
+      next.delete(stopId);
+      return next;
+    });
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="mb-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
@@ -1534,9 +1571,6 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
         >
           {isUpdatingEtas ? 'Updating bookmark ETAs...' : 'Update bookmark ETAs'}
         </button>
-        <p className="mt-2 text-[11px] font-bold text-slate-400">
-          ETAs refresh once when opened, then only when you tap this button.
-        </p>
       </div>
       {lastEtaUpdateAt && (
         <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
@@ -1629,42 +1663,109 @@ const BookmarkPanel = ({ stopMap, onClose, bookmarks, setBookmarks }) => {
               const stopInfo = stopMap[s.stopId];
               const hasEtaData = etaMap.has(s.stopId);
               const etas = etaMap.get(s.stopId) || [];
+              const stopKey = `${gi}|${s.stopId}`;
+              const isExpanded = expandedStopKey === stopKey;
+              const routeOptions = getAvailableRoutesForStop(s.stopId);
+              const selectedRoutes = s.routes || [];
+              const selectedRouteNames = new Set(selectedRoutes.map((r) => r.route));
               return (
                 <div
                   key={si}
-                  className="flex items-start justify-between py-2 border-b border-slate-100 last:border-none"
+                  className="border-b border-slate-100 py-2 last:border-none"
                 >
-                  <div className="flex-1">
-                    <div className="text-sm font-bold text-slate-700">
-                      {stopInfo?.name_tc || s.stopName}
-                    </div>
-                    <div className="text-xs text-slate-400">{stopInfo?.name_en}</div>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {!hasEtaData && (
-                        <span className="text-xs text-slate-300">Click Update ETA to refresh</span>
-                      )}
-                      {hasEtaData && etas.length === 0 && (
-                        <span className="text-xs text-slate-400">No ETA available now</span>
-                      )}
-                      {etas.slice(0, 4).map((e, ei) => (
-                        <span
-                          key={ei}
-                          className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white border eta-${e.color}`}
-                        >
-                          {e.route} {'\u00B7'} {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setExpandedStopKey(isExpanded ? null : stopKey)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setExpandedStopKey(isExpanded ? null : stopKey);
+                      }
+                    }}
+                    className={`w-full rounded-2xl p-2 text-left transition ${
+                      isExpanded ? 'bg-white shadow-sm ring-1 ring-[#E1251B]/15' : 'hover:bg-white/80'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-bold text-slate-700">
+                          {stopInfo?.name_tc || s.stopName}
+                        </div>
+                        <div className="truncate text-xs text-slate-400">{stopInfo?.name_en}</div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {!hasEtaData && (
+                            <span className="text-xs text-slate-300">Click Update ETA to refresh</span>
+                          )}
+                          {hasEtaData && etas.length === 0 && (
+                            <span className="text-xs text-slate-400">No ETA available now</span>
+                          )}
+                          {etas.slice(0, 4).map((e, ei) => (
+                            <span
+                              key={ei}
+                              className={`rounded-full border bg-white px-2 py-0.5 text-xs font-bold eta-${e.color}`}
+                            >
+                              {e.route} {'\u00B7'} {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-400">
+                          {isExpanded ? 'Hide' : 'Routes'}
                         </span>
-                      ))}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const u = window.bookmarkEngine.removeStop(bookmarks, gi, s.stopId);
+                            update(u);
+                          }}
+                          className="text-sm text-slate-300 hover:text-red-400"
+                        >
+                          {'\u2715'}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      const u = window.bookmarkEngine.removeStop(bookmarks, gi, s.stopId);
-                      update(u);
-                    }}
-                    className="text-slate-300 text-sm hover:text-red-400 ml-2 mt-0.5"
-                  >
-                    {'\u2715'}
-                  </button>
+                  {isExpanded && (
+                    <div className="mt-2 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
+                      <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-400">
+                        ETA route review
+                      </div>
+                      {routeOptions.length === 0 ? (
+                        <div className="text-xs font-bold text-slate-400">
+                          No route list found for this stop.
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {routeOptions.map(({ route, variants }) => {
+                            const selected = selectedRouteNames.has(route);
+                            return (
+                              <button
+                                key={route}
+                                type="button"
+                                onClick={() =>
+                                  toggleBookmarkRoute(gi, s.stopId, route, variants, selectedRoutes)
+                                }
+                                className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
+                                  selected
+                                    ? 'bg-[#E1251B] text-white shadow-md shadow-red-200'
+                                    : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                                }`}
+                                title={selected ? 'Included in ETA review. Tap to remove.' : 'Excluded from ETA review. Tap to add.'}
+                              >
+                                {route}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="mt-2 text-[10px] font-bold text-slate-400">
+                        Bright routes are included in ETA refresh. Dim routes are ignored.
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -3174,6 +3275,7 @@ const App = () => {
         <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[60vh] overflow-y-auto scrollbar-hide slide-up">
           <BookmarkPanel
             stopMap={stopMapRef.current}
+            stopRoutes={stopRoutesRef.current}
             onClose={() => setShowBookmarks(false)}
             bookmarks={bookmarks}
             setBookmarks={setBookmarks}

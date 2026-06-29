@@ -77,6 +77,20 @@ function removeStop(bookmarks, groupIndex, stopId) {
     return updated;
 }
 
+function updateStopRoutes(bookmarks, groupIndex, stopId, routes) {
+    const updated = bookmarks.map((g, i) => {
+        if (i !== groupIndex) return g;
+        return {
+            ...g,
+            stops: g.stops.map(s => (
+                s.stopId === stopId ? { ...s, routes: routes || [] } : s
+            )),
+        };
+    });
+    saveBookmarks(updated);
+    return updated;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // ETA FETCHING FOR BOOKMARKS
 // ─────────────────────────────────────────────────────────────────────
@@ -152,6 +166,7 @@ window.bookmarkEngine = {
     deleteGroup,
     addStop,
     removeStop,
+    updateStopRoutes,
     fetchStopETAs,
     refreshBookmarkETAs,
 };
