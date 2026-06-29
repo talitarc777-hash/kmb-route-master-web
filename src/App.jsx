@@ -1564,13 +1564,6 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
             {'\u2715'}
           </button>
         </div>
-        <button
-          onClick={handleUpdateEtas}
-          disabled={isUpdatingEtas || totalBookmarkedStops === 0}
-          className="mt-3 hidden w-full rounded-xl bg-[#E1251B] px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-[#B71C14] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 md:block"
-        >
-          {isUpdatingEtas ? 'Updating bookmark ETAs...' : 'Update bookmark ETAs'}
-        </button>
       </div>
       {lastEtaUpdateAt && (
         <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
