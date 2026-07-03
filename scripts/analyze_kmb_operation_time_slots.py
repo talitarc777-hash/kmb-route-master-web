@@ -85,6 +85,17 @@ def slot_label(minutes, slot_minutes):
     return format_hhmm(slot_start)
 
 
+def encode_slot_mask(slots, slot_minutes):
+    slot_count = (24 * 60 + slot_minutes - 1) // slot_minutes
+    mask = 0
+    for slot in slots:
+        index = hhmm_to_minutes(slot) // slot_minutes
+        if 0 <= index < slot_count:
+            mask |= 1 << index
+    width = (slot_count + 3) // 4
+    return format(mask, f"0{width}x")
+
+
 def percentile(values, p):
     if not values:
         return None
@@ -490,12 +501,14 @@ def main():
             row = [hhmm_to_minutes(period["s"]), hhmm_to_minutes(period["e"]), period["n"]]
             if include_days:
                 row.append(period.get("d"))
+            row.append(encode_slot_mask(period.get("a", []), args.slot_minutes))
             rows.append(row)
         return rows
 
     runtime_payload = {
-        "v": 2,
+        "v": 3,
         "d": list(DAY_CLASSES),
+        "sm": args.slot_minutes,
         "r": {
             key: runtime_periods(periods, False)
             for key, periods in compact_routes.items()
@@ -550,7 +563,7 @@ def main():
                 handle.write(f"- {label}: `{path}` (**{size_mb:.2f} MB**)\n")
             handle.write("- Runtime JSON is the only operation-slot file fetched by the app.\n")
             handle.write("- Runtime JSON stores start/end times as minutes since midnight.\n")
-            handle.write("- Runtime JSON omits stop names, coordinates, active slots, and verbose metadata to reduce planned-search load time.\n\n")
+            handle.write("- Runtime JSON omits stop names, coordinates, and verbose metadata; active slots are retained as compact bitmasks.\n\n")
             handle.write("## Day-Class Trends\n\n")
             for day_class in DAY_CLASSES:
                 row = summary["day_class_summary"].get(day_class)

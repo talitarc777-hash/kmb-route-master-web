@@ -95,7 +95,7 @@ The lookup key is route, bound, service type, and boarding stop. Service windows
 - Saturday
 - Sunday and public holiday
 
-A route-stop profile has highest priority because it is the most specific evidence for the boarding station. If the station profile confirms the selected time, the segment is valid immediately. Because observed stop-level ETA samples can still be sparse, a valid route-level profile is used only as a recovery path when the station profile is missing or rejects a time that the broader route profile supports. Candidates are rejected only when neither source supports the selected time; when both reject, the station-level reason is shown.
+KMB validation is strict at the boarding stop. Every segment must have an exact route, bound, service type, and boarding-stop entry in the route-stop (`rs`) index. The requested boarding time must be inside that station profile and within 20 minutes of an observed 15-minute ETA slot. Missing or rejecting station profiles reject the candidate; a broader route-level (`r`) profile is retained only for diagnostics and can never override station-level evidence. This prevents circular-route or bound ambiguity from making a route appear valid at a stop where KMB service was not observed.
 
 ### 5. Estimate journey time
 
@@ -146,7 +146,7 @@ python scripts/analyze_kmb_operation_time_slots.py ^
   --summary-output tmp/kmb_operation_time_slot_summary.md
 ```
 
-The script uses observed ETA percentiles rather than treating every observation as a timetable. Public holidays are explicitly classified in `HK_GENERAL_HOLIDAYS`; update that set when adding observations from another year.
+The script uses observed ETA percentiles rather than treating every observation as a timetable. Runtime version 3 stores observed 15-minute slots as compact daily bitmasks, preserving station-level gaps without loading verbose slot arrays. Public holidays are explicitly classified in `HK_GENERAL_HOLIDAYS`; update that set when adding observations from another year.
 
 ## Operator Data Maintenance
 

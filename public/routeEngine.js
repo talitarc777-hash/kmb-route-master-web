@@ -30,8 +30,8 @@ const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
 const GCP_CACHE_MAX_ENTRIES = 400;
 const GCP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const GCP_DRIVING_ROUTE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const KMB_OPERATION_SCHEDULE_URL = '/operator-data/kmb_operation_time_slots.runtime.json';
-const KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN = 45;
+const KMB_OPERATION_SCHEDULE_URL = '/operator-data/kmb_operation_time_slots.runtime.json?v=3';
+const KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN = 20;
 const KMB_ROUTE_SLOT_TOLERANCE_MIN = 75;
 let GCP_PERSISTED_CACHE = null;
 let KMB_OPERATION_SCHEDULE_PROMISE = null;
@@ -421,7 +421,28 @@ function nearestSlotDistance(minute, slots = []) {
     return best;
 }
 
-function validateSchedulePeriod(period, plannedDate, toleranceMin) {
+function nearestEncodedSlotDistance(minute, maskHex, slotMinutes = 15) {
+    if (!Number.isFinite(minute) || !maskHex) return null;
+    let mask;
+    try {
+        mask = BigInt(`0x${maskHex}`);
+    } catch {
+        return null;
+    }
+    const slotCount = Math.ceil(1440 / slotMinutes);
+    let best = null;
+    for (let index = 0; index < slotCount; index++) {
+        if ((mask & (1n << BigInt(index))) === 0n) continue;
+        const slotMinute = index * slotMinutes;
+        const delta = circularMinuteDelta(minute, slotMinute);
+        if (best == null || delta < best.deltaMin) {
+            best = { slot: formatMinutesAsTime(slotMinute), deltaMin: delta };
+        }
+    }
+    return best;
+}
+
+function validateSchedulePeriod(period, plannedDate, toleranceMin, requireObservedSlots = false) {
     if (!period) return { valid: false, reason: 'missing_period' };
     const minute = dateToMinutes(plannedDate);
     const startMinute = timeStringToMinutes(period.s);
@@ -436,7 +457,16 @@ function validateSchedulePeriod(period, plannedDate, toleranceMin) {
             endTime,
         };
     }
-    const nearest = nearestSlotDistance(minute, period.a || []);
+    const nearest = nearestSlotDistance(minute, period.a || []) ||
+        nearestEncodedSlotDistance(minute, period.m, period.sm || 15);
+    if (!nearest && requireObservedSlots) {
+        return {
+            valid: false,
+            reason: 'observed_slots_missing',
+            startTime,
+            endTime,
+        };
+    }
     if (nearest && nearest.deltaMin > toleranceMin) {
         return {
             valid: false,
@@ -474,20 +504,26 @@ function getSchedulePeriod(schedule, collectionName, key, dayClass) {
     const row = dayIndex >= 0 ? runtimeCollection?.[key]?.[dayIndex] : null;
     if (!Array.isArray(row)) return null;
 
+    const includeDays = collectionName === 'route_stops';
+    const maskIndex = includeDays ? 4 : 3;
     return {
         s: row[0],
         e: row[1],
         n: row[2],
-        d: row[3],
+        d: includeDays ? row[3] : null,
+        m: typeof row[maskIndex] === 'string' ? row[maskIndex] : null,
+        sm: Number(schedule.sm) || 15,
     };
 }
 
 function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
     if (!schedule || !segment || !boardTime) {
-        return { valid: true, status: 'schedule_unavailable' };
+        return { valid: false, status: 'schedule_unavailable', reason: 'schedule_unavailable' };
     }
     const boardDate = boardTime instanceof Date ? boardTime : new Date(boardTime);
-    if (Number.isNaN(boardDate.getTime())) return { valid: true, status: 'invalid_board_time' };
+    if (Number.isNaN(boardDate.getTime())) {
+        return { valid: false, status: 'invalid_board_time', reason: 'invalid_board_time' };
+    }
 
     const dayClass = getPlannedDayClass(boardDate);
     const routeKey = [
@@ -497,42 +533,39 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule) {
     ].map((part) => String(part || '').trim()).join('|');
     const routeStopKey = `${routeKey}|${String(segment.fromStop || '').trim()}`;
     const routeStopPeriod = getSchedulePeriod(schedule, 'route_stops', routeStopKey, dayClass);
-    let routeStopResult = null;
-    if (routeStopPeriod) {
-        routeStopResult = {
-            ...validateSchedulePeriod(routeStopPeriod, boardDate, KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN),
-            status: 'route_stop_profile',
-            dayClass,
-        };
-        // Station-level evidence is the most specific source. If it confirms
-        // the requested time, accept the segment without consulting route-level
-        // summaries that may be broader or noisier.
-        if (routeStopResult.valid) return routeStopResult;
-    }
-
     const routePeriod = getSchedulePeriod(schedule, 'routes', routeKey, dayClass);
-    if (routePeriod) {
-        const routeResult = {
+    const routeDiagnostic = routePeriod
+        ? {
             ...validateSchedulePeriod(routePeriod, boardDate, KMB_ROUTE_SLOT_TOLERANCE_MIN),
             status: 'route_profile',
             dayClass,
-        };
-        if (routeResult.valid && routeStopResult) {
-            routeResult.stationProfileFallback = {
-                status: routeStopResult.status,
-                reason: routeStopResult.reason,
-                startTime: routeStopResult.startTime,
-                endTime: routeStopResult.endTime,
-                sampleCount: routeStopResult.sampleCount,
-                sampleDays: routeStopResult.sampleDays,
-            };
         }
-        if (!routeResult.valid && routeStopResult) return routeStopResult;
-        return routeResult;
+        : null;
+
+    if (!routeStopPeriod) {
+        return {
+            valid: false,
+            status: 'route_stop_profile_missing',
+            reason: 'route_stop_profile_missing',
+            dayClass,
+            routeDiagnostic,
+        };
     }
 
-    if (routeStopResult) return routeStopResult;
-    return { valid: false, status: 'profile_missing', reason: 'historical_profile_missing', dayClass };
+    const routeStopResult = {
+        ...validateSchedulePeriod(
+            routeStopPeriod,
+            boardDate,
+            KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN,
+            true
+        ),
+        status: 'route_stop_profile',
+        dayClass,
+    };
+    if (!routeStopResult.valid && routeDiagnostic) {
+        routeStopResult.routeDiagnostic = routeDiagnostic;
+    }
+    return routeStopResult;
 }
 
 async function validateRouteHistoricalSchedule(route) {

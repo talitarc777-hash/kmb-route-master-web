@@ -642,6 +642,7 @@ function plannedTimeValidity(route, timeMode) {
 function historicalScheduleSourceLabel(status) {
   if (status === 'route_stop_profile') return 'station profile';
   if (status === 'route_profile') return 'route profile';
+  if (status === 'route_stop_profile_missing') return 'station profile unavailable';
   if (status === 'profile_missing') return 'profile unavailable';
   if (status === 'schedule_unavailable') return 'schedule unavailable';
   return 'historical profile';
@@ -655,7 +656,7 @@ function dayClassLabel(dayClass) {
 
 function formatHistoricalSchedule(schedule) {
   if (!schedule) return null;
-  if (schedule.status === 'profile_missing') {
+  if (schedule.status === 'profile_missing' || schedule.status === 'route_stop_profile_missing') {
     return `${dayClassLabel(schedule.dayClass)} service window unavailable for this station`;
   }
   if (schedule.status === 'schedule_unavailable') return 'Historical service slots unavailable';
@@ -665,7 +666,6 @@ function formatHistoricalSchedule(schedule) {
     `${dayClassLabel(schedule.dayClass)} observed ${schedule.startTime}-${schedule.endTime}`,
     historicalScheduleSourceLabel(schedule.status),
   ];
-  if (schedule.stationProfileFallback) pieces.push('station profile sparse');
   if (Number.isFinite(schedule.sampleCount)) pieces.push(`${schedule.sampleCount} ETA samples`);
   return pieces.join(' · ');
 }
@@ -673,7 +673,9 @@ function formatHistoricalSchedule(schedule) {
 function historicalScheduleClass(schedule) {
   if (!schedule) return 'bg-slate-50 text-slate-500 border-slate-200';
   if (schedule.valid === false) return 'bg-red-50 text-red-700 border-red-200';
-  if (schedule.status === 'profile_missing') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (schedule.status === 'profile_missing' || schedule.status === 'route_stop_profile_missing') {
+    return 'bg-amber-50 text-amber-700 border-amber-200';
+  }
   if (schedule.status === 'route_profile') return 'bg-cyan-50 text-cyan-700 border-cyan-200';
   return 'bg-emerald-50 text-emerald-700 border-emerald-200';
 }
