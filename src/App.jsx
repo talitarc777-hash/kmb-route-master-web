@@ -654,6 +654,16 @@ function dayClassLabel(dayClass) {
   return 'Weekday';
 }
 
+function kmbVariantRemark(segment) {
+  const route = String(segment?.route || '').toUpperCase();
+  const bound = String(segment?.bound || '').toUpperCase();
+  const serviceType = String(segment?.service_type || '1');
+  if (route === '269C' && bound === 'O' && serviceType === '5') {
+    return 'Includes Tin Shui Wai Station + Shek Po Tsuen';
+  }
+  return null;
+}
+
 function formatHistoricalSchedule(schedule) {
   if (!schedule) return null;
   if (schedule.status === 'profile_missing' || schedule.status === 'route_stop_profile_missing') {
@@ -1871,7 +1881,7 @@ const App = () => {
         sortedRoutes.forEach((routeCandidate) => {
           const candidateSeg = (routeCandidate.segments || [])[si];
           if (!candidateSeg?.route) return;
-          const optionKey = `${candidateSeg.route}|${candidateSeg.service_type || '1'}`;
+          const optionKey = `${candidateSeg.route}|${candidateSeg.bound || ''}|${candidateSeg.service_type || '1'}`;
           const candidateEta = candidateSeg.nextEta ? new Date(candidateSeg.nextEta) : null;
           const previous = routeOptionMap.get(optionKey);
           const shouldReplace =
@@ -1880,6 +1890,7 @@ const App = () => {
           if (shouldReplace) {
             routeOptionMap.set(optionKey, {
               route: candidateSeg.route,
+              bound: candidateSeg.bound,
               service_type: candidateSeg.service_type || '1',
               nextEta: candidateEta,
               hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
@@ -3660,14 +3671,26 @@ const App = () => {
                               </div>
                               {seg.routeOptions && seg.routeOptions.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
-                                  {seg.routeOptions.map((option) => (
-                                    <span
-                                      key={`${option.route}|${option.service_type || '1'}`}
-                                      className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
-                                    >
-                                      {option.route}: {getEtaText(option.nextEta)}
-                                    </span>
-                                  ))}
+                                  {seg.routeOptions.map((option) => {
+                                    const variantRemark = kmbVariantRemark(option);
+                                    return (
+                                      <div
+                                        key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}`}
+                                        className="flex flex-col items-start gap-0.5"
+                                      >
+                                        <span
+                                          className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
+                                        >
+                                          {option.route}: {getEtaText(option.nextEta)}
+                                        </span>
+                                        {variantRemark && (
+                                          <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
+                                            {variantRemark}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               ) : seg.nextEta ? (
                                 <span className="text-[10px] text-[#E1251B] leading-none whitespace-nowrap">
@@ -4064,17 +4087,29 @@ const App = () => {
                     </div>
                     <div className="flex font-normal flex-wrap gap-2">
                       {displaySeg.routeOptions && displaySeg.routeOptions.length > 0 ? (
-                        displaySeg.routeOptions.map((option) => (
-                          <span
-                            key={`${option.route}|${option.service_type || '1'}`}
-                            className={`text-[11px] px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
-                          >
-                            {option.route}: {getEtaText(option.nextEta)}
-                            {!option.nextEta && option.busInterval
-                              ? ` (~${option.busInterval}min)`
-                              : ''}
-                          </span>
-                        ))
+                        displaySeg.routeOptions.map((option) => {
+                          const variantRemark = kmbVariantRemark(option);
+                          return (
+                            <div
+                              key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}`}
+                              className="flex flex-col items-start gap-0.5"
+                            >
+                              <span
+                                className={`text-[11px] px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
+                              >
+                                {option.route}: {getEtaText(option.nextEta)}
+                                {!option.nextEta && option.busInterval
+                                  ? ` (~${option.busInterval}min)`
+                                  : ''}
+                              </span>
+                              {variantRemark && (
+                                <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
+                                  {variantRemark}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })
                       ) : (
                         <>
                           {seg.nextEta && (
