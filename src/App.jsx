@@ -664,6 +664,15 @@ function kmbVariantRemark(segment) {
   return null;
 }
 
+function kmbEtaOptionKey(segment, fallbackStopId = '') {
+  return [
+    segment?.fromStop || fallbackStopId,
+    segment?.route,
+    segment?.bound,
+    segment?.service_type || '1',
+  ].map((value) => String(value || '')).join('|');
+}
+
 function formatHistoricalSchedule(schedule) {
   if (!schedule) return null;
   if (schedule.status === 'profile_missing' || schedule.status === 'route_stop_profile_missing') {
@@ -1470,6 +1479,54 @@ const SkeletonCard = () => (
   </div>
 );
 
+const CurrentStopEtaList = ({
+  options,
+  fallbackStopId,
+  etaMap,
+  isLoading,
+  getEtaText,
+  getEtaChipClass,
+}) => (
+  <div className="flex flex-col gap-1">
+    <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+      Current stop ETA
+    </div>
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => {
+        const etaKey = kmbEtaOptionKey(option, fallbackStopId);
+        const currentEtas = etaMap.get(etaKey);
+        const variantRemark = kmbVariantRemark(option);
+        return (
+          <div key={etaKey} className="flex flex-col items-start gap-0.5">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[10px] font-black text-slate-600">{option.route}</span>
+              {currentEtas?.length > 0 ? (
+                currentEtas.slice(0, 3).map((eta, etaIndex) => (
+                  <span
+                    key={`${eta.eta}|${etaIndex}`}
+                    className={`rounded-full border px-2 py-1 text-[11px] font-bold ${getEtaChipClass(eta.eta)}`}
+                  >
+                    {getEtaText(eta.eta)}
+                  </span>
+                ))
+              ) : (
+                <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-400">
+                  {isLoading && !etaMap.has(etaKey) ? 'Loading...' : 'No current ETA'}
+                </span>
+              )}
+            </div>
+            {variantRemark && (
+              <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
+                {variantRemark}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  </div>
+);
+
 // Bookmark Panel Component
 const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }) => {
   const [etaMap, setEtaMap] = useState(new Map());
@@ -1788,6 +1845,9 @@ const App = () => {
   const [destination, setDestination] = useState('');
   const [results, setResults] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState(null);
+  const [selectedCurrentEtas, setSelectedCurrentEtas] = useState(new Map());
+  const [isLoadingSelectedEtas, setIsLoadingSelectedEtas] = useState(false);
+  const [selectedEtaUpdatedAt, setSelectedEtaUpdatedAt] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(true);
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
@@ -1836,6 +1896,7 @@ const App = () => {
   const searchCacheRef = useRef(new Map());
   const kmbRouteGeometryCacheRef = useRef(new Map());
   const kmbRoadGeometryCacheRef = useRef(new Map());
+  const selectedEtaRequestRef = useRef(0);
 
   const displayedResults = useMemo(() => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
@@ -1882,7 +1943,12 @@ const App = () => {
           const candidateSeg = (routeCandidate.segments || [])[si];
           if (!candidateSeg?.route) return;
           const optionKey = `${candidateSeg.route}|${candidateSeg.bound || ''}|${candidateSeg.service_type || '1'}`;
-          const candidateEta = candidateSeg.nextEta ? new Date(candidateSeg.nextEta) : null;
+          const rawCandidateEta = candidateSeg.nextEta ? new Date(candidateSeg.nextEta) : null;
+          const readyTime = candidateSeg.readyTime ? new Date(candidateSeg.readyTime) : null;
+          const candidateEta = rawCandidateEta &&
+            (!readyTime || Number.isNaN(readyTime.getTime()) || rawCandidateEta >= readyTime)
+            ? rawCandidateEta
+            : null;
           const previous = routeOptionMap.get(optionKey);
           const shouldReplace =
             !previous ||
@@ -1892,6 +1958,8 @@ const App = () => {
               route: candidateSeg.route,
               bound: candidateSeg.bound,
               service_type: candidateSeg.service_type || '1',
+              fromStop: candidateSeg.fromStop,
+              readyTime: candidateSeg.readyTime || null,
               nextEta: candidateEta,
               hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
               busInterval: candidateSeg.busInterval ?? null,
@@ -2889,6 +2957,54 @@ const App = () => {
     }
   };
 
+  const loadSelectedCurrentEtas = useCallback(async (segments) => {
+    const requestId = selectedEtaRequestRef.current + 1;
+    selectedEtaRequestRef.current = requestId;
+    setIsLoadingSelectedEtas(true);
+    setSelectedCurrentEtas(new Map());
+    setSelectedEtaUpdatedAt(null);
+
+    const optionMap = new Map();
+    for (const segment of segments || []) {
+      const options = segment?.routeOptions?.length > 0
+        ? segment.routeOptions
+        : [segment];
+      for (const option of options) {
+        const normalized = {
+          ...option,
+          fromStop: option?.fromStop || segment?.fromStop,
+        };
+        if (!normalized.fromStop || !normalized.route) continue;
+        optionMap.set(kmbEtaOptionKey(normalized), normalized);
+      }
+    }
+
+    try {
+      window.routeEngine?.clearETACache?.();
+      const entries = await Promise.all(
+        Array.from(optionMap.entries()).map(async ([key, option]) => {
+          const rows = await window.routeEngine.fetchETA(
+            option.fromStop,
+            option.route,
+            option.service_type || '1',
+          );
+          const currentRows = (rows || [])
+            .filter((row) => row?.eta)
+            .sort((a, b) => new Date(a.eta) - new Date(b.eta));
+          return [key, currentRows];
+        }),
+      );
+      if (selectedEtaRequestRef.current === requestId) {
+        setSelectedCurrentEtas(new Map(entries));
+        setSelectedEtaUpdatedAt(new Date());
+      }
+    } finally {
+      if (selectedEtaRequestRef.current === requestId) {
+        setIsLoadingSelectedEtas(false);
+      }
+    }
+  }, []);
+
   // Select route handler
   const handleSelectRoute = (cardOrRoute) => {
     const isCard = Boolean(cardOrRoute?.representative && cardOrRoute?.segmentDisplay);
@@ -2901,6 +3017,9 @@ const App = () => {
     setOverlayFeedback(null);
     setExpandedSegments(new Set());
     drawRouteOnMap(baseRoute);
+    if (!isFallbackRoute(baseRoute)) {
+      loadSelectedCurrentEtas(initialSegmentDisplay);
+    }
   };
 
   const handleRefreshEtaSession = useCallback(async () => {
@@ -3759,6 +3878,10 @@ const App = () => {
           <div className="flex items-center justify-between gap-3 mb-3">
             <button
               onClick={() => {
+                selectedEtaRequestRef.current += 1;
+                setSelectedCurrentEtas(new Map());
+                setIsLoadingSelectedEtas(false);
+                setSelectedEtaUpdatedAt(null);
                 setSelectedRoute(null);
                 clearMapGraphics();
                 clearRouteOverlay();
@@ -3937,6 +4060,10 @@ const App = () => {
           <div className="flex items-center justify-between gap-3 mb-3">
             <button
               onClick={() => {
+                selectedEtaRequestRef.current += 1;
+                setSelectedCurrentEtas(new Map());
+                setIsLoadingSelectedEtas(false);
+                setSelectedEtaUpdatedAt(null);
                 setSelectedRoute(null);
                 clearMapGraphics();
                 clearRouteOverlay();
@@ -3948,16 +4075,16 @@ const App = () => {
             </button>
             <button
               type="button"
-              onClick={handleRefreshEtaSession}
-              disabled={isRefreshingEta || isLoading}
+              onClick={() => loadSelectedCurrentEtas(detailSegments)}
+              disabled={isLoadingSelectedEtas}
               className="text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-2 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isRefreshingEta ? 'Refreshing...' : 'Refresh ETA'}
+              {isLoadingSelectedEtas ? 'Refreshing...' : 'Refresh current ETA'}
             </button>
           </div>
-          {lastEtaRefreshAt && (
+          {selectedEtaUpdatedAt && (
             <div className="text-[11px] text-slate-500 font-semibold mb-2">
-              Last refreshed: {formatRefreshTime(lastEtaRefreshAt)}
+              Current ETA updated: {formatRefreshTime(selectedEtaUpdatedAt)}
             </div>
           )}
           {refreshFeedback && (
@@ -4041,6 +4168,14 @@ const App = () => {
               route: r.route,
               service_type: r.service_type,
             }));
+            const currentEtaOptions = (
+              displaySeg.routeOptions && displaySeg.routeOptions.length > 0
+                ? displaySeg.routeOptions
+                : [displaySeg]
+            ).map((option) => ({
+              ...option,
+              fromStop: option?.fromStop || seg.fromStop,
+            }));
             return (
               <div key={si} className="mb-2">
                 <div className="pl-2 border-l-4 py-2" style={{ borderColor: color }}>
@@ -4085,47 +4220,14 @@ const App = () => {
                       {expandedSegments.has(si) ? '\u25B2' : '\u25BC'} {seg.stops.length - 2} intermediate
                       stops
                     </div>
-                    <div className="flex font-normal flex-wrap gap-2">
-                      {displaySeg.routeOptions && displaySeg.routeOptions.length > 0 ? (
-                        displaySeg.routeOptions.map((option) => {
-                          const variantRemark = kmbVariantRemark(option);
-                          return (
-                            <div
-                              key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}`}
-                              className="flex flex-col items-start gap-0.5"
-                            >
-                              <span
-                                className={`text-[11px] px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
-                              >
-                                {option.route}: {getEtaText(option.nextEta)}
-                                {!option.nextEta && option.busInterval
-                                  ? ` (~${option.busInterval}min)`
-                                  : ''}
-                              </span>
-                              {variantRemark && (
-                                <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
-                                  {variantRemark}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <>
-                          {seg.nextEta && (
-                            <span className="text-[#E1251B]">
-                              Next: {new Date(seg.nextEta).toLocaleTimeString('en-HK', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          )}
-                          {seg.busInterval && (
-                            <span className="text-slate-500">Every ~{seg.busInterval}min</span>
-                          )}
-                        </>
-                      )}
-                    </div>
+                    <CurrentStopEtaList
+                      options={currentEtaOptions}
+                      fallbackStopId={seg.fromStop}
+                      etaMap={selectedCurrentEtas}
+                      isLoading={isLoadingSelectedEtas}
+                      getEtaText={getEtaText}
+                      getEtaChipClass={getEtaChipClass}
+                    />
                     {expandedSegments.has(si) && (
                       <div className="mt-2 py-2 border-l-2 border-dashed border-slate-200 pl-3 ml-1 space-y-2">
                         {seg.stops.slice(1, -1).map((stopId, stopIdx) => {
