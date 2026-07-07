@@ -1557,9 +1557,6 @@ const RouteDetailResizeHandle = ({ height, onPointerDown, onChange }) => (
         className="flex min-w-0 flex-1 touch-none cursor-ns-resize flex-col items-center gap-1 py-1 outline-none"
       >
         <span className="h-1.5 w-14 rounded-full bg-slate-300 shadow-inner" />
-        <span className="text-[9px] font-black uppercase tracking-wide text-slate-400">
-          Drag · Map {100 - height}% / Details {height}%
-        </span>
       </div>
       <button
         type="button"
