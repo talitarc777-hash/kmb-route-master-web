@@ -1533,14 +1533,7 @@ function clampRouteDetailHeight(value) {
 
 const RouteDetailResizeHandle = ({ height, onPointerDown, onChange }) => (
   <div className="sticky top-0 z-20 -mx-4 -mt-4 mb-3 rounded-t-[2rem] border-b border-slate-100 bg-white/95 px-3 pb-2 pt-2 backdrop-blur">
-    <div className="flex items-center justify-between gap-2">
-      <button
-        type="button"
-        onClick={() => onChange(height - 8)}
-        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500 active:bg-slate-200"
-      >
-        More map
-      </button>
+    <div className="flex items-center justify-center">
       <div
         role="separator"
         aria-label="Resize map and route details"
@@ -1558,13 +1551,6 @@ const RouteDetailResizeHandle = ({ height, onPointerDown, onChange }) => (
       >
         <span className="h-1.5 w-14 rounded-full bg-slate-300 shadow-inner" />
       </div>
-      <button
-        type="button"
-        onClick={() => onChange(height + 8)}
-        className="rounded-full border border-[#E1251B]/20 bg-red-50 px-2.5 py-1 text-[10px] font-black text-[#E1251B] active:bg-red-100"
-      >
-        More details
-      </button>
     </div>
   </div>
 );
