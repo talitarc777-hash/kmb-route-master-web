@@ -1527,6 +1527,51 @@ const CurrentStopEtaList = ({
   </div>
 );
 
+function clampRouteDetailHeight(value) {
+  return Math.min(82, Math.max(28, Math.round(value)));
+}
+
+const RouteDetailResizeHandle = ({ height, onPointerDown, onChange }) => (
+  <div className="sticky top-0 z-20 -mx-4 -mt-4 mb-3 rounded-t-[2rem] border-b border-slate-100 bg-white/95 px-3 pb-2 pt-2 backdrop-blur">
+    <div className="flex items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={() => onChange(height - 8)}
+        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500 active:bg-slate-200"
+      >
+        More map
+      </button>
+      <div
+        role="separator"
+        aria-label="Resize map and route details"
+        aria-orientation="horizontal"
+        aria-valuemin={28}
+        aria-valuemax={82}
+        aria-valuenow={height}
+        tabIndex={0}
+        onPointerDown={onPointerDown}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowUp') onChange(height + 5);
+          if (event.key === 'ArrowDown') onChange(height - 5);
+        }}
+        className="flex min-w-0 flex-1 touch-none cursor-ns-resize flex-col items-center gap-1 py-1 outline-none"
+      >
+        <span className="h-1.5 w-14 rounded-full bg-slate-300 shadow-inner" />
+        <span className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+          Drag · Map {100 - height}% / Details {height}%
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(height + 8)}
+        className="rounded-full border border-[#E1251B]/20 bg-red-50 px-2.5 py-1 text-[10px] font-black text-[#E1251B] active:bg-red-100"
+      >
+        More details
+      </button>
+    </div>
+  </div>
+);
+
 // Bookmark Panel Component
 const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }) => {
   const [etaMap, setEtaMap] = useState(new Map());
@@ -3173,6 +3218,33 @@ const App = () => {
     }
   };
 
+  const startRouteDetailResize = useCallback((event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = routeDetailHeight;
+
+    const handlePointerMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const viewportHeight = window.innerHeight || 1;
+      const deltaVh = ((startY - moveEvent.clientY) / viewportHeight) * 100;
+      setRouteDetailHeight(clampRouteDetailHeight(startHeight + deltaVh));
+    };
+    const stopResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }, [routeDetailHeight]);
+
+  const changeRouteDetailHeight = useCallback((height) => {
+    setRouteDetailHeight(clampRouteDetailHeight(height));
+  }, []);
+
   const detailSegments = selectedRoute?.segmentDisplay || selectedRoute?.segments || [];
 
   useEffect(() => {
@@ -3875,7 +3947,15 @@ const App = () => {
 
       {/* Selected fallback detail */}
       {selectedRoute && isFallbackRoute(selectedRoute) && !showBookmarks && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[70vh] md:max-h-[55vh] overflow-y-auto scrollbar-hide slide-up">
+        <div
+          className="absolute bottom-0 left-0 right-0 z-20 overflow-y-auto rounded-t-[2rem] bg-white p-4 shadow-2xl scrollbar-hide slide-up"
+          style={{ height: `${routeDetailHeight}vh` }}
+        >
+          <RouteDetailResizeHandle
+            height={routeDetailHeight}
+            onPointerDown={startRouteDetailResize}
+            onChange={changeRouteDetailHeight}
+          />
           <div className="flex items-center justify-between gap-3 mb-3">
             <button
               onClick={() => {
@@ -4057,7 +4137,15 @@ const App = () => {
 
       {/* Selected route detail */}
       {selectedRoute && !isFallbackRoute(selectedRoute) && !showBookmarks && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[70vh] md:max-h-[55vh] overflow-y-auto scrollbar-hide slide-up">
+        <div
+          className="absolute bottom-0 left-0 right-0 z-20 overflow-y-auto rounded-t-[2rem] bg-white p-4 shadow-2xl scrollbar-hide slide-up"
+          style={{ height: `${routeDetailHeight}vh` }}
+        >
+          <RouteDetailResizeHandle
+            height={routeDetailHeight}
+            onPointerDown={startRouteDetailResize}
+            onChange={changeRouteDetailHeight}
+          />
           <div className="flex items-center justify-between gap-3 mb-3">
             <button
               onClick={() => {
