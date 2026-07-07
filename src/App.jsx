@@ -315,6 +315,33 @@ function selectCsdiRouteGeometry(features, startStop, endStop, operator = 'KMB')
   return best.geometry;
 }
 
+function selectFullCsdiRouteGeometry(features, routeStops, operator = 'KMB') {
+  const requestedOperator = String(operator || 'KMB').toUpperCase();
+  const sampleCount = Math.min(12, routeStops.length);
+  const sampledStops = Array.from({ length: sampleCount }, (_, index) => (
+    routeStops[Math.round(index * (routeStops.length - 1) / Math.max(1, sampleCount - 1))]
+  ));
+  const candidates = (features || []).map((feature) => {
+    const geometry = stitchCsdiLineParts(feature?.geometry);
+    if (geometry.length < 2) return null;
+    const company = String(feature?.properties?.COMPANY_CODE || '').toUpperCase();
+    const operatorMismatch = requestedOperator && !company.includes(requestedOperator);
+    const distances = sampledStops.map((stop) => geometry.reduce((nearest, [lng, lat]) => (
+      Math.min(nearest, haversine(stop.lat, stop.lng, lat, lng))
+    ), Infinity));
+    return {
+      geometry,
+      operatorMismatch,
+      score: distances.reduce((sum, distance) => sum + distance, 0) / distances.length,
+      furthestStopDistance: Math.max(...distances),
+    };
+  }).filter(Boolean).sort((a, b) => a.score - b.score);
+
+  const best = candidates.find((candidate) => !candidate.operatorMismatch);
+  if (!best || best.furthestStopDistance > 1) return null;
+  return best.geometry;
+}
+
 function compactCsdiRouteFeatures(features) {
   return (features || []).map((feature) => {
     const geometry = simplifyCsdiGeometry(stitchCsdiLineParts(feature?.geometry));
@@ -2384,22 +2411,27 @@ const App = () => {
     cacheKey = '',
     routeNumber = '',
     operator = 'KMB',
+    options = {},
   ) => {
-    const key = cacheKey || stopIds.join('>');
+    const fullRoute = options.fullRoute === true;
+    const baseKey = cacheKey || stopIds.join('>');
+    const key = `${fullRoute ? 'full' : 'segment'}|${baseKey}`;
     const cached = kmbRoadGeometryCacheRef.current.get(key);
     if (cached) return cached;
 
-    const local = getKmbStopSequenceGeometry(stopIds, key);
+    const local = getKmbStopSequenceGeometry(stopIds, baseKey);
     if (local.stops.length < 2) return local.geometry;
 
     try {
-      const features = await fetchCsdiRouteFeatures(routeNumber || key.split('|')[0]);
-      const csdiGeometry = selectCsdiRouteGeometry(
-        features,
-        local.stops[0],
-        local.stops[local.stops.length - 1],
-        operator,
-      );
+      const features = await fetchCsdiRouteFeatures(routeNumber || baseKey.split('|')[0]);
+      const csdiGeometry = fullRoute
+        ? selectFullCsdiRouteGeometry(features, local.stops, operator)
+        : selectCsdiRouteGeometry(
+          features,
+          local.stops[0],
+          local.stops[local.stops.length - 1],
+          operator,
+        );
       if (csdiGeometry?.length >= 2) {
         kmbRoadGeometryCacheRef.current.set(key, csdiGeometry);
         return csdiGeometry;
@@ -2874,6 +2906,41 @@ const App = () => {
       score += 250 + destinationIndex;
     }
 
+    const originPoint = mapPointFromStop(
+      selectedRoute?.searchOriginLoc || selectedRoute?.originLoc || selectedRoute?.origin || originLoc,
+    );
+    const destinationPoint = mapPointFromStop(
+      selectedRoute?.searchDestLoc || selectedRoute?.destLoc || selectedRoute?.destination || destLoc,
+    );
+    const nearestStop = (point) => {
+      if (!point || stops.length === 0) return null;
+      return stops.reduce((best, stopId, index) => {
+        const stop = stopMapRef.current[stopId];
+        if (!Number.isFinite(stop?.lat) || !Number.isFinite(stop?.lng)) return best;
+        const distance = haversine(point.lat, point.lng, stop.lat, stop.lng);
+        return !best || distance < best.distance ? { index, distance } : best;
+      }, null);
+    };
+    const originMatch = nearestStop(originPoint);
+    const destinationMatch = nearestStop(destinationPoint);
+    if (originMatch) score += Math.max(0, 2500 - originMatch.distance * 800);
+    if (destinationMatch) score += Math.max(0, 5000 - destinationMatch.distance * 1500);
+    if (originMatch && destinationMatch) {
+      score += originMatch.index < destinationMatch.index ? 6000 : -6000;
+    }
+    if (destinationPoint && stops.length > 0) {
+      const terminal = stopMapRef.current[stops[stops.length - 1]];
+      if (Number.isFinite(terminal?.lat) && Number.isFinite(terminal?.lng)) {
+        const terminalDistance = haversine(
+          destinationPoint.lat,
+          destinationPoint.lng,
+          terminal.lat,
+          terminal.lng,
+        );
+        score += Math.max(0, 3000 - terminalDistance * 500);
+      }
+    }
+
     const selectedRouteNumber = routeNumberFromRoute(selectedRoute).toUpperCase();
     if (selectedRouteNumber === routeNumber) score += 100;
     return score;
@@ -2924,8 +2991,9 @@ const App = () => {
           key,
           routeNumber,
           routeMapRef.current[key]?.co || 'KMB',
+          { fullRoute: true },
         );
-        if (stops.length < 2) continue;
+        if (stops.length < 2 || geometry.length < 2) continue;
 
         layer.add(
           new Graphic({
@@ -2980,7 +3048,16 @@ const App = () => {
           }).expand(1.15),
         ).catch(() => {});
       }
-      setOverlayFeedback(`Showing ${routeNumber} ${selectedVariant.split('|')[1] || ''}`.trim());
+      const direction = selectedVariant.split('|')[1] || '';
+      const destination = routeMapRef.current[selectedVariant]?.dest_en
+        || routeMapRef.current[selectedVariant]?.dest_tc
+        || '';
+      setOverlayFeedback(
+        `Showing ${routeNumber} ${direction}${destination ? ` toward ${destination}` : ''}`.trim(),
+      );
+    } catch (error) {
+      console.error('Unable to draw full KMB route overlay:', error);
+      setOverlayFeedback(`Could not show the full route for ${routeNumber}`);
     } finally {
       setIsOverlayLoading(false);
     }
