@@ -1848,6 +1848,7 @@ const App = () => {
   const [selectedCurrentEtas, setSelectedCurrentEtas] = useState(new Map());
   const [isLoadingSelectedEtas, setIsLoadingSelectedEtas] = useState(false);
   const [selectedEtaUpdatedAt, setSelectedEtaUpdatedAt] = useState(null);
+  const [routeDetailHeight, setRouteDetailHeight] = useState(48);
   const [isLoading, setIsLoading] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(true);
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
