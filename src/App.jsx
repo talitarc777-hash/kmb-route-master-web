@@ -1650,28 +1650,71 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
       .sort((a, b) => a.route.localeCompare(b.route, undefined, { numeric: true }));
   };
 
-  const normalizeBookmarkStopName = (stopId) => {
-    const stop = stopMap?.[stopId];
-    return String(stop?.name_tc || stop?.name_en || stopId || '')
+  const normalizeBookmarkName = (value) => String(value || '')
       .normalize('NFKC')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
       .trim()
       .replace(/\s+/g, ' ')
+      .replace(/\s*\([A-Z]{1,3}\d{2,4}(?:\s*[,/]\s*[A-Z]{1,3}\d{2,4})*\)\s*$/i, '')
       .toLocaleLowerCase('en-HK');
+
+  const cleanBookmarkDisplayName = (value) => String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .replace(/\s*\([A-Z]{1,3}\d{2,4}(?:\s*[,/]\s*[A-Z]{1,3}\d{2,4})*\)\s*$/i, '');
+
+  const getBookmarkStopNameAliases = (stopId) => {
+    const stop = stopMap?.[stopId];
+    return Array.from(new Set([
+      normalizeBookmarkName(stop?.name_tc),
+      normalizeBookmarkName(stop?.name_en),
+    ].filter(Boolean)));
   };
 
-  const stopIdsByNormalizedName = useMemo(() => {
+  const sameNameStopIdsByStopId = useMemo(() => {
+    const stopIds = Object.keys(stopMap || {});
+    const parent = new Map(stopIds.map((stopId) => [stopId, stopId]));
+    const find = (stopId) => {
+      let root = stopId;
+      while (parent.get(root) !== root) root = parent.get(root);
+      let current = stopId;
+      while (parent.get(current) !== current) {
+        const next = parent.get(current);
+        parent.set(current, root);
+        current = next;
+      }
+      return root;
+    };
+    const union = (left, right) => {
+      const leftRoot = find(left);
+      const rightRoot = find(right);
+      if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+    };
+    const aliasOwner = new Map();
+    stopIds.forEach((stopId) => {
+      getBookmarkStopNameAliases(stopId).forEach((alias) => {
+        const existingStopId = aliasOwner.get(alias);
+        if (existingStopId) union(stopId, existingStopId);
+        else aliasOwner.set(alias, stopId);
+      });
+    });
+    const groups = new Map();
+    stopIds.forEach((stopId) => {
+      const root = find(stopId);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(stopId);
+    });
     const index = new Map();
-    Object.keys(stopMap || {}).forEach((stopId) => {
-      const normalizedName = normalizeBookmarkStopName(stopId);
-      if (!index.has(normalizedName)) index.set(normalizedName, []);
-      index.get(normalizedName).push(stopId);
+    groups.forEach((groupStopIds) => {
+      const sortedStopIds = [...groupStopIds].sort();
+      sortedStopIds.forEach((stopId) => index.set(stopId, sortedStopIds));
     });
     return index;
   }, [stopMap]);
 
   const getAvailableRoutesForNamedStation = (stopId) => {
-    const normalizedName = normalizeBookmarkStopName(stopId);
-    const matchingStopIds = stopIdsByNormalizedName.get(normalizedName) || [stopId];
+    const matchingStopIds = sameNameStopIdsByStopId.get(stopId) || [stopId];
     const grouped = new Map();
     matchingStopIds.forEach((matchingStopId) => {
       getAvailableRoutesForStop(matchingStopId).forEach(({ route, variants }) => {
@@ -1690,11 +1733,12 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
   const groupBookmarkedStopsByName = (stops = []) => {
     const grouped = new Map();
     stops.forEach((stop) => {
-      const normalizedName = normalizeBookmarkStopName(stop.stopId);
-      if (!grouped.has(normalizedName)) {
-        grouped.set(normalizedName, { key: normalizedName, stops: [] });
+      const sameNameStopIds = sameNameStopIdsByStopId.get(stop.stopId) || [stop.stopId];
+      const groupKey = sameNameStopIds.join('|');
+      if (!grouped.has(groupKey)) {
+        grouped.set(groupKey, { key: groupKey, stops: [] });
       }
-      grouped.get(normalizedName).stops.push(stop);
+      grouped.get(groupKey).stops.push(stop);
     });
     return Array.from(grouped.values());
   };
@@ -1866,7 +1910,13 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
             {groupBookmarkedStopsByName(group.stops).map((stopGroup, si) => {
               const s = stopGroup.stops[0];
               const stopInfo = stopMap[s.stopId];
-              const groupedStopIds = stopGroup.stops.map((stop) => stop.stopId);
+              const groupedStopIds = stopGroup.stops.map((stop) => stop.stopId).sort();
+              const stationName = cleanBookmarkDisplayName(
+                stopInfo?.name_tc || s.stopName || stopInfo?.name_en,
+              );
+              const stationLabel = groupedStopIds.length > 1
+                ? `${stationName} (${groupedStopIds.join(', ')})`
+                : stationName;
               const hasEtaData = groupedStopIds.every((stopId) => etaMap.has(stopId));
               const etas = Array.from(new Map(
                 groupedStopIds
@@ -1900,7 +1950,7 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-bold text-slate-700">
-                          {stopInfo?.name_tc || s.stopName}
+                          {stationLabel}
                         </div>
                         <div className="truncate text-xs text-slate-400">{stopInfo?.name_en}</div>
                         <div className="mt-1 flex flex-wrap gap-1">
