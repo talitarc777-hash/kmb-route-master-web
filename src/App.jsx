@@ -1914,9 +1914,7 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
               const stationName = cleanBookmarkDisplayName(
                 stopInfo?.name_tc || s.stopName || stopInfo?.name_en,
               );
-              const stationLabel = groupedStopIds.length > 1
-                ? `${stationName} (${groupedStopIds.join(', ')})`
-                : stationName;
+              const stationLabel = stationName;
               const hasEtaData = groupedStopIds.every((stopId) => etaMap.has(stopId));
               const etas = Array.from(new Map(
                 groupedStopIds
