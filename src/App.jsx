@@ -1650,86 +1650,66 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
       .sort((a, b) => a.route.localeCompare(b.route, undefined, { numeric: true }));
   };
 
-  const groupBookmarkStopsByName = (stops = []) => {
-    const grouped = new Map();
-    stops.forEach((stop) => {
-      const stopInfo = stopMap?.[stop.stopId];
-      const nameTc = stopInfo?.name_tc || '';
-      const nameEn = stopInfo?.name_en || '';
-      const displayName = nameTc || stop.stopName || nameEn || stop.stopId;
-      const normalizedName = String(nameTc || nameEn || stop.stopName || stop.stopId)
-        .normalize('NFKC')
-        .trim()
-        .replace(/\s+/g, ' ')
-        .toLocaleLowerCase('en-HK');
-      if (!grouped.has(normalizedName)) {
-        grouped.set(normalizedName, {
-          key: normalizedName,
-          displayName,
-          englishName: nameEn,
-          stops: [],
-        });
-      }
-      grouped.get(normalizedName).stops.push(stop);
-    });
-    return Array.from(grouped.values());
+  const normalizeBookmarkStopName = (stopId) => {
+    const stop = stopMap?.[stopId];
+    return String(stop?.name_tc || stop?.name_en || stopId || '')
+      .normalize('NFKC')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLocaleLowerCase('en-HK');
   };
 
-  const getAvailableRoutesForStops = (stops = []) => {
+  const stopIdsByNormalizedName = useMemo(() => {
+    const index = new Map();
+    Object.keys(stopMap || {}).forEach((stopId) => {
+      const normalizedName = normalizeBookmarkStopName(stopId);
+      if (!index.has(normalizedName)) index.set(normalizedName, []);
+      index.get(normalizedName).push(stopId);
+    });
+    return index;
+  }, [stopMap]);
+
+  const getAvailableRoutesForNamedStation = (stopId) => {
+    const normalizedName = normalizeBookmarkStopName(stopId);
+    const matchingStopIds = stopIdsByNormalizedName.get(normalizedName) || [stopId];
     const grouped = new Map();
-    stops.forEach((stop) => {
-      getAvailableRoutesForStop(stop.stopId).forEach(({ route, variants }) => {
+    matchingStopIds.forEach((matchingStopId) => {
+      getAvailableRoutesForStop(matchingStopId).forEach(({ route, variants }) => {
         if (!grouped.has(route)) grouped.set(route, []);
-        grouped.get(route).push({ stopId: stop.stopId, variants });
+        grouped.get(route).push(...variants.map((variant) => ({
+          ...variant,
+          stopId: matchingStopId,
+        })));
       });
     });
     return Array.from(grouped.entries())
-      .map(([route, stopVariants]) => ({ route, stopVariants }))
+      .map(([route, variants]) => ({ route, variants }))
       .sort((a, b) => a.route.localeCompare(b.route, undefined, { numeric: true }));
   };
 
-  const toggleGroupedBookmarkRoute = (groupIndex, stops, routeName, stopVariants, selected) => {
-    const variantsByStop = new Map(stopVariants.map((item) => [item.stopId, item.variants]));
-    const stopIds = new Set(stops.map((stop) => stop.stopId));
-    const updated = bookmarks.map((group, index) => {
-      if (index !== groupIndex) return group;
-      return {
-        ...group,
-        stops: group.stops.map((stop) => {
-          if (!stopIds.has(stop.stopId)) return stop;
-          const currentRoutes = stop.routes || [];
-          const nextRoutes = selected
-            ? currentRoutes.filter((item) => item.route !== routeName)
-            : [...currentRoutes, ...(variantsByStop.get(stop.stopId) || [])];
-          const deduped = Array.from(new Map(nextRoutes.map((item) => [
-            `${item.route}|${item.service_type || '1'}`,
-            { route: item.route, service_type: item.service_type || '1' },
-          ])).values());
-          return { ...stop, routes: deduped };
-        }),
-      };
-    });
-    window.bookmarkEngine.saveBookmarks(updated);
+  const toggleBookmarkRoute = (groupIndex, stopId, routeName, variants, currentRoutes = []) => {
+    const selected = currentRoutes.some((item) => item.route === routeName);
+    const nextRoutes = selected
+      ? currentRoutes.filter((item) => item.route !== routeName)
+      : [...currentRoutes, ...variants];
+    const deduped = Array.from(new Map(nextRoutes.map((item) => [
+      `${item.route}|${item.service_type || '1'}|${item.stopId || stopId}`,
+      {
+        route: item.route,
+        service_type: item.service_type || '1',
+        stopId: item.stopId || stopId,
+      },
+    ])).values());
+    const updated = window.bookmarkEngine.updateStopRoutes(
+      bookmarks,
+      groupIndex,
+      stopId,
+      deduped,
+    );
     update(updated);
     setEtaMap((previous) => {
       const next = new Map(previous);
-      stopIds.forEach((stopId) => next.delete(stopId));
-      return next;
-    });
-  };
-
-  const removeGroupedBookmarkStops = (groupIndex, stops) => {
-    const stopIds = new Set(stops.map((stop) => stop.stopId));
-    const updated = bookmarks.map((group, index) => (
-      index === groupIndex
-        ? { ...group, stops: group.stops.filter((stop) => !stopIds.has(stop.stopId)) }
-        : group
-    ));
-    window.bookmarkEngine.saveBookmarks(updated);
-    update(updated);
-    setEtaMap((previous) => {
-      const next = new Map(previous);
-      stopIds.forEach((stopId) => next.delete(stopId));
+      next.delete(stopId);
       return next;
     });
   };
@@ -1840,20 +1820,18 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
               </div>
             )}
 
-            {groupBookmarkStopsByName(group.stops).map((stopGroup, si) => {
-              const stopIds = stopGroup.stops.map((stop) => stop.stopId);
-              const hasEtaData = stopIds.every((stopId) => etaMap.has(stopId));
-              const etas = Array.from(new Map(
-                stopIds
-                  .flatMap((stopId) => etaMap.get(stopId) || [])
-                  .map((eta) => [`${eta.route}|${eta.eta}`, eta]),
-              ).values()).sort((a, b) => a.waitMin - b.waitMin);
-              const stopKey = `${gi}|${stopGroup.key}`;
+            {group.stops.map((s, si) => {
+              const stopInfo = stopMap[s.stopId];
+              const hasEtaData = etaMap.has(s.stopId);
+              const etas = etaMap.get(s.stopId) || [];
+              const stopKey = `${gi}|${s.stopId}`;
               const isExpanded = expandedStopKey === stopKey;
-              const routeOptions = getAvailableRoutesForStops(stopGroup.stops);
+              const routeOptions = getAvailableRoutesForNamedStation(s.stopId);
+              const selectedRoutes = s.routes || [];
+              const selectedRouteNames = new Set(selectedRoutes.map((item) => item.route));
               return (
                 <div
-                  key={stopGroup.key || si}
+                  key={si}
                   className="border-b border-slate-100 py-2 last:border-none"
                 >
                   <div
@@ -1873,9 +1851,9 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-bold text-slate-700">
-                          {stopGroup.displayName}
+                          {stopInfo?.name_tc || s.stopName}
                         </div>
-                        <div className="truncate text-xs text-slate-400">{stopGroup.englishName}</div>
+                        <div className="truncate text-xs text-slate-400">{stopInfo?.name_en}</div>
                         <div className="mt-1 flex flex-wrap gap-1">
                           {!hasEtaData && (
                             <span className="text-xs text-slate-300">Click Update ETA to refresh</span>
@@ -1901,7 +1879,8 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            removeGroupedBookmarkStops(gi, stopGroup.stops);
+                            const updated = window.bookmarkEngine.removeStop(bookmarks, gi, s.stopId);
+                            update(updated);
                           }}
                           className="text-sm text-slate-300 hover:text-red-400"
                         >
@@ -1921,23 +1900,14 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
                         </div>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          {routeOptions.map(({ route, stopVariants }) => {
-                            const selected = stopVariants.every(({ stopId }) => {
-                              const stop = stopGroup.stops.find((item) => item.stopId === stopId);
-                              return (stop?.routes || []).some((item) => item.route === route);
-                            });
+                          {routeOptions.map(({ route, variants }) => {
+                            const selected = selectedRouteNames.has(route);
                             return (
                               <button
                                 key={route}
                                 type="button"
                                 onClick={() =>
-                                  toggleGroupedBookmarkRoute(
-                                    gi,
-                                    stopGroup.stops,
-                                    route,
-                                    stopVariants,
-                                    selected,
-                                  )
+                                  toggleBookmarkRoute(gi, s.stopId, route, variants, selectedRoutes)
                                 }
                                 className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
                                   selected

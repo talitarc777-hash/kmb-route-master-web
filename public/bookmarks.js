@@ -97,10 +97,11 @@ function updateStopRoutes(bookmarks, groupIndex, stopId, routes) {
 
 async function fetchStopETAs(stopId, routes) {
     const results = await Promise.all(
-        routes.map(async ({ route, service_type }) => {
+        routes.map(async ({ route, service_type, stopId: routeStopId }) => {
             try {
                 const svc = service_type || '1';
-                const etaUrl = `https://data.etabus.gov.hk/v1/transport/kmb/eta/${stopId}/${route}/${svc}?_=${Date.now()}`;
+                const etaStopId = routeStopId || stopId;
+                const etaUrl = `https://data.etabus.gov.hk/v1/transport/kmb/eta/${etaStopId}/${route}/${svc}?_=${Date.now()}`;
                 const res = await fetch(etaUrl, {
                     cache: 'no-store',
                     headers: {
