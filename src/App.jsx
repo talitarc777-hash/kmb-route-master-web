@@ -2290,10 +2290,35 @@ const App = () => {
             renderCurrentLocationMarker(currentLocation.lat, currentLocation.lng);
           }
           view.on('click', async (event) => {
-            const hit = await view.hitTest(event);
-            const stopGraphic = hit.results
+            const stationLayers = [layer, routeOverlayLayer];
+            const hit = await view.hitTest(event, { include: stationLayers });
+            let stopGraphic = hit.results
               .map((result) => result.graphic)
               .find((graphic) => graphic?.attributes?.type === 'station-stop');
+
+            // Small overlay stops are difficult to hit precisely on touch screens.
+            // Accept the closest station marker within a modest screen-pixel radius.
+            if (!stopGraphic) {
+              const tapPoint = { x: event.x, y: event.y };
+              let closest = null;
+              stationLayers.forEach((stationLayer) => {
+                stationLayer.graphics
+                  .filter((graphic) => graphic?.attributes?.type === 'station-stop')
+                  .forEach((graphic) => {
+                    const screenPoint = view.toScreen(graphic.geometry);
+                    if (!screenPoint) return;
+                    const distance = Math.hypot(
+                      screenPoint.x - tapPoint.x,
+                      screenPoint.y - tapPoint.y,
+                    );
+                    if (distance <= 22 && (!closest || distance < closest.distance)) {
+                      closest = { graphic, distance };
+                    }
+                  });
+              });
+              stopGraphic = closest?.graphic;
+            }
+
             if (stopGraphic) showStationNameOnMap(stopGraphic);
           });
           view.when(() => setMapLoaded(true));
