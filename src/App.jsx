@@ -2421,8 +2421,8 @@ const App = () => {
           const routeOverlayLayer = new GraphicsLayer();
           const stationLabelLayer = new GraphicsLayer();
           const currentLocationLayer = new GraphicsLayer();
-          map.add(routeOverlayLayer);
           map.add(layer);
+          map.add(routeOverlayLayer);
           map.add(stationLabelLayer);
           map.add(currentLocationLayer);
           graphicsLayerRef.current = layer;
