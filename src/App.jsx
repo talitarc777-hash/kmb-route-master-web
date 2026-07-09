@@ -2443,7 +2443,7 @@ const App = () => {
               .find((graphic) => graphic?.attributes?.type === 'station-stop');
 
             // Small overlay stops are difficult to hit precisely on touch screens.
-            // Accept the closest station marker within a modest screen-pixel radius.
+            // Accept the closest station marker, with a wider target for full-route overlays.
             if (!stopGraphic) {
               const tapPoint = { x: event.x, y: event.y };
               let closest = null;
@@ -2457,7 +2457,8 @@ const App = () => {
                       screenPoint.x - tapPoint.x,
                       screenPoint.y - tapPoint.y,
                     );
-                    if (distance <= 22 && (!closest || distance < closest.distance)) {
+                    const hitRadius = graphic?.attributes?.source === 'route-overlay' ? 36 : 22;
+                    if (distance <= hitRadius && (!closest || distance < closest.distance)) {
                       closest = { graphic, distance };
                     }
                   });
@@ -3184,23 +3185,43 @@ const App = () => {
 
         stops.forEach((stop, index) => {
           pointsForExtent.push(stop);
+          const isTerminal = index === 0 || index === stops.length - 1;
+          const stationName = getStopDisplayName(stop);
           layer.add(
             new Graphic({
               geometry: new Point({ x: stop.lng, y: stop.lat, spatialReference: { wkid: 4326 } }),
               symbol: {
                 type: 'simple-marker',
                 style: 'circle',
-                color: index === 0 || index === stops.length - 1
-                  ? [124, 58, 237, 0.48]
-                  : [255, 255, 255, 0.5],
-                size: index === 0 || index === stops.length - 1 ? 9 : 6,
-                outline: { color: [124, 58, 237, 0.58], width: 1.5 },
+                color: [124, 58, 237, 0.01],
+                size: 28,
+                outline: { color: [124, 58, 237, 0.01], width: 1 },
               },
               attributes: {
                 type: 'station-stop',
-                stationName: getStopDisplayName(stop),
+                source: 'route-overlay',
+                stationName,
               },
-              popupTemplate: { title: getStopDisplayName(stop) },
+            }),
+          );
+          layer.add(
+            new Graphic({
+              geometry: new Point({ x: stop.lng, y: stop.lat, spatialReference: { wkid: 4326 } }),
+              symbol: {
+                type: 'simple-marker',
+                style: 'circle',
+                color: isTerminal
+                  ? [124, 58, 237, 0.62]
+                  : [255, 255, 255, 0.82],
+                size: isTerminal ? 10 : 7,
+                outline: { color: [124, 58, 237, 0.78], width: 1.5 },
+              },
+              attributes: {
+                type: 'station-stop',
+                source: 'route-overlay',
+                stationName,
+              },
+              popupTemplate: { title: stationName },
             }),
           );
         });
