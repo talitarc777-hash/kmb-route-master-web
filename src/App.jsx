@@ -2511,6 +2511,41 @@ const App = () => {
   const getOperatorStopDisplayName = (stop) =>
     stop?.name?.tc || stop?.name?.en || stop?.name_tc || stop?.name_en || stop?.stop_id || stop?.id || 'Station';
 
+  const normalizeOverlayStationName = (value) => String(value || '')
+    .replace(/<br\s*\/?\s*>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .split(/[\/／,，(（]/)[0]
+    .normalize('NFKC')
+    .replace(/[\s\u200B-\u200D\uFEFF'".．·・-]+/g, '')
+    .toLowerCase();
+
+  const stopNameKeys = (stop) => {
+    const rawNames = [
+      stop?.name_tc,
+      stop?.name_en,
+      stop?.name?.tc,
+      stop?.name?.en,
+      getOperatorStopDisplayName(stop),
+      getStopDisplayName(stop),
+    ].filter(Boolean);
+    return Array.from(new Set(rawNames
+      .map(normalizeOverlayStationName)
+      .filter((name) => name.length >= 2)));
+  };
+
+  const stopNameDedupKey = (stop) => stopNameKeys(stop)[0] || stopDedupKey(stop);
+
+  const namesOverlap = (left = [], right = []) => {
+    const rightSet = new Set(right);
+    return left.some((leftValue) => (
+      rightSet.has(leftValue) || right.some((rightValue) => (
+        leftValue.length >= 3 && rightValue.length >= 3 &&
+        (leftValue.includes(rightValue) || rightValue.includes(leftValue))
+      ))
+    ));
+  };
+
   const loadCompactOperatorDataset = async (operatorKey) => {
     const key = String(operatorKey || '').trim().toLowerCase();
     if (!key) return null;
@@ -2584,7 +2619,41 @@ const App = () => {
     return score;
   };
 
-  const getCompactOperatorOverlayStops = async (operatorKey, routeNumber) => {
+  const scoreOperatorOverlayPath = (stops, referenceStops = [], destinationName = '') => {
+    let score = rankOverlayStopPath(stops);
+    const terminalKeys = stopNameKeys(stops[stops.length - 1]);
+    const originKeys = stopNameKeys(stops[0]);
+    const destinationKeys = [normalizeOverlayStationName(destinationName)].filter(Boolean);
+
+    if (destinationKeys.length > 0) {
+      if (namesOverlap(terminalKeys, destinationKeys)) score += 15000;
+      if (namesOverlap(originKeys, destinationKeys)) score -= 8000;
+    }
+
+    if (referenceStops.length >= 2) {
+      const nearestIndex = (referenceStop) => {
+        const ref = mapPointFromStop(referenceStop);
+        if (!ref) return null;
+        return stops.reduce((best, stop, index) => {
+          const lat = Number(stop?.lat);
+          const lng = Number(stop?.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return best;
+          const distance = haversine(ref.lat, ref.lng, lat, lng);
+          return !best || distance < best.distance ? { index, distance } : best;
+        }, null);
+      };
+
+      const startMatch = nearestIndex(referenceStops[0]);
+      const endMatch = nearestIndex(referenceStops[referenceStops.length - 1]);
+      if (startMatch) score += Math.max(0, 3000 - startMatch.distance * 1500);
+      if (endMatch) score += Math.max(0, 5000 - endMatch.distance * 1800);
+      if (startMatch && endMatch) score += startMatch.index <= endMatch.index ? 12000 : -12000;
+    }
+
+    return score;
+  };
+
+  const getCompactOperatorOverlayStops = async (operatorKey, routeNumber, options = {}) => {
     const dataset = await loadCompactOperatorDataset(operatorKey);
     if (!dataset) return [];
 
@@ -2608,30 +2677,49 @@ const App = () => {
       groups.get(groupKey).push(row);
     });
 
-    const paths = Array.from(groups.values()).map((rows) => rows
-      .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0))
-      .map((row) => {
-        const stop = stopById.get(String(row.stop_id || '').trim());
-        const lat = Number(stop?.lat);
-        const lng = Number(stop?.lng);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-        return {
-          ...stop,
-          lat,
-          lng,
-          id: stop?.id || `${operatorKey}:${row.stop_id}`,
-          operator: dataset.operator || operatorKey.toUpperCase(),
-        };
-      })
-      .filter(Boolean))
-      .filter((path) => path.length >= 2)
-      .sort((a, b) => rankOverlayStopPath(b) - rankOverlayStopPath(a));
+    const paths = Array.from(groups.entries()).map(([groupKey, rows]) => ({
+      groupKey,
+      stops: rows
+        .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0))
+        .map((row) => {
+          const stop = stopById.get(String(row.stop_id || '').trim());
+          const lat = Number(stop?.lat);
+          const lng = Number(stop?.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+          return {
+            ...stop,
+            lat,
+            lng,
+            id: stop?.id || `${operatorKey}:${row.stop_id}`,
+            operator: dataset.operator || operatorKey.toUpperCase(),
+          };
+        })
+        .filter(Boolean),
+    }))
+      .filter((path) => path.stops.length >= 2)
+      .map((path) => ({
+        ...path,
+        score: scoreOperatorOverlayPath(
+          path.stops,
+          options.referenceStops || [],
+          options.destinationName || '',
+        ),
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const bestPath = paths[0];
+    if (!bestPath) return [];
+
+    const bestTerminalKeys = stopNameKeys(bestPath.stops[bestPath.stops.length - 1]);
+    const selectedPaths = paths.filter((path) => (
+      path === bestPath || namesOverlap(stopNameKeys(path.stops[path.stops.length - 1]), bestTerminalKeys)
+    ));
 
     const mergedStops = [];
     const seen = new Set();
-    paths.forEach((path) => {
-      path.forEach((stop) => {
-        const key = stopDedupKey(stop);
+    selectedPaths.forEach((path) => {
+      path.stops.forEach((stop) => {
+        const key = stopNameDedupKey(stop);
         if (seen.has(key)) return;
         seen.add(key);
         mergedStops.push(stop);
@@ -3311,12 +3399,17 @@ const App = () => {
       for (const key of [selectedVariant]) {
         const stopIds = routeStopsRef.current[key] || [];
         const { stops } = getKmbStopSequenceGeometry(stopIds, key);
-        const citybusOverlayStops = await getCompactOperatorOverlayStops('citybus', routeNumber);
+        const overlayRouteInfo = routeMapRef.current[key] || {};
+        const overlayDestinationName = overlayRouteInfo.dest_en || overlayRouteInfo.dest_tc || '';
+        const citybusOverlayStops = await getCompactOperatorOverlayStops('citybus', routeNumber, {
+          referenceStops: stops,
+          destinationName: overlayDestinationName,
+        });
         const geometry = await getKmbRoadGeometry(
           stopIds,
           key,
           routeNumber,
-          routeMapRef.current[key]?.co || 'KMB',
+          overlayRouteInfo.co || 'KMB',
           { fullRoute: true },
         );
         if (stops.length < 2 || geometry.length < 2) continue;
@@ -3338,13 +3431,17 @@ const App = () => {
         );
 
         const overlayStops = [];
-        const seenStopKeys = new Set();
+        const seenNameKeys = new Set();
+        const seenCoordKeys = new Set();
         [...stops, ...citybusOverlayStops].forEach((stop) => {
           const normalized = mapPointFromStop(stop);
           if (!normalized) return;
-          const dedupKey = stopDedupKey(normalized);
-          if (seenStopKeys.has(dedupKey)) return;
-          seenStopKeys.add(dedupKey);
+          const nameKeys = stopNameKeys(normalized);
+          const coordKey = stopDedupKey(normalized);
+          const hasSeenName = nameKeys.some((nameKey) => seenNameKeys.has(nameKey));
+          if (hasSeenName || seenCoordKeys.has(coordKey)) return;
+          nameKeys.forEach((nameKey) => seenNameKeys.add(nameKey));
+          seenCoordKeys.add(coordKey);
           overlayStops.push(normalized);
         });
 
