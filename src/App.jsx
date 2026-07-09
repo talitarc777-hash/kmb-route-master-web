@@ -2087,6 +2087,7 @@ const App = () => {
   const viewRef = useRef(null);
   const graphicsLayerRef = useRef(null);
   const routeOverlayLayerRef = useRef(null);
+  const routeOverlayStopLayerRef = useRef(null);
   const stationLabelLayerRef = useRef(null);
   const currentLocationLayerRef = useRef(null);
   const currentLocationRef = useRef(null);
@@ -2419,14 +2420,17 @@ const App = () => {
           view.popupEnabled = false;
           const layer = new GraphicsLayer();
           const routeOverlayLayer = new GraphicsLayer();
+          const routeOverlayStopLayer = new GraphicsLayer();
           const stationLabelLayer = new GraphicsLayer();
           const currentLocationLayer = new GraphicsLayer();
           map.add(layer);
           map.add(routeOverlayLayer);
+          map.add(routeOverlayStopLayer);
           map.add(stationLabelLayer);
           map.add(currentLocationLayer);
           graphicsLayerRef.current = layer;
           routeOverlayLayerRef.current = routeOverlayLayer;
+          routeOverlayStopLayerRef.current = routeOverlayStopLayer;
           stationLabelLayerRef.current = stationLabelLayer;
           currentLocationLayerRef.current = currentLocationLayer;
           viewRef.current = view;
@@ -2436,7 +2440,7 @@ const App = () => {
             renderCurrentLocationMarker(currentLocation.lat, currentLocation.lng);
           }
           view.on('click', async (event) => {
-            const stationLayers = [layer, routeOverlayLayer];
+            const stationLayers = [layer, routeOverlayStopLayer, routeOverlayLayer];
             const hit = await view.hitTest(event, { include: stationLayers });
             let stopGraphic = hit.results
               .map((result) => result.graphic)
@@ -2484,6 +2488,7 @@ const App = () => {
   const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
   const clearRouteOverlay = () => {
     routeOverlayLayerRef.current?.removeAll();
+    routeOverlayStopLayerRef.current?.removeAll();
     setOverlayFeedback(null);
   };
   const clearStationLabel = () => stationLabelLayerRef.current?.removeAll();
@@ -3130,12 +3135,14 @@ const App = () => {
     const routeNumber = (overlayRouteNumber || routeNumberFromRoute(selectedRoute)).trim().toUpperCase();
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = routeOverlayLayerRef.current;
+    const stopLayer = routeOverlayStopLayerRef.current;
     const view = viewRef.current;
-    if (!routeNumber || !layer || !view || !Graphic || !Polyline || !Point || !Extent) return;
+    if (!routeNumber || !layer || !stopLayer || !view || !Graphic || !Polyline || !Point || !Extent) return;
 
     setIsOverlayLoading(true);
     setOverlayFeedback(null);
     layer.removeAll();
+    stopLayer.removeAll();
 
     try {
       const variantKeys = Object.keys(routeStopsRef.current || {})
@@ -3187,14 +3194,14 @@ const App = () => {
           pointsForExtent.push(stop);
           const isTerminal = index === 0 || index === stops.length - 1;
           const stationName = getStopDisplayName(stop);
-          layer.add(
+          stopLayer.add(
             new Graphic({
               geometry: new Point({ x: stop.lng, y: stop.lat, spatialReference: { wkid: 4326 } }),
               symbol: {
                 type: 'simple-marker',
                 style: 'circle',
                 color: [124, 58, 237, 0.01],
-                size: 28,
+                size: 32,
                 outline: { color: [124, 58, 237, 0.01], width: 1 },
               },
               attributes: {
@@ -3204,17 +3211,17 @@ const App = () => {
               },
             }),
           );
-          layer.add(
+          stopLayer.add(
             new Graphic({
               geometry: new Point({ x: stop.lng, y: stop.lat, spatialReference: { wkid: 4326 } }),
               symbol: {
                 type: 'simple-marker',
                 style: 'circle',
                 color: isTerminal
-                  ? [124, 58, 237, 0.62]
-                  : [255, 255, 255, 0.82],
-                size: isTerminal ? 10 : 7,
-                outline: { color: [124, 58, 237, 0.78], width: 1.5 },
+                  ? [124, 58, 237, 0.95]
+                  : [124, 58, 237, 0.9],
+                size: isTerminal ? 14 : 10,
+                outline: { color: [255, 255, 255, 0.96], width: 2.5 },
               },
               attributes: {
                 type: 'station-stop',
