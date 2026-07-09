@@ -2486,9 +2486,20 @@ const App = () => {
   };
 
   const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
+  const clearOverlayStopGraphics = () => {
+    const layer = graphicsLayerRef.current;
+    if (!layer?.graphics) return;
+    const graphics = typeof layer.graphics.toArray === 'function'
+      ? layer.graphics.toArray()
+      : Array.from(layer.graphics || []);
+    graphics
+      .filter((graphic) => graphic?.attributes?.source === 'route-overlay')
+      .forEach((graphic) => layer.remove(graphic));
+  };
   const clearRouteOverlay = () => {
     routeOverlayLayerRef.current?.removeAll();
     routeOverlayStopLayerRef.current?.removeAll();
+    clearOverlayStopGraphics();
     setOverlayFeedback(null);
   };
   const clearStationLabel = () => stationLabelLayerRef.current?.removeAll();
@@ -3135,14 +3146,15 @@ const App = () => {
     const routeNumber = (overlayRouteNumber || routeNumberFromRoute(selectedRoute)).trim().toUpperCase();
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = routeOverlayLayerRef.current;
-    const stopLayer = routeOverlayStopLayerRef.current;
+    const stopLayer = graphicsLayerRef.current;
     const view = viewRef.current;
     if (!routeNumber || !layer || !stopLayer || !view || !Graphic || !Polyline || !Point || !Extent) return;
 
     setIsOverlayLoading(true);
     setOverlayFeedback(null);
     layer.removeAll();
-    stopLayer.removeAll();
+    routeOverlayStopLayerRef.current?.removeAll();
+    clearOverlayStopGraphics();
 
     try {
       const variantKeys = Object.keys(routeStopsRef.current || {})
