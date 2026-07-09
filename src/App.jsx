@@ -2627,7 +2627,18 @@ const App = () => {
       .filter((path) => path.length >= 2)
       .sort((a, b) => rankOverlayStopPath(b) - rankOverlayStopPath(a));
 
-    return paths[0] || [];
+    const mergedStops = [];
+    const seen = new Set();
+    paths.forEach((path) => {
+      path.forEach((stop) => {
+        const key = stopDedupKey(stop);
+        if (seen.has(key)) return;
+        seen.add(key);
+        mergedStops.push(stop);
+      });
+    });
+
+    return mergedStops;
   };
 
   const showStationNameOnMap = (graphic) => {
