@@ -2511,6 +2511,19 @@ const App = () => {
   const getOperatorStopDisplayName = (stop) =>
     stop?.name?.tc || stop?.name?.en || stop?.name_tc || stop?.name_en || stop?.stop_id || stop?.id || 'Station';
 
+  const formatOverlayStationLabel = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return 'Station';
+    const parts = raw.split(/<br\s*\/?\s*>/i);
+    const preferred = (parts.length > 1 ? parts[parts.length - 1] : parts[0]) || raw;
+    const cleaned = preferred
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned || 'Station';
+  };
+
   const normalizeOverlayStationName = (value) => String(value || '')
     .replace(/<br\s*\/?\s*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
@@ -3431,26 +3444,39 @@ const App = () => {
         );
 
         const overlayStops = [];
-        const seenNameKeys = new Set();
-        const seenCoordKeys = new Set();
-        [...stops, ...citybusOverlayStops].forEach((stop) => {
+        const seenKmbNameKeys = new Set();
+        const seenKmbCoordKeys = new Set();
+
+        stops.forEach((stop) => {
           const normalized = mapPointFromStop(stop);
           if (!normalized) return;
           const nameKeys = stopNameKeys(normalized);
           const coordKey = stopDedupKey(normalized);
-          const hasSeenName = nameKeys.some((nameKey) => seenNameKeys.has(nameKey));
-          if (hasSeenName || seenCoordKeys.has(coordKey)) return;
-          nameKeys.forEach((nameKey) => seenNameKeys.add(nameKey));
-          seenCoordKeys.add(coordKey);
+          if (seenKmbCoordKeys.has(coordKey)) return;
+          nameKeys.forEach((nameKey) => seenKmbNameKeys.add(nameKey));
+          seenKmbCoordKeys.add(coordKey);
+          overlayStops.push(normalized);
+        });
+
+        citybusOverlayStops.forEach((stop) => {
+          const normalized = mapPointFromStop(stop);
+          if (!normalized) return;
+          const nameKeys = stopNameKeys(normalized);
+          const coordKey = stopDedupKey(normalized);
+          const duplicatesKmbName = nameKeys.some((nameKey) => seenKmbNameKeys.has(nameKey));
+          if (duplicatesKmbName || seenKmbCoordKeys.has(coordKey)) return;
+          nameKeys.forEach((nameKey) => seenKmbNameKeys.add(nameKey));
+          seenKmbCoordKeys.add(coordKey);
           overlayStops.push(normalized);
         });
 
         overlayStops.forEach((stop, index) => {
           pointsForExtent.push(stop);
           const isTerminal = index === 0 || index === overlayStops.length - 1;
-          const stationName = stop.operator === 'CTB'
+          const rawStationName = stop.operator === 'CTB'
             ? getOperatorStopDisplayName(stop)
             : getStopDisplayName(stop);
+          const stationName = formatOverlayStationLabel(rawStationName);
           stopLayer.add(
             new Graphic({
               geometry: new Point({ x: stop.lng, y: stop.lat, spatialReference: { wkid: 4326 } }),
