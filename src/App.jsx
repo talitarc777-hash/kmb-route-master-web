@@ -691,6 +691,36 @@ function kmbVariantRemark(segment) {
   return null;
 }
 
+function etaDisplayIdentity(etaValue) {
+  if (!etaValue) return 'no-eta';
+  const etaDate = new Date(etaValue);
+  return Number.isNaN(etaDate.getTime()) ? String(etaValue) : etaDate.toISOString();
+}
+
+function mergeSameVisibleRouteOptions(options = []) {
+  const displayOptions = [];
+  const optionIndexByKey = new Map();
+
+  options.forEach((option) => {
+    const displayKey = [
+      String(option?.route || '').toUpperCase(),
+      etaDisplayIdentity(option?.nextEta),
+    ].join('|');
+    const existingIndex = optionIndexByKey.get(displayKey);
+    if (existingIndex == null) {
+      optionIndexByKey.set(displayKey, displayOptions.length);
+      displayOptions.push(option);
+      return;
+    }
+
+    if (!kmbVariantRemark(displayOptions[existingIndex]) && kmbVariantRemark(option)) {
+      displayOptions[existingIndex] = option;
+    }
+  });
+
+  return displayOptions;
+}
+
 function kmbEtaOptionKey(segment, fallbackStopId = '') {
   return [
     segment?.fromStop || fallbackStopId,
@@ -698,6 +728,37 @@ function kmbEtaOptionKey(segment, fallbackStopId = '') {
     segment?.bound,
     segment?.service_type || '1',
   ].map((value) => String(value || '')).join('|');
+}
+
+function etaListDisplayIdentity(etas) {
+  if (!etas) return 'pending';
+  if (etas.length === 0) return 'no-current-eta';
+  return etas.slice(0, 3).map((eta) => etaDisplayIdentity(eta?.eta)).join(',');
+}
+
+function mergeSameVisibleCurrentEtaOptions(options = [], fallbackStopId = '', etaMap = new Map()) {
+  const displayOptions = [];
+  const optionIndexByKey = new Map();
+
+  options.forEach((option) => {
+    const etaKey = kmbEtaOptionKey(option, fallbackStopId);
+    const displayKey = [
+      String(option?.route || '').toUpperCase(),
+      etaListDisplayIdentity(etaMap.get(etaKey)),
+    ].join('|');
+    const existingIndex = optionIndexByKey.get(displayKey);
+    if (existingIndex == null) {
+      optionIndexByKey.set(displayKey, displayOptions.length);
+      displayOptions.push(option);
+      return;
+    }
+
+    if (!kmbVariantRemark(displayOptions[existingIndex]) && kmbVariantRemark(option)) {
+      displayOptions[existingIndex] = option;
+    }
+  });
+
+  return displayOptions;
 }
 
 function formatHistoricalSchedule(schedule) {
@@ -1519,7 +1580,7 @@ const CurrentStopEtaList = ({
       Current stop ETA
     </div>
     <div className="flex flex-wrap gap-2">
-      {options.map((option) => {
+      {mergeSameVisibleCurrentEtaOptions(options, fallbackStopId, etaMap).map((option) => {
         const etaKey = kmbEtaOptionKey(option, fallbackStopId);
         const currentEtas = etaMap.get(etaKey);
         const variantRemark = kmbVariantRemark(option);
@@ -4407,7 +4468,7 @@ const App = () => {
                               </div>
                               {seg.routeOptions && seg.routeOptions.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
-                                  {seg.routeOptions.map((option) => {
+                                  {mergeSameVisibleRouteOptions(seg.routeOptions).map((option) => {
                                     const variantRemark = kmbVariantRemark(option);
                                     return (
                                       <div
