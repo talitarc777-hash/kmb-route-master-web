@@ -981,7 +981,7 @@ async function findRoutes(params) {
         if (orig.oIdx >= dest.dIdx) continue; // going wrong way
 
         const segStops = orig.stops.slice(orig.oIdx, dest.dIdx + 1);
-        const dk = `direct|${orig.route.route}`;
+        const dk = `direct|${key}`;
         if (dedupSeen.has(dk)) continue;
         dedupSeen.add(dk);
 
@@ -1017,7 +1017,7 @@ async function findRoutes(params) {
 
                     const seg1Stops = orig.stops.slice(orig.oIdx, i + 1);
                     const seg2Stops = dest.stops.slice(dest.transferIdx, dest.dIdx + 1);
-                    const dk = `1t|${orig.route.route}->${dest.route.route}`;
+                    const dk = `1t|${r1Key}->${dest.routeKey}`;
 
                     // Only keep one candidate per route-pair; pick best by heuristic
                     const hScore = seg1Stops.length * RIDE_MIN_PER_STOP + seg2Stops.length * RIDE_MIN_PER_STOP
@@ -1080,7 +1080,7 @@ async function findRoutes(params) {
                 if (dest3.routeKey === seg2.routeKey) continue;
 
                 const seg3Stops = dest3.stops.slice(dest3.transferIdx, dest3.dIdx + 1);
-                const dk = `2t|${parent.segments[0].route}->${parent.segments[1].route}->${dest3.route.route}`;
+                const dk = `2t|${parent.segments[0].routeKey}->${parent.segments[1].routeKey}->${dest3.routeKey}`;
                 if (dedupSeen.has(dk)) continue;
                 dedupSeen.add(dk);
 
@@ -1118,7 +1118,7 @@ async function findRoutes(params) {
     const candidates = [];
     for (const c of found) {
         if (!seenForGCP.has(c.dedupKey)) {
-            const origR = c.segments[0].route;
+            const origR = c.segments[0].routeKey || c.segments[0].route;
             const count = originRouteCount.get(origR) || 0;
 
             // Limit to max 6 unique combinations originating from the same bus line

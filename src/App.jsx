@@ -681,12 +681,24 @@ function dayClassLabel(dayClass) {
   return 'Weekday';
 }
 
-function kmbVariantRemark(segment) {
+function isKmb269CSpecialVariant(segment) {
   const route = String(segment?.route || '').toUpperCase();
   const bound = String(segment?.bound || '').toUpperCase();
-  const serviceType = String(segment?.service_type || '1');
-  if (route === '269C' && bound === 'O' && serviceType === '5') {
-    return 'Includes Tin Shui Wai Station + Shek Po Tsuen';
+  const serviceType = String(segment?.service_type || '1').trim();
+  return route === '269C' && bound === 'O' && serviceType === '5';
+}
+
+function kmbVariantLabel(segment) {
+  const route = String(segment?.route || '').trim();
+  if (!route) return '';
+  return isKmb269CSpecialVariant(segment)
+    ? `${route} (Tin Shui Wai Station)`
+    : route;
+}
+
+function kmbVariantRemark(segment) {
+  if (isKmb269CSpecialVariant(segment)) {
+    return 'Special variant via Shek Po Tsuen';
   }
   return null;
 }
@@ -1526,7 +1538,7 @@ const CurrentStopEtaList = ({
         return (
           <div key={etaKey} className="flex flex-col items-start gap-0.5">
             <div className="flex flex-wrap items-center gap-1">
-              <span className="text-[10px] font-black text-slate-600">{option.route}</span>
+              <span className="text-[10px] font-black text-slate-600">{kmbVariantLabel(option)}</span>
               {currentEtas?.length > 0 ? (
                 currentEtas.slice(0, 3).map((eta, etaIndex) => (
                   <span
@@ -2174,7 +2186,7 @@ const App = () => {
         const routeOptions = Array.from(routeOptionMap.values()).sort((a, b) =>
           a.route.localeCompare(b.route, undefined, { numeric: true, sensitivity: 'base' }),
         );
-        const routeNames = routeOptions.map((o) => o.route);
+        const routeNames = routeOptions.map((o) => kmbVariantLabel(o));
         const earliestEta = routeOptions
           .map((o) => o.nextEta)
           .filter(Boolean)
@@ -4417,7 +4429,7 @@ const App = () => {
                                         <span
                                           className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
                                         >
-                                          {option.route}: {getEtaText(option.nextEta)}
+                                          {kmbVariantLabel(option)}: {getEtaText(option.nextEta)}
                                         </span>
                                         {variantRemark && (
                                           <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
