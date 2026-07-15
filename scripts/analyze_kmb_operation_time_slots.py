@@ -578,7 +578,7 @@ def main():
             handle.write("\n## Route Planning Use\n\n")
             handle.write("- For planned time searches, lookup route + bound + service_type + stop_id + day class.\n")
             handle.write("- Reject a candidate when a known profile says the planned board time is outside `start_time`/`end_time`.\n")
-            handle.write("- Use route-level profiles as fallback if a specific route-stop profile is missing.\n")
+            handle.write("- Use route-level profiles only as explicit low-confidence fallback when the station key is absent and the route pattern is unambiguous.\n")
             handle.write("- Reject candidates with missing station and route-level historical profiles.\n")
             handle.write("- In Now mode, live ETA should still override this historical profile.\n")
 

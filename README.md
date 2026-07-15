@@ -95,7 +95,7 @@ The lookup key is route, bound, service type, and boarding stop. Service windows
 - Saturday
 - Sunday and public holiday
 
-KMB validation is strict at the boarding stop. Every segment must have an exact route, bound, service type, and boarding-stop entry in the route-stop (`rs`) index. The requested boarding time must be inside that station profile and within 20 minutes of an observed 15-minute ETA slot. Missing or rejecting station profiles reject the candidate; a broader route-level (`r`) profile is retained only for diagnostics and can never override station-level evidence. This prevents circular-route or bound ambiguity from making a route appear valid at a stop where KMB service was not observed.
+KMB validation is authoritative at the boarding stop. Every segment is matched by route, bound, service type, boarding stop, and stop sequence. When a station (`rs`) profile exists, its active window decides validity and a negative result can never be overridden by route-level evidence. Sample count, sample days, and nearby observed 15-minute ETA slots determine high or medium confidence. If the station key is entirely absent, an explicitly enabled route-level (`r`) fallback may retain an exact route-stop candidate at low confidence; that fallback is blocked for route 110, loops, duplicated-stop patterns, and other ambiguous patterns.
 
 ### 5. Estimate journey time
 

@@ -667,9 +667,9 @@ function plannedTimeValidity(route, timeMode) {
 }
 
 function historicalScheduleSourceLabel(status) {
-  if (status === 'route_stop_profile') return 'station profile';
-  if (status === 'route_profile') return 'route profile';
-  if (status === 'route_stop_profile_missing') return 'station profile unavailable';
+  if (status === 'operating_station_level' || status === 'route_stop_profile') return 'station profile';
+  if (status === 'likely_operating_route_level_fallback' || status === 'route_profile') return 'route profile fallback';
+  if (status === 'station_profile_missing' || status === 'route_stop_profile_missing') return 'station profile unavailable';
   if (status === 'profile_missing') return 'profile unavailable';
   if (status === 'schedule_unavailable') return 'schedule unavailable';
   return 'historical profile';
@@ -783,7 +783,9 @@ function historicalScheduleClass(schedule) {
   if (schedule.status === 'profile_missing' || schedule.status === 'route_stop_profile_missing') {
     return 'bg-amber-50 text-amber-700 border-amber-200';
   }
-  if (schedule.status === 'route_profile') return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+  if (schedule.status === 'route_profile' || schedule.status === 'likely_operating_route_level_fallback') {
+    return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+  }
   return 'bg-emerald-50 text-emerald-700 border-emerald-200';
 }
 
@@ -2342,6 +2344,7 @@ const App = () => {
         timeValue,
         now: new Date(),
         allowNoEtaNow: !strictEtaOnly,
+        allowSparseHistoricalFallback: timeMode !== 'now',
       });
       return isValid ? clonedRoute : null;
     },
@@ -3105,6 +3108,7 @@ const App = () => {
           timeValue,
           excludedRoutesText,
           strictEtaOnly: searchAllowFallback ? false : searchStrictEtaOnly,
+          allowSparseHistoricalFallback: timeMode !== 'now',
           onProgress: (msg) => setLoadingStatus(msg),
         });
         filteredCandidates = routeSearch.filteredCandidates || [];
