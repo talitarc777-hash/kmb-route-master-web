@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { publishApiBaseUrl, toApiUrl } from './utils/apiBase.js';
+import { createLatestRequestTracker, loadKmbPayloads } from './utils/routePlanningRequests.js';
 
 publishApiBaseUrl();
 
@@ -136,7 +137,11 @@ function saveGcpCache(state) {
 }
 
 function getCachedGcpValue(state, key) {
-  if (state.memory.has(key)) return state.memory.get(key);
+  const memoryHit = state.memory.get(key);
+  if (memoryHit) {
+    if (memoryHit.expiresAt > Date.now()) return memoryHit.value;
+    state.memory.delete(key);
+  }
   const cache = loadGcpCache(state);
   const hit = cache.get(key);
   if (!hit) return null;
@@ -145,17 +150,18 @@ function getCachedGcpValue(state, key) {
     saveGcpCache(state);
     return null;
   }
-  state.memory.set(key, hit.value);
+  state.memory.set(key, { value: hit.value, expiresAt: hit.expiresAt });
   return hit.value;
 }
 
 function setCachedGcpValue(state, key, value) {
-  state.memory.set(key, value);
+  const expiresAt = Date.now() + state.ttlMs;
+  state.memory.set(key, { value, expiresAt });
   const cache = loadGcpCache(state);
   cache.set(key, {
     value,
     savedAt: Date.now(),
-    expiresAt: Date.now() + state.ttlMs,
+    expiresAt,
   });
   saveGcpCache(state);
 }
@@ -461,35 +467,6 @@ async function searchNominatim(query, limit = 1) {
   const payload = await response.json();
   if (!Array.isArray(payload)) return [];
   return payload;
-}
-
-async function fetchJsonEndpoint(url, label) {
-  const response = await fetch(url, { headers: { Accept: 'application/json' } });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`${label} returned HTTP ${response.status}`);
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    const preview = text.slice(0, 40).replace(/\s+/g, ' ');
-    throw new Error(`${label} returned non-JSON content: ${preview}`);
-  }
-}
-
-async function loadKmbPayloads(endpoints, sourceLabel) {
-  const [stopsData, routesData, routeStopsData] = await Promise.all([
-    fetchJsonEndpoint(endpoints[0], `${sourceLabel} stop`),
-    fetchJsonEndpoint(endpoints[1], `${sourceLabel} route`),
-    fetchJsonEndpoint(endpoints[2], `${sourceLabel} route-stop`),
-  ]);
-
-  if (!Array.isArray(stopsData?.data) || !Array.isArray(routesData?.data) || !Array.isArray(routeStopsData?.data)) {
-    throw new Error(`${sourceLabel} KMB payload format error (missing data arrays).`);
-  }
-
-  return { stopsData, routesData, routeStopsData };
 }
 
 async function geocode(query, placeId = null) {
@@ -1465,6 +1442,7 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
+    let active = true;
     const timer = setTimeout(async () => {
       const trimmedValue = displayValue.trim();
       const hasSelectedPlace = Boolean(value && typeof value === 'object' && value.place_id);
@@ -1496,13 +1474,16 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
             return rows.map(buildNominatimSuggestion).filter(Boolean).slice(0, 5);
           },
         );
-        setSuggestions(predictions || []);
+        if (active) setSuggestions(predictions || []);
       } catch (e) {
         console.error('Fetch Error:', e);
-        setSuggestions([]);
+        if (active) setSuggestions([]);
       }
     }, 350);
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [value, displayValue]);
 
   return (
@@ -2164,6 +2145,10 @@ const App = () => {
   const kmbRouteGeometryCacheRef = useRef(new Map());
   const kmbRoadGeometryCacheRef = useRef(new Map());
   const selectedEtaRequestRef = useRef(0);
+  const searchRequestTrackerRef = useRef(null);
+  if (!searchRequestTrackerRef.current) {
+    searchRequestTrackerRef.current = createLatestRequestTracker();
+  }
 
   const displayedResults = useMemo(() => {
     if (!strictEtaOnly || timeMode !== 'now') return results;
@@ -3053,6 +3038,9 @@ const App = () => {
   const handleSearch = async (e, overrides = {}) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!dataLoaded) return;
+    const searchStartedAt = Date.now();
+    const searchRequestId = searchRequestTrackerRef.current.start();
+    const isCurrentSearch = () => searchRequestTrackerRef.current.isCurrent(searchRequestId);
     const searchAllowFallback = overrides.allowFallbackNonKmb ?? allowFallbackNonKmb;
     const searchStrictEtaOnly = overrides.strictEtaOnly ?? strictEtaOnly;
     const preserveExistingResults = Boolean(overrides.preserveExistingResults);
@@ -3065,6 +3053,7 @@ const App = () => {
     clearMapGraphics();
     clearRouteOverlay();
     clearStationLabel();
+    let engineDebugSummary = null;
 
     try {
       let kmbSearchError = null;
@@ -3072,6 +3061,7 @@ const App = () => {
         resolveLocation(origin),
         resolveLocation(destination),
       ]);
+      if (!isCurrentSearch()) return;
       const searchCacheKey = buildSearchCacheKey({
         originLoc,
         destLoc,
@@ -3109,9 +3099,13 @@ const App = () => {
           excludedRoutesText,
           strictEtaOnly: searchAllowFallback ? false : searchStrictEtaOnly,
           allowSparseHistoricalFallback: timeMode !== 'now',
-          onProgress: (msg) => setLoadingStatus(msg),
+          onProgress: (msg) => {
+            if (isCurrentSearch()) setLoadingStatus(msg);
+          },
         });
+        if (!isCurrentSearch()) return;
         filteredCandidates = routeSearch.filteredCandidates || [];
+        engineDebugSummary = routeSearch.debugSummary || null;
       } catch (err) {
         kmbSearchError = err;
         if (!searchAllowFallback) throw err;
@@ -3161,6 +3155,7 @@ const App = () => {
               });
               return annotateGapRepairCandidates(candidates, gap);
             }));
+            if (!isCurrentSearch()) return;
             googleAlternatives = gapRows.flat();
           }
 
@@ -3185,8 +3180,10 @@ const App = () => {
             }
           }
 
-          setResults(finalResults);
-          setIsSearchOpen(false);
+          if (isCurrentSearch()) {
+            setResults(finalResults);
+            setIsSearchOpen(false);
+          }
 
           return;
         } catch (fallbackError) {
@@ -3216,13 +3213,27 @@ const App = () => {
         }
       }
 
-      setResults(finalResults);
-      setIsSearchOpen(false);
+      if (isCurrentSearch()) {
+        setResults(finalResults);
+        setIsSearchOpen(false);
+      }
     } catch (err) {
-      setSearchError(err.message);
+      if (isCurrentSearch()) setSearchError(err.message);
     } finally {
-      setIsLoading(false);
-      setLoadingStatus('');
+      if (isCurrentSearch()) {
+        const engineSummary = engineDebugSummary || {};
+        const debugSummary = {
+          ...engineSummary,
+          frontendTotalMs: Date.now() - searchStartedAt,
+          timeMode,
+        };
+        window.__KMB_LAST_PLANNING_DEBUG__ = debugSummary;
+        if (['localhost', '127.0.0.1'].includes(window.location.hostname) || localStorage.getItem('kmbPlanningDebug') === '1') {
+          console.debug('[KMB planning summary]', debugSummary);
+        }
+        setIsLoading(false);
+        setLoadingStatus('');
+      }
     }
   };
 
@@ -3635,7 +3646,6 @@ const App = () => {
     }
 
     try {
-      window.routeEngine?.clearETACache?.();
       const entries = await Promise.all(
         Array.from(optionMap.entries()).map(async ([key, option]) => {
           const rows = await window.routeEngine.fetchETA(
@@ -3671,8 +3681,10 @@ const App = () => {
     setOverlayRouteNumber(routeNumberFromRoute(baseRoute));
     setOverlayFeedback(null);
     setExpandedSegments(new Set());
+    setSelectedCurrentEtas(new Map());
+    setSelectedEtaUpdatedAt(null);
     drawRouteOnMap(baseRoute);
-    if (!isFallbackRoute(baseRoute)) {
+    if (!isFallbackRoute(baseRoute) && timeMode === 'now') {
       loadSelectedCurrentEtas(initialSegmentDisplay);
     }
   };
@@ -4771,14 +4783,19 @@ const App = () => {
             >
               {'\u2190'} Back
             </button>
-            <button
-              type="button"
-              onClick={() => loadSelectedCurrentEtas(detailSegments)}
-              disabled={isLoadingSelectedEtas}
-              className="text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-2 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoadingSelectedEtas ? 'Refreshing...' : 'Refresh current ETA'}
-            </button>
+            {timeMode === 'now' && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.routeEngine?.clearETACache?.();
+                  loadSelectedCurrentEtas(detailSegments);
+                }}
+                disabled={isLoadingSelectedEtas}
+                className="text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-2 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoadingSelectedEtas ? 'Refreshing...' : 'Refresh current ETA'}
+              </button>
+            )}
           </div>
           {selectedEtaUpdatedAt && (
             <div className="text-[11px] text-slate-500 font-semibold mb-2">

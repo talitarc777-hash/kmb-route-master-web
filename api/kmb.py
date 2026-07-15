@@ -81,11 +81,11 @@ class handler(BaseHTTPRequestHandler):
                 "orderByFields": "ROUTE_ID,ROUTE_SEQ",
             }
             target_url = f"{CSDI_BUS_ROUTE_QUERY_URL}?{urllib.parse.urlencode(csdi_query)}"
-            cache_control = "public, max-age=86400, s-maxage=604800"
+            cache_control = "public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800"
 
         elif '/api/kmb/' in path:
             # Keep your existing KMB Open Data logic here
-            cache_control = "public, max-age=60"
+            cache_control = "public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800"
             if 'route-stop' in path:
                 target_url = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop"
             elif 'stop' in path:

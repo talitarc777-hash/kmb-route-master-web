@@ -14,7 +14,7 @@ const baseJsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',
 };
 
-function responseHeaders(cacheControl = 'public, max-age=60') {
+function responseHeaders(cacheControl = 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800') {
   return {
     ...baseJsonHeaders,
     'Cache-Control': cacheControl,
@@ -44,7 +44,7 @@ export async function onRequestOptions() {
 export async function onRequestGet({ request, params }) {
   const routeName = routeNameFromParams(params);
   let upstreamUrl = KMB_ENDPOINTS[routeName];
-  let cacheControl = 'public, max-age=60';
+  let cacheControl = 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800';
 
   if (routeName === 'route-geometry') {
     const incomingUrl = new URL(request.url);
@@ -75,7 +75,7 @@ export async function onRequestGet({ request, params }) {
       orderByFields: 'ROUTE_ID,ROUTE_SEQ',
     });
     upstreamUrl = `${CSDI_BUS_ROUTE_QUERY_URL}?${query.toString()}`;
-    cacheControl = 'public, max-age=86400, s-maxage=604800';
+    cacheControl = 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800';
   }
 
   if (!upstreamUrl) {
@@ -91,7 +91,7 @@ export async function onRequestGet({ request, params }) {
         Accept: 'application/json',
       },
       cf: {
-        cacheTtl: routeName === 'route-geometry' ? 604800 : 60,
+        cacheTtl: routeName === 'route-geometry' ? 604800 : 86400,
         cacheEverything: true,
       },
     });

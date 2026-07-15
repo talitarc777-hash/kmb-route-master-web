@@ -24,6 +24,7 @@ const RIDE_MIN_PER_STOP = 1.5;  // minutes per bus stop
 const BOARDING_BUFFER_MIN = 1; // small safety buffer before boarding each leg
 const GRID_DEG = 0.005; // spatial grid cell ??500m
 const ETA_ACTIVE_WINDOW_MIN = 120; // ETA must be within this window to be considered active
+const ETA_CACHE_TTL_MS = 30 * 1000;
 const RIDE_TIME_CACHE_BUCKET_MS = 30 * 60 * 1000;
 const GCP_CACHE = new Map(); // in-memory promise cache
 const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
@@ -35,9 +36,37 @@ const KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN = 20;
 const KMB_ROUTE_SLOT_TOLERANCE_MIN = 75;
 const KMB_HIGH_CONFIDENCE_MIN_SAMPLES = 30;
 const KMB_HIGH_CONFIDENCE_MIN_SAMPLE_DAYS = 7;
+const EARLY_HISTORICAL_BOUNDARY_GUARD_MIN = 30;
 const STRICT_STOP_LEVEL_ROUTES = new Set(['110']);
+const SPATIAL_GRID_CACHE = new WeakMap();
+const REQUEST_STATS = {
+    gcpNetworkRequests: 0,
+    gcpCacheHits: 0,
+    etaNetworkRequests: 0,
+    etaCacheHits: 0,
+    historicalNetworkRequests: 0,
+    historicalCacheHits: 0,
+    duplicateRequestsPrevented: 0,
+    payloadBytes: 0,
+};
 let GCP_PERSISTED_CACHE = null;
 let KMB_OPERATION_SCHEDULE_PROMISE = null;
+let LAST_PLANNING_DEBUG_SUMMARY = null;
+
+function requestStatsSnapshot() {
+    return { ...REQUEST_STATS };
+}
+
+function requestStatsDelta(before) {
+    return Object.fromEntries(
+        Object.entries(REQUEST_STATS).map(([key, value]) => [key, value - (before[key] || 0)])
+    );
+}
+
+function recordPayloadBytes(response) {
+    const bytes = Number(response?.headers?.get?.('content-length'));
+    if (Number.isFinite(bytes) && bytes > 0) REQUEST_STATS.payloadBytes += bytes;
+}
 
 function getApiBaseUrl() {
     const base = (window.__KMB_API_BASE_URL__ || '').trim();
@@ -72,6 +101,9 @@ function haversine(lat1, lon1, lat2, lon2) {
 // SPATIAL GRID  ??build once per search, reuse for all lookups
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function buildSpatialGrid(stopMap) {
+    if (stopMap && typeof stopMap === 'object' && SPATIAL_GRID_CACHE.has(stopMap)) {
+        return SPATIAL_GRID_CACHE.get(stopMap);
+    }
     const grid = new Map();
     for (const [id, s] of Object.entries(stopMap)) {
         const gx = Math.floor(s.lat / GRID_DEG);
@@ -80,6 +112,7 @@ function buildSpatialGrid(stopMap) {
         if (!grid.has(k)) grid.set(k, []);
         grid.get(k).push({ id, ...s });
     }
+    if (stopMap && typeof stopMap === 'object') SPATIAL_GRID_CACHE.set(stopMap, grid);
     return grid;
 }
 
@@ -168,7 +201,15 @@ function savePersistedGcpCache(cache) {
 }
 
 function getGcpCachedValue(cacheKey) {
-    if (GCP_CACHE.has(cacheKey)) return GCP_CACHE.get(cacheKey);
+    const memoryHit = GCP_CACHE.get(cacheKey);
+    if (memoryHit) {
+        if (memoryHit.expiresAt > Date.now()) {
+            REQUEST_STATS.gcpCacheHits += 1;
+            REQUEST_STATS.duplicateRequestsPrevented += 1;
+            return memoryHit.promise;
+        }
+        GCP_CACHE.delete(cacheKey);
+    }
     const cache = loadPersistedGcpCache();
     const hit = cache.get(cacheKey);
     if (!hit) return null;
@@ -178,16 +219,20 @@ function getGcpCachedValue(cacheKey) {
         return null;
     }
     const resolved = Promise.resolve(hit.value);
-    GCP_CACHE.set(cacheKey, resolved);
+    GCP_CACHE.set(cacheKey, { promise: resolved, expiresAt: hit.expiresAt });
+    REQUEST_STATS.gcpCacheHits += 1;
+    REQUEST_STATS.duplicateRequestsPrevented += 1;
     return resolved;
 }
 
 function setGcpCachedValue(cacheKey, value, ttlMs = GCP_CACHE_TTL_MS) {
+    const expiresAt = Date.now() + ttlMs;
+    GCP_CACHE.set(cacheKey, { promise: Promise.resolve(value), expiresAt });
     const cache = loadPersistedGcpCache();
     cache.set(cacheKey, {
         value,
         savedAt: Date.now(),
-        expiresAt: Date.now() + ttlMs,
+        expiresAt,
     });
     savePersistedGcpCache(cache);
 }
@@ -203,6 +248,7 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
     if (cached) return cached;
 
     const promise = (async () => {
+        REQUEST_STATS.gcpNetworkRequests += 1;
         try {
             let wpStr = '';
             if (intermediateStops.length > 0) {
@@ -212,7 +258,9 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
                 wpStr = '&waypoints=' + s.map(p => `${p.lat},${p.lng}`).join('%7C');
             }
             const url = toApiUrl(`/api/google/directions/json?origin=${lat1},${lng1}&destination=${lat2},${lng2}&mode=${mode}${wpStr}`);
-            const data = await (await fetch(url)).json();
+            const response = await fetch(url);
+            recordPayloadBytes(response);
+            const data = await response.json();
             if (data.status === 'OK' && data.routes.length > 0) {
                 const r = data.routes[0];
                 const out = {
@@ -232,7 +280,10 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
         return fallback;
     })();
 
-    GCP_CACHE.set(cacheKey, promise);
+    GCP_CACHE.set(cacheKey, {
+        promise,
+        expiresAt: Date.now() + getGcpRouteCacheTtl(mode),
+    });
     return promise;
 }
 
@@ -249,15 +300,24 @@ function logEtaCall(entry) {
 
 async function fetchETA(stopId, route, serviceType) {
     const key = `${stopId}|${route}|${serviceType}`;
-    if (ETA_CACHE.has(key)) {
-        logEtaCall({ type: 'cache_hit', key, stopId, route, serviceType });
-        return ETA_CACHE.get(key);
+    const cached = ETA_CACHE.get(key);
+    if (cached) {
+        if (cached.expiresAt > Date.now()) {
+            REQUEST_STATS.etaCacheHits += 1;
+            REQUEST_STATS.duplicateRequestsPrevented += 1;
+            logEtaCall({ type: 'cache_hit', key, stopId, route, serviceType });
+            return cached.promise;
+        }
+        ETA_CACHE.delete(key);
     }
     const p = (async () => {
         const startedAt = Date.now();
         const url = `https://data.etabus.gov.hk/v1/transport/kmb/eta/${stopId}/${route}/${serviceType}`;
+        REQUEST_STATS.etaNetworkRequests += 1;
         try {
-            const data = await (await fetch(url)).json();
+            const response = await fetch(url);
+            recordPayloadBytes(response);
+            const data = await response.json();
             const items = data?.data || [];
             logEtaCall({
                 type: 'network_ok',
@@ -284,7 +344,7 @@ async function fetchETA(stopId, route, serviceType) {
             return [];
         }
     })();
-    ETA_CACHE.set(key, p);
+    ETA_CACHE.set(key, { promise: p, expiresAt: Date.now() + ETA_CACHE_TTL_MS });
     return p;
 }
 
@@ -335,10 +395,16 @@ function bucketTimestamp(date) {
 }
 
 async function loadKmbOperationSchedule() {
-    if (KMB_OPERATION_SCHEDULE_PROMISE) return KMB_OPERATION_SCHEDULE_PROMISE;
+    if (KMB_OPERATION_SCHEDULE_PROMISE) {
+        REQUEST_STATS.historicalCacheHits += 1;
+        REQUEST_STATS.duplicateRequestsPrevented += 1;
+        return KMB_OPERATION_SCHEDULE_PROMISE;
+    }
     KMB_OPERATION_SCHEDULE_PROMISE = (async () => {
         try {
+            REQUEST_STATS.historicalNetworkRequests += 1;
             const response = await fetch(KMB_OPERATION_SCHEDULE_URL);
+            recordPayloadBytes(response);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             return response.json();
         } catch (error) {
@@ -755,7 +821,7 @@ async function validateRouteHistoricalSchedule(route, options = {}) {
     for (const segment of route.segments || []) {
         const result = validateSegmentHistoricalSchedule(segment, segment.boardTime, schedule, options);
         segment.historicalSchedule = result;
-        if (shouldLogHistoricalValidation()) {
+        if (options.logValidation !== false && shouldLogHistoricalValidation()) {
             console.debug('[KMB historical operation]', result.debug || result);
         }
         if (!result.valid) {
@@ -827,6 +893,7 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
     if (cached) return cached;
 
     const promise = (async () => {
+        REQUEST_STATS.gcpNetworkRequests += 1;
         try {
             const query = new URLSearchParams({
                 origin: `${fromStop.lat},${fromStop.lng}`,
@@ -841,6 +908,7 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
             }
 
             const response = await fetch(toApiUrl(`/api/google/directions/json?${query.toString()}`));
+            recordPayloadBytes(response);
             const data = await response.json();
             if (data?.status === 'OK' && Array.isArray(data.routes) && data.routes.length > 0) {
                 const legs = data.routes[0]?.legs || [];
@@ -875,7 +943,7 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
         return payload;
     })();
 
-    GCP_CACHE.set(cacheKey, promise);
+    GCP_CACHE.set(cacheKey, { promise, expiresAt: Date.now() + GCP_CACHE_TTL_MS });
     return promise;
 }
 
@@ -1120,6 +1188,108 @@ function annotateHistoricalSegmentContext(segment, routeStops, stopMap) {
     );
 }
 
+function applyStraightLineWalkingEstimate(route) {
+    const originWalk = getFallbackRoute(
+        route.originLoc.lat, route.originLoc.lng, route.oLat, route.oLng, 'walking'
+    );
+    const destinationWalk = getFallbackRoute(
+        route.dLat, route.dLng, route.destLoc.lat, route.destLoc.lng, 'walking'
+    );
+    route.walkInfoOrigin = originWalk;
+    route.walkTimeOrigin = originWalk.duration;
+    route.walkInfoDest = destinationWalk;
+    route.walkTimeDest = destinationWalk.duration;
+    route.walkTimeTransfer = 0;
+    route.walkTimeTransfer2 = 0;
+    if (route.transfers >= 1) {
+        const transferWalk = getFallbackRoute(route.t1Lat, route.t1Lng, route.t2Lat, route.t2Lng, 'walking');
+        route.walkInfoTransfer = transferWalk;
+        route.walkTimeTransfer = transferWalk.duration;
+    }
+    if (route.transfers >= 2) {
+        const transferWalk = getFallbackRoute(route.t3Lat, route.t3Lng, route.t4Lat, route.t4Lng, 'walking');
+        route.walkInfoTransfer2 = transferWalk;
+        route.walkTimeTransfer2 = transferWalk.duration;
+    }
+}
+
+function isDefinitiveEarlyHistoricalRejection(route) {
+    const definitiveStatuses = new Set([
+        'route_stop_not_found',
+        'fallback_blocked_strict_route',
+        'fallback_blocked_loop_or_ambiguous_route',
+        'station_profile_missing',
+        'route_profile_missing',
+    ]);
+    return (route.segments || []).some((segment) => {
+        const result = segment.historicalSchedule;
+        if (!result || result.valid) return false;
+        if (definitiveStatuses.has(result.status)) return true;
+        if (result.reason === 'station_profile_missing_for_day_class') return true;
+        if (result.reason === 'outside_observed_slots') {
+            return Number(result.nearestSlotDeltaMin) > EARLY_HISTORICAL_BOUNDARY_GUARD_MIN;
+        }
+        if (result.reason !== 'outside_operation_window') return false;
+        const requested = Number(result.requestedMinute);
+        const start = timeStringToMinutes(result.startTime);
+        const end = timeStringToMinutes(result.endTime);
+        if (![requested, start, end].every(Number.isFinite)) return false;
+        return Math.min(
+            circularMinuteDelta(requested, start),
+            circularMinuteDelta(requested, end)
+        ) > EARLY_HISTORICAL_BOUNDARY_GUARD_MIN;
+    });
+}
+
+async function earlyFilterPlannedCandidates(candidates, options = {}) {
+    if (options.timeMode === 'now' || candidates.length === 0) {
+        return { candidates, rejectedCount: 0 };
+    }
+    const schedule = await loadKmbOperationSchedule();
+    if (!schedule) return { candidates, rejectedCount: 0 };
+
+    const plannedAnchorTime = buildPlannedDateTime(options.dateValue, options.timeValue, options.now);
+    const retained = [];
+    for (const route of candidates) {
+        applyStraightLineWalkingEstimate(route);
+        const timingValid = options.timeMode === 'leave'
+            ? applyLeaveTiming(route, plannedAnchorTime)
+            : applyArriveTiming(route, plannedAnchorTime, options.now);
+        if (!timingValid) continue;
+        const historicalValid = await validateRouteHistoricalSchedule(route, {
+            allowSparseDataFallback: options.allowSparseHistoricalFallback,
+            requestedDateTime: plannedAnchorTime,
+            logValidation: false,
+        });
+        if (historicalValid || !isDefinitiveEarlyHistoricalRejection(route)) retained.push(route);
+    }
+    return { candidates: retained, rejectedCount: candidates.length - retained.length };
+}
+
+async function earlyFilterNowCandidates(candidates, now, strictEtaOnly) {
+    if (!strictEtaOnly || candidates.length === 0) {
+        return { candidates, rejectedCount: 0 };
+    }
+    const decisions = await Promise.all(candidates.map(async (route) => {
+        const firstSegment = route.segments?.[0];
+        if (!firstSegment) return false;
+        const etaRows = await fetchSegmentETA(firstSegment);
+        return getActiveEtas(etaRows, now).length > 0;
+    }));
+    const retained = candidates.filter((_, index) => decisions[index]);
+    return { candidates: retained, rejectedCount: candidates.length - retained.length };
+}
+
+function shouldLogPlanningDebug() {
+    try {
+        const hostname = String(window?.location?.hostname || '').toLowerCase();
+        return hostname === 'localhost' || hostname === '127.0.0.1' ||
+            window?.localStorage?.getItem('kmbPlanningDebug') === '1';
+    } catch {
+        return false;
+    }
+}
+
 function compareRouteCandidates(a, b) {
     const confidenceDelta = (b.historicalConfidenceScore || 0) - (a.historicalConfidenceScore || 0);
     if (confidenceDelta !== 0) return confidenceDelta;
@@ -1135,7 +1305,15 @@ function compareRouteCandidates(a, b) {
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 async function findRoutes(params) {
     const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, gcpKey, onProgress } = params;
-    clearETACache();
+    const planningStartedAt = Date.now();
+    const requestStatsBefore = requestStatsSnapshot();
+    const stageTimings = {};
+    let stageStartedAt = planningStartedAt;
+    const finishStage = (name) => {
+        const now = Date.now();
+        stageTimings[name] = now - stageStartedAt;
+        stageStartedAt = now;
+    };
 
     // Build spatial grid once
     const grid = buildSpatialGrid(stopMap);
@@ -1205,6 +1383,7 @@ async function findRoutes(params) {
 
     const found = [];
     const dedupSeen = new Set();
+    const foundByDedupKey = new Map();
 
     // ?€?€ DIRECT routes (ORIGIN ??DEST, same routeKey, oIdx < dIdx) 
     onProgress?.('Finding direct routes...');
@@ -1226,6 +1405,7 @@ async function findRoutes(params) {
             oLat: orig.oStop.lat, oLng: orig.oStop.lng, oDist: orig.oStop.distance,
             dLat: dest.dStop.lat, dLng: dest.dStop.lng, dDist: dest.dStop.distance,
         });
+        foundByDedupKey.set(dk, found[found.length - 1]);
     }
 
     // ?€?€ 1-TRANSFER routes
@@ -1258,7 +1438,7 @@ async function findRoutes(params) {
 
                     if (dedupSeen.has(dk)) {
                         // Replace if better score
-                        const existing = found.find(f => f.dedupKey === dk);
+                        const existing = foundByDedupKey.get(dk);
                         if (existing && hScore < existing._hScore) {
                             existing._hScore = hScore;
                             existing.segments[0].stops = seg1Stops;
@@ -1291,6 +1471,7 @@ async function findRoutes(params) {
                         t1Lat: transferStop.lat, t1Lng: transferStop.lng,
                         t2Lat: nb.lat, t2Lng: nb.lng,
                     });
+                    foundByDedupKey.set(dk, found[found.length - 1]);
                 }
             }
         }
@@ -1333,6 +1514,7 @@ async function findRoutes(params) {
                     t3Lat: dropStop.lat, t3Lng: dropStop.lng,
                     t4Lat: nb3.lat, t4Lng: nb3.lng,
                 });
+                foundByDedupKey.set(dk, found[found.length - 1]);
             }
         }
     }
@@ -1371,12 +1553,23 @@ async function findRoutes(params) {
     }
 
     // ?€?€ Parallel GCP walking times
-    if (timeMode !== 'now') {
-        loadKmbOperationSchedule();
-    }
+    finishStage('candidateGeneration');
+    const now = new Date();
+    const earlyFilter = await earlyFilterPlannedCandidates(candidates, {
+        timeMode,
+        dateValue,
+        timeValue,
+        now,
+        allowSparseHistoricalFallback,
+    });
+    const earlyNowFilter = timeMode === 'now'
+        ? await earlyFilterNowCandidates(earlyFilter.candidates, now, strictEtaOnly)
+        : { candidates: earlyFilter.candidates, rejectedCount: 0 };
+    const networkCandidates = earlyNowFilter.candidates;
+    finishStage('earlyServiceFilter');
 
     onProgress?.('Calculating walking times...');
-    await Promise.all(candidates.map(async route => {
+    await Promise.all(networkCandidates.map(async route => {
         const [wO, wD] = await Promise.all([
             fetchGCPRoute(originLoc.lat, originLoc.lng, route.oLat, route.oLng, 'walking', [], gcpKey),
             fetchGCPRoute(route.dLat, route.dLng, destLoc.lat, destLoc.lng, 'walking', [], gcpKey),
@@ -1394,13 +1587,13 @@ async function findRoutes(params) {
             route.walkInfoTransfer2 = tw2; route.walkTimeTransfer2 = tw2.duration;
         }
     }));
+    finishStage('walkingEnrichment');
 
     // ?€?€ ETA filter + accurate time calculation
     onProgress?.('Checking scheduled services...');
-    const now = new Date();
     const filteredCandidates = [];
 
-    await Promise.all(candidates.map(async route => {
+    await Promise.all(networkCandidates.map(async route => {
         const isValid = await applyRouteTiming(route, {
             timeMode,
             dateValue,
@@ -1411,6 +1604,7 @@ async function findRoutes(params) {
         });
         if (isValid) filteredCandidates.push(route);
     }));
+    finishStage('serviceValidation');
 
     // ?€?€ Final sort: time ??transfers ??walk
     if (filteredCandidates.length > 0) {
@@ -1438,10 +1632,43 @@ async function findRoutes(params) {
         filteredCandidates.length = 0;
         filteredCandidates.push(...refinedCandidates);
     }
+    finishStage('rideRefinement');
 
     filteredCandidates.sort(compareRouteCandidates);
+    finishStage('finalSort');
 
-    return { filteredCandidates: filteredCandidates.slice(0, MAX_FINAL), originStops, destStops };
+    const requestDelta = requestStatsDelta(requestStatsBefore);
+    const finalCandidates = filteredCandidates.slice(0, MAX_FINAL);
+    const slowestStep = Object.entries(stageTimings)
+        .sort((a, b) => b[1] - a[1])[0] || ['none', 0];
+    LAST_PLANNING_DEBUG_SUMMARY = {
+        timeMode,
+        totalMs: Date.now() - planningStartedAt,
+        stagesMs: stageTimings,
+        slowestStep: { name: slowestStep[0], durationMs: slowestStep[1] },
+        candidatesGenerated: found.length,
+        candidatesShortlisted: candidates.length,
+        earlyHistoricalRejected: earlyFilter.rejectedCount,
+        earlyLiveEtaRejected: earlyNowFilter.rejectedCount,
+        candidatesAfterEarlyFilter: networkCandidates.length,
+        candidatesAfterServiceValidation: filteredCandidates.length,
+        finalCandidateCount: finalCandidates.length,
+        externalRequestCount: requestDelta.gcpNetworkRequests +
+            requestDelta.etaNetworkRequests +
+            requestDelta.historicalNetworkRequests,
+        requests: requestDelta,
+    };
+    if (shouldLogPlanningDebug()) {
+        console.debug('[KMB planning performance]', LAST_PLANNING_DEBUG_SUMMARY);
+    }
+
+    return { filteredCandidates: finalCandidates, originStops, destStops, debugSummary: LAST_PLANNING_DEBUG_SUMMARY };
+}
+
+function getLastPlanningDebugSummary() {
+    return LAST_PLANNING_DEBUG_SUMMARY
+        ? JSON.parse(JSON.stringify(LAST_PLANNING_DEBUG_SUMMARY))
+        : null;
 }
 
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1460,6 +1687,7 @@ window.routeEngine = {
     applyRouteTiming,
     validateSegmentHistoricalSchedule,
     compareRouteCandidates,
+    getLastPlanningDebugSummary,
     STRICT_STOP_LEVEL_ROUTES,
 };
 
