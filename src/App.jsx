@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { publishApiBaseUrl, toApiUrl } from './utils/apiBase.js';
-import { createLatestRequestTracker, loadKmbPayloads } from './utils/routePlanningRequests.js';
+import {
+  createLatestRequestTracker,
+  filterRouteOptionsByGoogleTransitPermission,
+  loadKmbPayloads,
+} from './utils/routePlanningRequests.js';
 
 publishApiBaseUrl();
 
@@ -2151,12 +2155,16 @@ const App = () => {
   }
 
   const displayedResults = useMemo(() => {
-    if (!strictEtaOnly || timeMode !== 'now') return results;
-    return results.filter((route) =>
+    const permittedResults = filterRouteOptionsByGoogleTransitPermission(
+      results,
+      allowFallbackNonKmb,
+    );
+    if (!strictEtaOnly || timeMode !== 'now') return permittedResults;
+    return permittedResults.filter((route) =>
       isFallbackRoute(route) ||
       (route.segments || []).every((seg, index) => hasUsableNowTiming(seg, index)),
     );
-  }, [results, strictEtaOnly, timeMode]);
+  }, [allowFallbackNonKmb, results, strictEtaOnly, timeMode]);
 
   const displayedResultCards = useMemo(() => {
     const groups = new Map();
@@ -3104,7 +3112,10 @@ const App = () => {
           },
         });
         if (!isCurrentSearch()) return;
-        filteredCandidates = routeSearch.filteredCandidates || [];
+        filteredCandidates = filterRouteOptionsByGoogleTransitPermission(
+          routeSearch.filteredCandidates,
+          false,
+        );
         engineDebugSummary = routeSearch.debugSummary || null;
       } catch (err) {
         kmbSearchError = err;
@@ -3159,7 +3170,10 @@ const App = () => {
             googleAlternatives = gapRows.flat();
           }
 
-          finalResults = rankCombinedTransportOptions([...filteredCandidates, ...googleAlternatives]);
+          finalResults = filterRouteOptionsByGoogleTransitPermission(
+            rankCombinedTransportOptions([...filteredCandidates, ...googleAlternatives]),
+            searchAllowFallback,
+          );
           if (filteredCandidates.length === 0 && googleAlternatives.length === 0) {
             throw new Error(
               'No KMB route found, and Google Transit did not return a usable alternative.',
@@ -3213,6 +3227,10 @@ const App = () => {
         }
       }
 
+      finalResults = filterRouteOptionsByGoogleTransitPermission(
+        finalResults,
+        searchAllowFallback,
+      );
       if (isCurrentSearch()) {
         setResults(finalResults);
         setIsSearchOpen(false);
@@ -3234,6 +3252,19 @@ const App = () => {
         setIsLoading(false);
         setLoadingStatus('');
       }
+    }
+  };
+
+  const setGoogleTransitPermission = (enabled) => {
+    setAllowFallbackNonKmb(enabled);
+    if (enabled) return;
+    setResults((current) => filterRouteOptionsByGoogleTransitPermission(current, false));
+    if (isFallbackRoute(selectedRoute)) {
+      selectedEtaRequestRef.current += 1;
+      setSelectedRoute(null);
+      clearMapGraphics();
+      clearRouteOverlay();
+      clearStationLabel();
     }
   };
 
@@ -4009,7 +4040,7 @@ const App = () => {
               <input
                 type="checkbox"
                 checked={allowFallbackNonKmb}
-                onChange={(e) => setAllowFallbackNonKmb(e.target.checked)}
+                onChange={(e) => setGoogleTransitPermission(e.target.checked)}
                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#E1251B] focus:ring-[#E1251B]"
               />
               <span className="leading-snug">
@@ -4155,7 +4186,7 @@ const App = () => {
               checked={allowFallbackNonKmb}
               onChange={(e) => {
                 const next = e.target.checked;
-                setAllowFallbackNonKmb(next);
+                setGoogleTransitPermission(next);
                 if (!isLoading) {
                   setTimeout(
                     () => handleSearch(null, {

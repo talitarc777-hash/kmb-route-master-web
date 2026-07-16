@@ -56,6 +56,31 @@ export function createLatestRequestTracker() {
   };
 }
 
+export function isGoogleTransitRouteOption(route) {
+  return route?.type === 'fallback_candidate' || route?.isFallback === true;
+}
+
+export function isKmbOnlyRouteOption(route) {
+  if (!route || isGoogleTransitRouteOption(route)) return false;
+
+  const declaredOperators = String(route.operator || '')
+    .split('+')
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+  if (declaredOperators.some((operator) => operator !== 'KMB')) return false;
+
+  const transitLegs = (route.legs || []).filter((leg) => {
+    const operator = String(leg?.operator || '').trim().toUpperCase();
+    return operator && operator !== 'WALK';
+  });
+  return transitLegs.every((leg) => String(leg.operator || '').trim().toUpperCase() === 'KMB');
+}
+
+export function filterRouteOptionsByGoogleTransitPermission(routes, googleTransitEnabled) {
+  const options = Array.isArray(routes) ? routes : [];
+  return googleTransitEnabled ? options : options.filter(isKmbOnlyRouteOption);
+}
+
 export function clearKmbStaticInflightForTests() {
   kmbStaticInflight.clear();
 }

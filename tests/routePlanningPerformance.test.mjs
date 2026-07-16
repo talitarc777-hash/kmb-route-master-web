@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import {
   clearKmbStaticInflightForTests,
   createLatestRequestTracker,
+  filterRouteOptionsByGoogleTransitPermission,
   loadKmbPayloads,
 } from '../src/utils/routePlanningRequests.js';
 
@@ -229,4 +230,35 @@ test('latest-request tracker marks an earlier result stale', () => {
   assert.equal(tracker.isCurrent(second), true);
   tracker.invalidate();
   assert.equal(tracker.isCurrent(second), false);
+});
+
+test('non-KMB route options require explicit Google Transit permission', () => {
+  const kmb = { id: 'kmb', segments: [{ route: '1' }] };
+  const citybusFallback = {
+    id: 'ctb-google',
+    type: 'fallback_candidate',
+    operator: 'CTB',
+    legs: [{ operator: 'CTB' }],
+  };
+  const hybridFallback = {
+    id: 'hybrid-google',
+    isFallback: true,
+    operator: 'KMB+CTB',
+    legs: [{ operator: 'KMB' }, { operator: 'CTB' }],
+  };
+  const undeclaredCitybus = {
+    id: 'unexpected-ctb',
+    operator: 'CTB',
+    legs: [{ operator: 'CTB' }],
+  };
+  const options = [kmb, citybusFallback, hybridFallback, undeclaredCitybus];
+
+  assert.deepEqual(
+    filterRouteOptionsByGoogleTransitPermission(options, false),
+    [kmb],
+  );
+  assert.deepEqual(
+    filterRouteOptionsByGoogleTransitPermission(options, true),
+    options,
+  );
 });
