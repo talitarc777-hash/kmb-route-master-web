@@ -37,6 +37,8 @@ const KMB_ROUTE_SLOT_TOLERANCE_MIN = 75;
 const KMB_HIGH_CONFIDENCE_MIN_SAMPLES = 30;
 const KMB_HIGH_CONFIDENCE_MIN_SAMPLE_DAYS = 7;
 const EARLY_HISTORICAL_BOUNDARY_GUARD_MIN = 30;
+const MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR = 8;
+const PREFERRED_TRANSFER_WALK_KM = 0.25;
 const STRICT_STOP_LEVEL_ROUTES = new Set(['110']);
 const SPATIAL_GRID_CACHE = new WeakMap();
 const REQUEST_STATS = {
@@ -1290,14 +1292,56 @@ function shouldLogPlanningDebug() {
     }
 }
 
+function retainTransferVariants(candidates, limit = MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR) {
+    const groups = new Map();
+    for (const candidate of candidates || []) {
+        const key = candidate.routePairKey || candidate.dedupKey;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(candidate);
+    }
+
+    const retained = [];
+    for (const group of groups.values()) {
+        const byHeuristic = [...group].sort((a, b) => (a._hScore || 0) - (b._hScore || 0));
+        const byProgress = [...group].sort(
+            (a, b) => (a.transferOutIndex || 0) - (b.transferOutIndex || 0)
+        );
+        const priority = [
+            ...byHeuristic.slice(0, 4),
+            ...byProgress.slice(0, 2),
+            ...byProgress.slice(-2),
+            ...byHeuristic,
+        ];
+        const seen = new Set();
+        for (const candidate of priority) {
+            if (seen.has(candidate.dedupKey)) continue;
+            seen.add(candidate.dedupKey);
+            retained.push(candidate);
+            if (seen.size >= limit) break;
+        }
+    }
+    return retained;
+}
+
 function compareRouteCandidates(a, b) {
     const confidenceDelta = (b.historicalConfidenceScore || 0) - (a.historicalConfidenceScore || 0);
     if (confidenceDelta !== 0) return confidenceDelta;
     const estimatedTimeDelta = a.estimatedTime - b.estimatedTime;
     if (Math.abs(estimatedTimeDelta) > 5) return estimatedTimeDelta;
     if (a.transfers !== b.transfers) return a.transfers - b.transfers;
-    return ((a.walkTimeOrigin || 0) + (a.walkTimeDest || 0)) -
-        ((b.walkTimeOrigin || 0) + (b.walkTimeDest || 0));
+    const sameOneTransferPair = a.transfers === 1 &&
+        a.routePairKey && a.routePairKey === b.routePairKey;
+    const bothReasonableTransferWalks = Number(a.transferWalkDistanceKm) <= PREFERRED_TRANSFER_WALK_KM &&
+        Number(b.transferWalkDistanceKm) <= PREFERRED_TRANSFER_WALK_KM;
+    if (sameOneTransferPair && bothReasonableTransferWalks) {
+        const progressDelta = Number(a.transferOutIndex) - Number(b.transferOutIndex);
+        if (Number.isFinite(progressDelta) && progressDelta !== 0) return progressDelta;
+    }
+    const totalWalk = (route) => (route.walkTimeOrigin || 0) +
+        (route.walkTimeDest || 0) +
+        (route.walkTimeTransfer || 0) +
+        (route.walkTimeTransfer2 || 0);
+    return totalWalk(a) - totalWalk(b);
 }
 
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1430,9 +1474,11 @@ async function findRoutes(params) {
 
                     const seg1Stops = orig.stops.slice(orig.oIdx, i + 1);
                     const seg2Stops = dest.stops.slice(dest.transferIdx, dest.dIdx + 1);
-                    const dk = `1t|${r1Key}->${dest.routeKey}`;
+                    const routePairKey = `1t|${r1Key}->${dest.routeKey}`;
+                    const dk = `${routePairKey}|${transferStopId}->${nb.id}`;
 
-                    // Only keep one candidate per route-pair; pick best by heuristic
+                    // Keep distinct physical transfer points; a bounded diverse subset is
+                    // retained below so live ETA can choose between shared-corridor options.
                     const hScore = seg1Stops.length * RIDE_MIN_PER_STOP + seg2Stops.length * RIDE_MIN_PER_STOP
                         + orig.oStop.distance * 12 + dest.dStop.distance * 12 + nb.distance * 10;
 
@@ -1452,6 +1498,9 @@ async function findRoutes(params) {
                             existing.dLat = dest.dStop.lat; existing.dLng = dest.dStop.lng; existing.dDist = dest.dStop.distance;
                             existing.t1Lat = transferStop.lat; existing.t1Lng = transferStop.lng;
                             existing.t2Lat = nb.lat; existing.t2Lng = nb.lng;
+                            existing.transferOutIndex = i;
+                            existing.transferInIndex = dest.transferIdx;
+                            existing.transferWalkDistanceKm = nb.distance;
                         }
                         continue;
                     }
@@ -1460,7 +1509,10 @@ async function findRoutes(params) {
                     found.push({
                         id: `t1-${found.length}`, transfers: 1,
                         totalStops: seg1Stops.length + seg2Stops.length,
-                        dedupKey: dk, _hScore: hScore,
+                        dedupKey: dk, routePairKey, _hScore: hScore,
+                        transferOutIndex: i,
+                        transferInIndex: dest.transferIdx,
+                        transferWalkDistanceKm: nb.distance,
                         segments: [
                             { route: orig.route.route, bound: orig.route.bound, service_type: orig.route.service_type, routeKey: r1Key, fromStop: orig.oStop.id, toStop: transferStopId, stops: seg1Stops, routeInfo: routeMap[r1Key] },
                             { route: dest.route.route, bound: dest.route.bound, service_type: dest.route.service_type, routeKey: dest.routeKey, fromStop: nb.id, toStop: dest.dStop.id, stops: seg2Stops, routeInfo: routeMap[dest.routeKey] },
@@ -1481,7 +1533,14 @@ async function findRoutes(params) {
     // Seed from 1-transfer results. At the dropoff of seg2, look for a 3rd leg
     // that reaches the destination. Same grid trick.
     onProgress?.('Finding 2-transfer routes...');
-    const oneTransfers = found.filter(f => f.transfers === 1);
+    const directCandidates = found.filter((candidate) => candidate.transfers === 0);
+    const retainedOneTransferCandidates = retainTransferVariants(
+        found.filter((candidate) => candidate.transfers === 1)
+    );
+    found.length = 0;
+    found.push(...directCandidates, ...retainedOneTransferCandidates);
+
+    const oneTransfers = retainedOneTransferCandidates;
     for (const parent of oneTransfers.slice(0, 40)) { // cap seeds, not exploration
         const seg2 = parent.segments[1];
         const dropStop = stopMap[seg2.toStop];
@@ -1535,17 +1594,23 @@ async function findRoutes(params) {
 
     // Take top 200 unique candidates for GCP + ETA enrichment
     const seenForGCP = new Set();
-    const originRouteCount = new Map();
+    const originRoutePairs = new Map();
+    const routePairVariantCount = new Map();
     const candidates = [];
     for (const c of found) {
         if (!seenForGCP.has(c.dedupKey)) {
             const origR = c.segments[0].routeKey || c.segments[0].route;
-            const count = originRouteCount.get(origR) || 0;
+            const pairKey = c.routePairKey || c.dedupKey;
+            const pairs = originRoutePairs.get(origR) || new Set();
+            const variantCount = routePairVariantCount.get(pairKey) || 0;
 
-            // Limit to max 6 unique combinations originating from the same bus line
-            if (count < 6) {
+            // Limit route combinations per origin while preserving several transfer points
+            // for the same pair until ETA and walking-time validation can rank them.
+            if ((pairs.has(pairKey) || pairs.size < 6) && variantCount < MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR) {
                 seenForGCP.add(c.dedupKey);
-                originRouteCount.set(origR, count + 1);
+                pairs.add(pairKey);
+                originRoutePairs.set(origR, pairs);
+                routePairVariantCount.set(pairKey, variantCount + 1);
                 candidates.push(c);
                 if (candidates.length >= 200) break;
             }
@@ -1638,7 +1703,14 @@ async function findRoutes(params) {
     finishStage('finalSort');
 
     const requestDelta = requestStatsDelta(requestStatsBefore);
-    const finalCandidates = filteredCandidates.slice(0, MAX_FINAL);
+    const selectedRoutePairs = new Set();
+    const rankedUniqueCandidates = filteredCandidates.filter((candidate) => {
+        const key = candidate.routePairKey || candidate.dedupKey;
+        if (selectedRoutePairs.has(key)) return false;
+        selectedRoutePairs.add(key);
+        return true;
+    });
+    const finalCandidates = rankedUniqueCandidates.slice(0, MAX_FINAL);
     const slowestStep = Object.entries(stageTimings)
         .sort((a, b) => b[1] - a[1])[0] || ['none', 0];
     LAST_PLANNING_DEBUG_SUMMARY = {

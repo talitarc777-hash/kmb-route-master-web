@@ -171,6 +171,59 @@ test('Now search rejects a route with no live ETA before Google enrichment', asy
   assert.equal(urls.some((url) => url.includes('/api/google/')), false);
 });
 
+test('shared-corridor transfers keep KT609-like early options until live ranking', async () => {
+  const nowMs = Date.now();
+  const etaAt = (minutes) => new Date(nowMs + minutes * 60_000).toISOString();
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    if (value.includes('/eta/O/671/1')) return jsonResponse({ data: [{ eta: etaAt(5) }] });
+    if (value.includes('/eta/B1/269C/1')) return jsonResponse({ data: [{ eta: etaAt(15) }] });
+    if (value.includes('/eta/B2/269C/1')) return jsonResponse({ data: [{ eta: etaAt(18) }] });
+    if (value.includes('/api/google/')) return jsonResponse({ status: 'ZERO_RESULTS', routes: [] });
+    throw new Error(`Unexpected network request: ${url}`);
+  });
+  const route671 = { route: '671', bound: 'I', service_type: '1' };
+  const route269c = { route: '269C', bound: 'I', service_type: '1' };
+  const stopMap = {
+    O: { lat: 22.291733, lng: 114.202568, name_en: 'Island Place' },
+    K1: { lat: 22.309933, lng: 114.229647, name_en: 'Kwun Tong Law Courts (KT609)' },
+    B1: { lat: 22.309291, lng: 114.228462, name_en: 'Shing Yip Street Rest Garden (KT446)' },
+    K2: { lat: 22.328563, lng: 114.212227, name_en: 'Kai Tai Court (KT677)' },
+    B2: { lat: 22.328468, lng: 114.212309, name_en: 'Kai Tai Court (KT676)' },
+    D: { lat: 22.4467, lng: 114.0030, name_en: 'Tin Shing' },
+  };
+
+  const result = await engine.findRoutes({
+    originLoc: { lat: stopMap.O.lat, lng: stopMap.O.lng },
+    destLoc: { lat: stopMap.D.lat, lng: stopMap.D.lng },
+    stopMap,
+    routeMap: {
+      '671|I|1': { ...route671, co: 'KMB', freq: '10' },
+      '269C|I|1': { ...route269c, co: 'KMB', freq: '10' },
+    },
+    routeStops: {
+      '671|I|1': ['O', 'K1', 'K2'],
+      '269C|I|1': ['B1', 'B2', 'D'],
+    },
+    stopRoutes: {
+      O: [route671], K1: [route671], K2: [route671],
+      B1: [route269c], B2: [route269c], D: [route269c],
+    },
+    timeMode: 'now',
+    dateValue: '',
+    timeValue: '',
+    excludedRoutesText: '',
+    strictEtaOnly: true,
+    allowSparseHistoricalFallback: false,
+  });
+
+  assert.equal(result.debugSummary.candidatesGenerated, 2);
+  assert.equal(result.debugSummary.candidatesAfterServiceValidation, 2);
+  assert.equal(result.filteredCandidates.length, 1);
+  assert.equal(result.filteredCandidates[0].segments[0].toStop, 'K1');
+  assert.equal(result.filteredCandidates[0].segments[1].fromStop, 'B1');
+});
+
 test('duplicate route records produce one candidate and reuse enrichment requests', async () => {
   const operationSchedule = schedule();
   const urls = [];
