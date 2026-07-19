@@ -128,6 +128,146 @@ test('Now timing uses live ETA while leave-at and arrive-at timing never request
   assert.equal(etaRequests, 1);
 });
 
+test('Now timing keeps a future transfer outside the live ETA horizon when its stop is operating', async () => {
+  const now = new Date(2026, 6, 15, 7, 50, 0);
+  const operationSchedule = {
+    route_stops: {
+      '2|I|1|B': {
+        weekday: { s: '06:00', e: '23:00', n: 20, d: 10, a: ['06:00'] },
+      },
+    },
+    routes: {
+      '2|I|1': {
+        weekday: { s: '06:00', e: '23:00', n: 100, d: 10, a: ['06:00'] },
+      },
+    },
+  };
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    if (value.includes('/eta/A/1/1')) {
+      return jsonResponse({
+        data: [{ eta: new Date(now.getTime() + 10 * 60_000).toISOString() }],
+      });
+    }
+    if (value.includes('/eta/B/2/1')) return jsonResponse({ data: [] });
+    if (value.includes('kmb_operation_time_slots')) return jsonResponse(operationSchedule);
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const makeSegment = (route, fromStop, toStop) => ({
+    route,
+    bound: 'I',
+    service_type: '1',
+    fromStop,
+    toStop,
+    stops: [fromStop, toStop],
+    routeInfo: { co: 'KMB', freq: '10' },
+    routeStopRecordExists: true,
+    boardingStopSequence: 1,
+    isLoopOrAmbiguousRoute: false,
+  });
+  const route = {
+    walkTimeOrigin: 0,
+    walkTimeDest: 0,
+    transferWalkTimes: [0],
+    segments: [
+      makeSegment('1', 'A', 'B'),
+      makeSegment('2', 'B', 'C'),
+    ],
+  };
+
+  assert.equal(await engine.applyRouteTiming(route, { timeMode: 'now', now }), true);
+  assert.equal(route.segments[0].hasActiveEta, true);
+  assert.equal(route.segments[1].hasActiveEta, false);
+  assert.equal(
+    route.segments[1].timingFallbackReason,
+    'transfer_eta_unavailable_historical_schedule',
+  );
+  assert.equal(route.segments[1].historicalSchedule.status, 'operating_station_level');
+});
+
+test('Now shortlist prioritizes an operating transfer over faster inactive route pairs', async () => {
+  const period = { s: '00:00', e: '23:59', n: 50, d: 10, a: ['12:00'] };
+  const activeEveryDay = {
+    weekday: period,
+    saturday: period,
+    sunday_public_holiday: period,
+  };
+  const inactiveEveryDay = {
+    weekday: null,
+    saturday: null,
+    sunday_public_holiday: null,
+  };
+  const operationSchedule = { route_stops: {}, routes: {} };
+  for (let i = 0; i < 7; i++) {
+    const profile = i === 6 ? activeEveryDay : inactiveEveryDay;
+    operationSchedule.route_stops[`D${i}|I|1|T${i}`] = profile;
+    operationSchedule.routes[`D${i}|I|1`] = profile;
+  }
+
+  const nowMs = Date.now();
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    if (value.includes('kmb_operation_time_slots')) return jsonResponse(operationSchedule);
+    if (value.includes('/eta/O/R/1')) {
+      return jsonResponse({
+        data: [{ eta: new Date(nowMs + 5 * 60_000).toISOString() }],
+      });
+    }
+    if (value.includes('/eta/')) return jsonResponse({ data: [] });
+    if (value.includes('/api/google/')) {
+      return jsonResponse({ status: 'ZERO_RESULTS', routes: [] });
+    }
+    throw new Error('Unexpected network request: ' + url);
+  });
+
+  const originRoute = { route: 'R', bound: 'O', service_type: '1' };
+  const stopMap = {
+    O: { lat: 22.2000, lng: 114.1000, name_en: 'Origin' },
+    D: { lat: 22.2800, lng: 114.1000, name_en: 'Destination' },
+  };
+  const routeMap = {
+    'R|O|1': { ...originRoute, co: 'KMB', freq: '10' },
+  };
+  const routeStops = { 'R|O|1': ['O'] };
+  const stopRoutes = { O: [originRoute], D: [] };
+
+  for (let i = 0; i < 7; i++) {
+    const stopId = `T${i}`;
+    const destRoute = { route: `D${i}`, bound: 'I', service_type: '1' };
+    stopMap[stopId] = {
+      lat: 22.2100 + i * 0.0100,
+      lng: 114.1000,
+      name_en: stopId,
+    };
+    routeStops['R|O|1'].push(stopId);
+    routeMap[`D${i}|I|1`] = { ...destRoute, co: 'KMB', freq: '10' };
+    routeStops[`D${i}|I|1`] = [stopId, 'D'];
+    stopRoutes[stopId] = [originRoute, destRoute];
+    stopRoutes.D.push(destRoute);
+  }
+
+  const result = await engine.findRoutes({
+    originLoc: { lat: stopMap.O.lat, lng: stopMap.O.lng },
+    destLoc: { lat: stopMap.D.lat, lng: stopMap.D.lng },
+    stopMap,
+    routeMap,
+    routeStops,
+    stopRoutes,
+    timeMode: 'now',
+    dateValue: '',
+    timeValue: '',
+    excludedRoutesText: '',
+    strictEtaOnly: true,
+    allowSparseHistoricalFallback: false,
+  });
+
+  assert.ok(result.filteredCandidates.length > 0);
+  assert.equal(
+    result.filteredCandidates[0].segments.map((segment) => segment.route).join(' -> '),
+    'R -> D6',
+  );
+});
+
 test('planned search rejects a clearly inactive route before Google enrichment', async () => {
   const urls = [];
   const engine = loadEngine(async (url) => {
@@ -171,11 +311,55 @@ test('Now search rejects a route with no live ETA before Google enrichment', asy
   assert.equal(urls.some((url) => url.includes('/api/google/')), false);
 });
 
+test('does not create meaningless same-number transfers such as 116 to 116', async () => {
+  const urls = [];
+  const engine = loadEngine(async (url) => {
+    urls.push(String(url));
+    throw new Error(`Unexpected network request: ${url}`);
+  });
+  const inbound116 = { route: '116', bound: 'I', service_type: '1' };
+  const outbound116 = { route: '116', bound: 'O', service_type: '1' };
+  const stopMap = {
+    O: { lat: 22.3000, lng: 114.1000, name_en: 'Origin' },
+    T: { lat: 22.3100, lng: 114.1100, name_en: 'Alight' },
+    B: { lat: 22.3101, lng: 114.1101, name_en: 'Board' },
+    D: { lat: 22.3200, lng: 114.1200, name_en: 'Destination' },
+  };
+
+  const result = await engine.findRoutes({
+    originLoc: { lat: stopMap.O.lat, lng: stopMap.O.lng },
+    destLoc: { lat: stopMap.D.lat, lng: stopMap.D.lng },
+    stopMap,
+    routeMap: {
+      '116|I|1': { ...inbound116, co: 'KMB', freq: '10' },
+      '116|O|1': { ...outbound116, co: 'KMB', freq: '10' },
+    },
+    routeStops: {
+      '116|I|1': ['O', 'T'],
+      '116|O|1': ['B', 'D'],
+    },
+    stopRoutes: {
+      O: [inbound116], T: [inbound116], B: [outbound116], D: [outbound116],
+    },
+    timeMode: 'now',
+    dateValue: '',
+    timeValue: '',
+    excludedRoutesText: '',
+    strictEtaOnly: true,
+    allowSparseHistoricalFallback: false,
+  });
+
+  assert.equal(result.filteredCandidates.length, 0);
+  assert.equal(result.debugSummary.candidatesGenerated, 0);
+  assert.equal(urls.length, 0);
+});
+
 test('shared-corridor transfers keep KT609-like early options until live ranking', async () => {
   const nowMs = Date.now();
   const etaAt = (minutes) => new Date(nowMs + minutes * 60_000).toISOString();
   const engine = loadEngine(async (url) => {
     const value = String(url);
+    if (value.includes('kmb_operation_time_slots')) return jsonResponse({});
     if (value.includes('/eta/O/671/1')) return jsonResponse({ data: [{ eta: etaAt(5) }] });
     if (value.includes('/eta/B1/269C/1')) return jsonResponse({ data: [{ eta: etaAt(15) }] });
     if (value.includes('/eta/B2/269C/1')) return jsonResponse({ data: [{ eta: etaAt(18) }] });

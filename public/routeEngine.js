@@ -1014,9 +1014,7 @@ async function applyNowTiming(route, now, options = {}) {
             );
             if (canUseScheduledTransferFallback) {
                 schedule = schedule || await loadKmbOperationSchedule();
-                const historicalResult = validateSegmentHistoricalSchedule(segment, boardTime, schedule, {
-                    requireObservedSlotMatch: true,
-                });
+                const historicalResult = validateSegmentHistoricalSchedule(segment, boardTime, schedule);
                 segment.historicalSchedule = historicalResult;
                 if (!historicalResult.valid) return false;
                 segment.timingFallbackReason = 'transfer_eta_unavailable_historical_schedule';
@@ -1282,6 +1280,32 @@ async function earlyFilterNowCandidates(candidates, now, strictEtaOnly) {
     return { candidates: retained, rejectedCount: candidates.length - retained.length };
 }
 
+async function rankNowCandidatesByTransferService(candidates, now, strictEtaOnly, allowSparseDataFallback) {
+    if (!strictEtaOnly || candidates.length === 0) return;
+    const transferCandidates = candidates.filter((route) => (route.segments || []).length > 1);
+    if (transferCandidates.length === 0) return;
+    const schedule = await loadKmbOperationSchedule();
+    if (!schedule) return;
+
+    for (const route of transferCandidates) {
+        applyLeaveTiming(route, now);
+        route._nowTransferScheduleRank = 0;
+        for (let i = 1; i < (route.segments || []).length; i++) {
+            const segment = route.segments[i];
+            const result = validateSegmentHistoricalSchedule(
+                segment,
+                segment.boardTime,
+                schedule,
+                { allowSparseDataFallback }
+            );
+            if (!result.valid) {
+                route._nowTransferScheduleRank = 1;
+                break;
+            }
+        }
+    }
+}
+
 function shouldLogPlanningDebug() {
     try {
         const hostname = String(window?.location?.hostname || '').toLowerCase();
@@ -1323,6 +1347,21 @@ function retainTransferVariants(candidates, limit = MAX_TRANSFER_VARIANTS_PER_RO
     return retained;
 }
 
+function normalizedRouteCode(value) {
+    return String(value || '').trim().toUpperCase();
+}
+
+function hasRepeatedRouteTransfer(route) {
+    const seen = new Set();
+    for (const segment of route?.segments || []) {
+        const code = normalizedRouteCode(segment?.route);
+        if (!code) continue;
+        if (seen.has(code)) return true;
+        seen.add(code);
+    }
+    return false;
+}
+
 function compareRouteCandidates(a, b) {
     const confidenceDelta = (b.historicalConfidenceScore || 0) - (a.historicalConfidenceScore || 0);
     if (confidenceDelta !== 0) return confidenceDelta;
@@ -1350,6 +1389,7 @@ function compareRouteCandidates(a, b) {
 async function findRoutes(params) {
     const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, gcpKey, onProgress } = params;
     const planningStartedAt = Date.now();
+    const now = new Date();
     const requestStatsBefore = requestStatsSnapshot();
     const stageTimings = {};
     let stageStartedAt = planningStartedAt;
@@ -1471,6 +1511,7 @@ async function findRoutes(params) {
                 const destMatches = destStopIndex.get(nb.id) || [];
                 for (const dest of destMatches) {
                     if (dest.routeKey === r1Key) continue; // avoid same route transfer
+                    if (normalizedRouteCode(dest.route?.route) === normalizedRouteCode(orig.route?.route)) continue;
 
                     const seg1Stops = orig.stops.slice(orig.oIdx, i + 1);
                     const seg2Stops = dest.stops.slice(dest.transferIdx, dest.dIdx + 1);
@@ -1545,12 +1586,16 @@ async function findRoutes(params) {
         const seg2 = parent.segments[1];
         const dropStop = stopMap[seg2.toStop];
         if (!dropStop) continue;
+        const usedRouteCodes = new Set(
+            parent.segments.map((segment) => normalizedRouteCode(segment.route))
+        );
 
         const nearby3 = nearbyFromGrid(grid, dropStop.lat, dropStop.lng, TRANSFER_WALK_KM);
         for (const nb3 of nearby3) {
             const destMatches3 = destStopIndex.get(nb3.id) || [];
             for (const dest3 of destMatches3) {
                 if (dest3.routeKey === seg2.routeKey) continue;
+                if (usedRouteCodes.has(normalizedRouteCode(dest3.route?.route))) continue;
 
                 const seg3Stops = dest3.stops.slice(dest3.transferIdx, dest3.dIdx + 1);
                 const dk = `2t|${parent.segments[0].routeKey}->${parent.segments[1].routeKey}->${dest3.routeKey}`;
@@ -1585,7 +1630,22 @@ async function findRoutes(params) {
     }
 
     // ?€?€ Initial heuristic sort (to prioritize for GCP/ETA enrichments)
+    // A transfer is commonly outside KMB's live ETA horizon. Prioritize candidates
+    // whose future legs are supported for this day and approximate boarding time,
+    // so inactive express services cannot consume the bounded shortlist.
+    if (timeMode === 'now') {
+        await rankNowCandidatesByTransferService(
+            found,
+            now,
+            strictEtaOnly,
+            allowSparseHistoricalFallback
+        );
+    }
+
     found.sort((a, b) => {
+        const transferServiceDelta = (a._nowTransferScheduleRank || 0) -
+            (b._nowTransferScheduleRank || 0);
+        if (transferServiceDelta !== 0) return transferServiceDelta;
         // Drastically reduce stop penalty: a highway route with 5 stops vs an express route with 25 stops 
         // often take the same time. The real penalty should be transfers and walking distance.
         const score = f => f.totalStops * 0.1 + f.transfers * 15 + ((f.oDist || 0) + (f.dDist || 0)) * 20;
@@ -1597,7 +1657,12 @@ async function findRoutes(params) {
     const originRoutePairs = new Map();
     const routePairVariantCount = new Map();
     const candidates = [];
+    let repeatedRouteCandidatesRejected = 0;
     for (const c of found) {
+        if (hasRepeatedRouteTransfer(c)) {
+            repeatedRouteCandidatesRejected += 1;
+            continue;
+        }
         if (!seenForGCP.has(c.dedupKey)) {
             const origR = c.segments[0].routeKey || c.segments[0].route;
             const pairKey = c.routePairKey || c.dedupKey;
@@ -1619,7 +1684,6 @@ async function findRoutes(params) {
 
     // ?€?€ Parallel GCP walking times
     finishStage('candidateGeneration');
-    const now = new Date();
     const earlyFilter = await earlyFilterPlannedCandidates(candidates, {
         timeMode,
         dateValue,
@@ -1722,6 +1786,7 @@ async function findRoutes(params) {
         candidatesShortlisted: candidates.length,
         earlyHistoricalRejected: earlyFilter.rejectedCount,
         earlyLiveEtaRejected: earlyNowFilter.rejectedCount,
+        repeatedRouteCandidatesRejected,
         candidatesAfterEarlyFilter: networkCandidates.length,
         candidatesAfterServiceValidation: filteredCandidates.length,
         finalCandidateCount: finalCandidates.length,
