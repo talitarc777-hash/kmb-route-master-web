@@ -496,9 +496,13 @@ test('KMB geometry cache separates partial and full stop sequences for one route
   );
 });
 
-test('KMB overlay direction switch keeps only the requested I or O variants', () => {
+test('KMB overlay keeps all variants for auto selection and filters manual I or O', () => {
   const variants = ['269B|I|1', '269B|I|2', '269B|O|1'];
 
+  assert.deepEqual(
+    filterKmbOverlayVariantsByDirection(variants, ''),
+    variants,
+  );
   assert.deepEqual(
     filterKmbOverlayVariantsByDirection(variants, 'I'),
     ['269B|I|1', '269B|I|2'],

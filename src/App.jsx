@@ -2126,7 +2126,8 @@ const App = () => {
   const [lastEtaRefreshAt, setLastEtaRefreshAt] = useState(null);
   const [refreshFeedback, setRefreshFeedback] = useState(null);
   const [overlayRouteNumber, setOverlayRouteNumber] = useState('');
-  const [overlayDirection, setOverlayDirection] = useState('I');
+  const [overlayDirection, setOverlayDirection] = useState('');
+  const [isOverlayDirectionManual, setIsOverlayDirectionManual] = useState(false);
   const [isOverlayLoading, setIsOverlayLoading] = useState(false);
   const [overlayFeedback, setOverlayFeedback] = useState(null);
 
@@ -3488,10 +3489,15 @@ const App = () => {
     return ranked[0]?.key || variantKeys[0];
   };
 
-  const drawFullKmbRouteOverlay = async (e, directionOverride = overlayDirection) => {
+  const drawFullKmbRouteOverlay = async (e, directionOverride = '') => {
     if (e?.preventDefault) e.preventDefault();
     const routeNumber = (overlayRouteNumber || routeNumberFromRoute(selectedRoute)).trim().toUpperCase();
-    const requestedDirection = String(directionOverride || overlayDirection).trim().toUpperCase();
+    const overrideDirection = String(directionOverride || '').trim().toUpperCase();
+    const requestedDirection = overrideDirection === 'I' || overrideDirection === 'O'
+      ? overrideDirection
+      : isOverlayDirectionManual
+        ? overlayDirection
+        : '';
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = routeOverlayLayerRef.current;
     const stopLayer = graphicsLayerRef.current;
@@ -3507,10 +3513,9 @@ const App = () => {
     try {
       const variantKeys = Object.keys(routeStopsRef.current || {})
         .filter((key) => key.split('|')[0]?.toUpperCase() === routeNumber);
-      const directionVariantKeys = filterKmbOverlayVariantsByDirection(
-        variantKeys,
-        requestedDirection,
-      );
+      const directionVariantKeys = requestedDirection
+        ? filterKmbOverlayVariantsByDirection(variantKeys, requestedDirection)
+        : variantKeys;
       const seenPatterns = new Set();
       const uniqueVariants = directionVariantKeys.filter((key) => {
         const pattern = (routeStopsRef.current[key] || []).join('>');
@@ -3654,6 +3659,7 @@ const App = () => {
         ).catch(() => {});
       }
       const direction = selectedVariant.split('|')[1] || '';
+      setOverlayDirection(direction);
       const destination = routeMapRef.current[selectedVariant]?.dest_en
         || routeMapRef.current[selectedVariant]?.dest_tc
         || '';
@@ -3672,6 +3678,7 @@ const App = () => {
 
   const changeOverlayDirection = (direction) => {
     setOverlayDirection(direction);
+    setIsOverlayDirectionManual(true);
     drawFullKmbRouteOverlay(null, direction);
   };
 
@@ -3737,6 +3744,7 @@ const App = () => {
     );
     const initialOverlayDirection = String(initialOverlaySegment?.bound || '').trim().toUpperCase();
     setOverlayRouteNumber(initialOverlayRouteNumber);
+    setIsOverlayDirectionManual(false);
     if (initialOverlayDirection === 'I' || initialOverlayDirection === 'O') {
       setOverlayDirection(initialOverlayDirection);
     }
@@ -4121,7 +4129,12 @@ const App = () => {
           <div className="flex items-center gap-2">
             <input
               value={overlayRouteNumber}
-              onChange={(e) => setOverlayRouteNumber(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                setOverlayRouteNumber(e.target.value.toUpperCase());
+                setOverlayDirection('');
+                setIsOverlayDirectionManual(false);
+                setOverlayFeedback(null);
+              }}
               placeholder="Bus route"
               className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black uppercase text-slate-700 outline-none focus:border-[#E1251B]"
             />
@@ -4144,7 +4157,7 @@ const App = () => {
           </div>
           <div className={'mt-2 flex items-center justify-between gap-2 px-1'}>
             <span className={'text-[10px] font-black uppercase tracking-wide text-slate-400'}>
-              Direction
+              Direction {isOverlayDirectionManual ? '(manual)' : '(auto)'}
             </span>
             <div
               className={'inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5'}
