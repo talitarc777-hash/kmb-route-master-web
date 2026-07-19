@@ -5,6 +5,7 @@ import {
   filterRouteOptionsByGoogleTransitPermission,
   loadKmbPayloads,
 } from './utils/routePlanningRequests.js';
+import { buildKmbGeometryCacheKey } from './utils/kmbGeometryCache.js';
 
 publishApiBaseUrl();
 
@@ -2871,7 +2872,7 @@ const App = () => {
   };
 
   const getKmbStopSequenceGeometry = (stopIds = [], cacheKey = '') => {
-    const key = cacheKey || stopIds.join('>');
+    const key = buildKmbGeometryCacheKey(stopIds, cacheKey);
     const cached = kmbRouteGeometryCacheRef.current.get(key);
     if (cached) return cached;
 
@@ -2894,12 +2895,12 @@ const App = () => {
     options = {},
   ) => {
     const fullRoute = options.fullRoute === true;
-    const baseKey = cacheKey || stopIds.join('>');
+    const baseKey = buildKmbGeometryCacheKey(stopIds, cacheKey);
     const key = `${fullRoute ? 'full' : 'segment'}|${baseKey}`;
     const cached = kmbRoadGeometryCacheRef.current.get(key);
     if (cached) return cached;
 
-    const local = getKmbStopSequenceGeometry(stopIds, baseKey);
+    const local = getKmbStopSequenceGeometry(stopIds, cacheKey);
     if (local.stops.length < 2) return local.geometry;
 
     try {
@@ -3643,8 +3644,10 @@ const App = () => {
       const destination = routeMapRef.current[selectedVariant]?.dest_en
         || routeMapRef.current[selectedVariant]?.dest_tc
         || '';
+      const selectedStopCount = (routeStopsRef.current[selectedVariant] || []).length;
       setOverlayFeedback(
-        `Showing ${routeNumber} ${direction}${destination ? ` toward ${destination}` : ''}`.trim(),
+        `Showing ${routeNumber} ${direction}${destination ? ` toward ${destination}` : ''}` +
+          ` · ${selectedStopCount} KMB stops`,
       );
     } catch (error) {
       console.error('Unable to draw full KMB route overlay:', error);

@@ -9,6 +9,7 @@ import {
   filterRouteOptionsByGoogleTransitPermission,
   loadKmbPayloads,
 } from '../src/utils/routePlanningRequests.js';
+import { buildKmbGeometryCacheKey } from '../src/utils/kmbGeometryCache.js';
 
 const engineSource = await readFile(new URL('../public/routeEngine.js', import.meta.url), 'utf8');
 
@@ -467,6 +468,29 @@ test('latest-request tracker marks an earlier result stale', () => {
   assert.equal(tracker.isCurrent(second), true);
   tracker.invalidate();
   assert.equal(tracker.isCurrent(second), false);
+});
+
+test('KMB geometry cache separates partial and full stop sequences for one route variant', () => {
+  const routeKey = '269B|I|1';
+  const selectedSegment = buildKmbGeometryCacheKey(
+    ['YT673', 'YT674B', 'YL232', 'YL234', 'TN201', 'TN206'],
+    routeKey,
+  );
+  const fullInboundRoute = buildKmbGeometryCacheKey(
+    ['HH902', 'HH321', 'HH978', 'YT629', 'YT632', 'YT102', 'YT109', 'YT112',
+      'YT114', 'YT133', 'YT673', 'YT674B', 'YL232', 'YL234', 'TN201', 'TN206',
+      'TN212', 'TN220', 'TN223', 'TN225', 'TN550', 'TN552', 'TN537', 'TN942'],
+    routeKey,
+  );
+
+  assert.notEqual(selectedSegment, fullInboundRoute);
+  assert.equal(
+    selectedSegment,
+    buildKmbGeometryCacheKey(
+      ['YT673', 'YT674B', 'YL232', 'YL234', 'TN201', 'TN206'],
+      routeKey,
+    ),
+  );
 });
 
 test('non-KMB route options require explicit Google Transit permission', () => {
