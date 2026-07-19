@@ -1429,6 +1429,24 @@ function compareRouteCandidates(a, b) {
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // MAIN ROUTE FINDER ??Bidirectional
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+function visibleRouteSequenceKey(candidate) {
+    const routeCodes = (candidate?.segments || [])
+        .map((segment) => normalizedRouteCode(segment?.route))
+        .filter(Boolean);
+    if (routeCodes.length > 0) return routeCodes.join('->');
+    return candidate?.routePairKey || candidate?.dedupKey || candidate?.id || '';
+}
+
+function deduplicateRankedRouteSequences(rankedCandidates) {
+    const seenSequences = new Set();
+    return (rankedCandidates || []).filter((candidate) => {
+        const sequenceKey = visibleRouteSequenceKey(candidate);
+        if (seenSequences.has(sequenceKey)) return false;
+        seenSequences.add(sequenceKey);
+        return true;
+    });
+}
+
 async function findRoutes(params) {
     const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, gcpKey, onProgress } = params;
     const planningStartedAt = Date.now();
@@ -1810,13 +1828,10 @@ async function findRoutes(params) {
     finishStage('finalSort');
 
     const requestDelta = requestStatsDelta(requestStatsBefore);
-    const selectedRoutePairs = new Set();
-    const rankedUniqueCandidates = filteredCandidates.filter((candidate) => {
-        const key = candidate.routePairKey || candidate.dedupKey;
-        if (selectedRoutePairs.has(key)) return false;
-        selectedRoutePairs.add(key);
-        return true;
-    });
+    // ETA/schedule ranking has already selected the most efficient transfer point.
+    // Display only that winner when other candidates show the same bus-number
+    // sequence but differ by route pattern metadata or overlapping transfer stop.
+    const rankedUniqueCandidates = deduplicateRankedRouteSequences(filteredCandidates);
     const finalCandidates = rankedUniqueCandidates.slice(0, MAX_FINAL);
     const slowestStep = Object.entries(stageTimings)
         .sort((a, b) => b[1] - a[1])[0] || ['none', 0];
@@ -1868,6 +1883,8 @@ window.routeEngine = {
     validateSegmentHistoricalSchedule,
     compareRouteCandidates,
     retainTransferVariants,
+    visibleRouteSequenceKey,
+    deduplicateRankedRouteSequences,
     getLastPlanningDebugSummary,
     STRICT_STOP_LEVEL_ROUTES,
 };

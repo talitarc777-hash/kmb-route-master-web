@@ -265,6 +265,58 @@ test('live transfer ETA can select a later overlap stop with an earlier final ar
   assert.equal(ranked[0], laterTransfer);
 });
 
+test('same bus sequence displays only its best overlapping transfer stop', () => {
+  const engine = loadEngine(async (url) => {
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const candidate = ({ id, routePairKey, transferStop, estimatedTime }) => ({
+    id,
+    routePairKey,
+    transfers: 1,
+    estimatedTime,
+    historicalConfidenceScore: 2,
+    transferWalkDistanceKm: 0.05,
+    walkTimeOrigin: 0,
+    walkTimeDest: 0,
+    walkTimeTransfer: 0,
+    segments: [
+      { route: '671', toStop: transferStop },
+      { route: '269C', fromStop: transferStop, waitMinutes: 3 },
+    ],
+  });
+  const slowerEarlyTransfer = candidate({
+    id: 'early',
+    routePairKey: '1t|671|I|1->269C|I|1',
+    transferStop: 'K1',
+    estimatedTime: 72,
+  });
+  const fasterLaterTransfer = candidate({
+    id: 'later',
+    routePairKey: '1t|671|I|2->269C|I|2',
+    transferStop: 'K2',
+    estimatedTime: 65,
+  });
+  const differentBusSequence = {
+    ...candidate({
+      id: 'different',
+      routePairKey: '1t|671|I|1->606|I|1',
+      transferStop: 'K3',
+      estimatedTime: 68,
+    }),
+    segments: [
+      { route: '671', toStop: 'K3' },
+      { route: '606', fromStop: 'K3', waitMinutes: 3 },
+    ],
+  };
+
+  const ranked = [slowerEarlyTransfer, differentBusSequence, fasterLaterTransfer]
+    .sort(engine.compareRouteCandidates);
+  const displayed = engine.deduplicateRankedRouteSequences(ranked);
+
+  assert.deepEqual(Array.from(displayed, (route) => route.id), ['later', 'different']);
+  assert.equal(displayed[0].segments[0].toStop, 'K2');
+});
+
 test('Now shortlist prioritizes an operating transfer over faster inactive route pairs', async () => {
   const period = { s: '00:00', e: '23:59', n: 50, d: 10, a: ['12:00'] };
   const activeEveryDay = {
