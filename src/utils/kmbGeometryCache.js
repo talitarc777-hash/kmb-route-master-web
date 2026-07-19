@@ -9,3 +9,12 @@ export function buildKmbGeometryCacheKey(stopIds = [], routeIdentity = '') {
     ? normalizedRouteIdentity + '|' + stopSequenceKey
     : stopSequenceKey;
 }
+
+export function filterKmbOverlayVariantsByDirection(variantKeys = [], direction = '') {
+  const normalizedDirection = String(direction || '').trim().toUpperCase();
+  const variants = Array.from(variantKeys || []);
+  if (normalizedDirection !== 'I' && normalizedDirection !== 'O') return variants;
+  return variants.filter(
+    (key) => String(key || '').split('|')[1]?.trim().toUpperCase() === normalizedDirection,
+  );
+}

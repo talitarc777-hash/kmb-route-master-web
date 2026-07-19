@@ -5,7 +5,10 @@ import {
   filterRouteOptionsByGoogleTransitPermission,
   loadKmbPayloads,
 } from './utils/routePlanningRequests.js';
-import { buildKmbGeometryCacheKey } from './utils/kmbGeometryCache.js';
+import {
+  buildKmbGeometryCacheKey,
+  filterKmbOverlayVariantsByDirection,
+} from './utils/kmbGeometryCache.js';
 
 publishApiBaseUrl();
 
@@ -2123,6 +2126,7 @@ const App = () => {
   const [lastEtaRefreshAt, setLastEtaRefreshAt] = useState(null);
   const [refreshFeedback, setRefreshFeedback] = useState(null);
   const [overlayRouteNumber, setOverlayRouteNumber] = useState('');
+  const [overlayDirection, setOverlayDirection] = useState('I');
   const [isOverlayLoading, setIsOverlayLoading] = useState(false);
   const [overlayFeedback, setOverlayFeedback] = useState(null);
 
@@ -3484,9 +3488,10 @@ const App = () => {
     return ranked[0]?.key || variantKeys[0];
   };
 
-  const drawFullKmbRouteOverlay = async (e) => {
+  const drawFullKmbRouteOverlay = async (e, directionOverride = overlayDirection) => {
     if (e?.preventDefault) e.preventDefault();
     const routeNumber = (overlayRouteNumber || routeNumberFromRoute(selectedRoute)).trim().toUpperCase();
+    const requestedDirection = String(directionOverride || overlayDirection).trim().toUpperCase();
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = routeOverlayLayerRef.current;
     const stopLayer = graphicsLayerRef.current;
@@ -3502,16 +3507,24 @@ const App = () => {
     try {
       const variantKeys = Object.keys(routeStopsRef.current || {})
         .filter((key) => key.split('|')[0]?.toUpperCase() === routeNumber);
+      const directionVariantKeys = filterKmbOverlayVariantsByDirection(
+        variantKeys,
+        requestedDirection,
+      );
       const seenPatterns = new Set();
-      const uniqueVariants = variantKeys.filter((key) => {
+      const uniqueVariants = directionVariantKeys.filter((key) => {
         const pattern = (routeStopsRef.current[key] || []).join('>');
         if (!pattern || seenPatterns.has(pattern)) return false;
         seenPatterns.add(pattern);
         return true;
       });
 
-      if (uniqueVariants.length === 0) {
+      if (variantKeys.length === 0) {
         setOverlayFeedback(`No KMB route found for ${routeNumber}`);
+        return;
+      }
+      if (uniqueVariants.length === 0) {
+        setOverlayFeedback(`No ${routeNumber} direction ${requestedDirection} route found`);
         return;
       }
 
@@ -3657,6 +3670,11 @@ const App = () => {
     }
   };
 
+  const changeOverlayDirection = (direction) => {
+    setOverlayDirection(direction);
+    drawFullKmbRouteOverlay(null, direction);
+  };
+
   const loadSelectedCurrentEtas = useCallback(async (segments) => {
     const requestId = selectedEtaRequestRef.current + 1;
     selectedEtaRequestRef.current = requestId;
@@ -3712,7 +3730,16 @@ const App = () => {
     const initialSegmentDisplay = isCard ? cardOrRoute.segmentDisplay : baseRoute.segments || [];
 
     setSelectedRoute({ ...baseRoute, segmentDisplay: initialSegmentDisplay });
-    setOverlayRouteNumber(routeNumberFromRoute(baseRoute));
+    const initialOverlayRouteNumber = routeNumberFromRoute(baseRoute);
+    const initialOverlaySegment = (baseRoute.segments || []).find(
+      (segment) => String(segment.route || '').trim().toUpperCase() ===
+        initialOverlayRouteNumber.trim().toUpperCase(),
+    );
+    const initialOverlayDirection = String(initialOverlaySegment?.bound || '').trim().toUpperCase();
+    setOverlayRouteNumber(initialOverlayRouteNumber);
+    if (initialOverlayDirection === 'I' || initialOverlayDirection === 'O') {
+      setOverlayDirection(initialOverlayDirection);
+    }
     setOverlayFeedback(null);
     setExpandedSegments(new Set());
     setSelectedCurrentEtas(new Map());
@@ -4114,6 +4141,34 @@ const App = () => {
             >
               Clear
             </button>
+          </div>
+          <div className={'mt-2 flex items-center justify-between gap-2 px-1'}>
+            <span className={'text-[10px] font-black uppercase tracking-wide text-slate-400'}>
+              Direction
+            </span>
+            <div
+              className={'inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5'}
+              role={'group'}
+              aria-label={'Overlay route direction'}
+            >
+              {['I', 'O'].map((direction) => (
+                <button
+                  key={direction}
+                  type={'button'}
+                  disabled={isOverlayLoading}
+                  onClick={() => changeOverlayDirection(direction)}
+                  className={'min-w-8 rounded-md px-2 py-1 text-[10px] font-black transition ' + (
+                    overlayDirection === direction
+                      ? 'bg-[#E1251B] text-white shadow-sm'
+                      : 'text-slate-500 hover:bg-white'
+                  )}
+                  title={'Show KMB bound ' + direction}
+                  aria-pressed={overlayDirection === direction}
+                >
+                  {direction}
+                </button>
+              ))}
+            </div>
           </div>
           {overlayFeedback && (
             <div className="mt-1 truncate px-1 text-[10px] font-bold text-slate-500">

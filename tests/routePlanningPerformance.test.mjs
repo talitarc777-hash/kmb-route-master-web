@@ -9,7 +9,10 @@ import {
   filterRouteOptionsByGoogleTransitPermission,
   loadKmbPayloads,
 } from '../src/utils/routePlanningRequests.js';
-import { buildKmbGeometryCacheKey } from '../src/utils/kmbGeometryCache.js';
+import {
+  buildKmbGeometryCacheKey,
+  filterKmbOverlayVariantsByDirection,
+} from '../src/utils/kmbGeometryCache.js';
 
 const engineSource = await readFile(new URL('../public/routeEngine.js', import.meta.url), 'utf8');
 
@@ -490,6 +493,19 @@ test('KMB geometry cache separates partial and full stop sequences for one route
       ['YT673', 'YT674B', 'YL232', 'YL234', 'TN201', 'TN206'],
       routeKey,
     ),
+  );
+});
+
+test('KMB overlay direction switch keeps only the requested I or O variants', () => {
+  const variants = ['269B|I|1', '269B|I|2', '269B|O|1'];
+
+  assert.deepEqual(
+    filterKmbOverlayVariantsByDirection(variants, 'I'),
+    ['269B|I|1', '269B|I|2'],
+  );
+  assert.deepEqual(
+    filterKmbOverlayVariantsByDirection(variants, 'o'),
+    ['269B|O|1'],
   );
 });
 
