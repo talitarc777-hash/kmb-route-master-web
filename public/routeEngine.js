@@ -1330,12 +1330,23 @@ function retainTransferVariants(candidates, limit = MAX_TRANSFER_VARIANTS_PER_RO
         const byProgress = [...group].sort(
             (a, b) => (a.transferOutIndex || 0) - (b.transferOutIndex || 0)
         );
+        const progressSampleCount = Math.min(limit, byProgress.length);
+        const progressSamples = Array.from(
+            { length: progressSampleCount },
+            (_, index) => byProgress[
+                Math.round(
+                    index * (byProgress.length - 1) /
+                    Math.max(1, progressSampleCount - 1)
+                )
+            ]
+        );
         const priority = [
-            ...byHeuristic.slice(0, 4),
-            ...byProgress.slice(0, 2),
-            ...byProgress.slice(-2),
+            byHeuristic[0],
+            byProgress[0],
+            byProgress[byProgress.length - 1],
+            ...progressSamples,
             ...byHeuristic,
-        ];
+        ].filter(Boolean);
         const seen = new Set();
         for (const candidate of priority) {
             if (seen.has(candidate.dedupKey)) continue;
@@ -1365,22 +1376,54 @@ function hasRepeatedRouteTransfer(route) {
 function compareRouteCandidates(a, b) {
     const confidenceDelta = (b.historicalConfidenceScore || 0) - (a.historicalConfidenceScore || 0);
     if (confidenceDelta !== 0) return confidenceDelta;
-    const estimatedTimeDelta = a.estimatedTime - b.estimatedTime;
-    if (Math.abs(estimatedTimeDelta) > 5) return estimatedTimeDelta;
+
+    const arrivalA = new Date(a.plannedArrivalTime || '').getTime();
+    const arrivalB = new Date(b.plannedArrivalTime || '').getTime();
+    if (Number.isFinite(arrivalA) && Number.isFinite(arrivalB) && arrivalA !== arrivalB) {
+        return arrivalA - arrivalB;
+    }
+
+    const estimatedTimeA = Number(a.estimatedTime);
+    const estimatedTimeB = Number(b.estimatedTime);
+    if (
+        Number.isFinite(estimatedTimeA) &&
+        Number.isFinite(estimatedTimeB) &&
+        estimatedTimeA !== estimatedTimeB
+    ) {
+        return estimatedTimeA - estimatedTimeB;
+    }
+
     if (a.transfers !== b.transfers) return a.transfers - b.transfers;
     const sameOneTransferPair = a.transfers === 1 &&
         a.routePairKey && a.routePairKey === b.routePairKey;
     const bothReasonableTransferWalks = Number(a.transferWalkDistanceKm) <= PREFERRED_TRANSFER_WALK_KM &&
         Number(b.transferWalkDistanceKm) <= PREFERRED_TRANSFER_WALK_KM;
     if (sameOneTransferPair && bothReasonableTransferWalks) {
-        const progressDelta = Number(a.transferOutIndex) - Number(b.transferOutIndex);
-        if (Number.isFinite(progressDelta) && progressDelta !== 0) return progressDelta;
+        const transferWait = (route) => (route.segments || []).slice(1).reduce(
+            (sum, segment) => sum + (Number(segment.waitMinutes) || 0),
+            0
+        );
+        const transferWaitDelta = transferWait(a) - transferWait(b);
+        if (transferWaitDelta !== 0) return transferWaitDelta;
+
+        const transferWalkDelta = Number(a.transferWalkDistanceKm) -
+            Number(b.transferWalkDistanceKm);
+        if (Number.isFinite(transferWalkDelta) && transferWalkDelta !== 0) {
+            return transferWalkDelta;
+        }
     }
     const totalWalk = (route) => (route.walkTimeOrigin || 0) +
         (route.walkTimeDest || 0) +
         (route.walkTimeTransfer || 0) +
         (route.walkTimeTransfer2 || 0);
-    return totalWalk(a) - totalWalk(b);
+    const totalWalkDelta = totalWalk(a) - totalWalk(b);
+    if (totalWalkDelta !== 0) return totalWalkDelta;
+
+    if (sameOneTransferPair) {
+        const progressDelta = Number(a.transferOutIndex) - Number(b.transferOutIndex);
+        if (Number.isFinite(progressDelta) && progressDelta !== 0) return progressDelta;
+    }
+    return 0;
 }
 
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1824,6 +1867,7 @@ window.routeEngine = {
     applyRouteTiming,
     validateSegmentHistoricalSchedule,
     compareRouteCandidates,
+    retainTransferVariants,
     getLastPlanningDebugSummary,
     STRICT_STOP_LEVEL_ROUTES,
 };

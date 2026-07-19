@@ -189,6 +189,82 @@ test('Now timing keeps a future transfer outside the live ETA horizon when its s
   assert.equal(route.segments[1].historicalSchedule.status, 'operating_station_level');
 });
 
+test('shared-corridor retention samples transfer stops across the whole overlap', () => {
+  const engine = loadEngine(async (url) => {
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const candidates = Array.from({ length: 12 }, (_, index) => ({
+    dedupKey: 'pair-stop-' + index,
+    routePairKey: '1t|A|I|1->B|I|1',
+    transferOutIndex: index,
+    _hScore: index,
+  }));
+
+  const retained = engine.retainTransferVariants(candidates, 8);
+  const retainedIndexes = retained
+    .map((candidate) => candidate.transferOutIndex)
+    .sort((a, b) => a - b);
+  const largestGap = Math.max(
+    ...retainedIndexes.slice(1).map((index, position) => index - retainedIndexes[position]),
+  );
+
+  assert.equal(retained.length, 8);
+  assert.equal(retainedIndexes[0], 0);
+  assert.equal(retainedIndexes[retainedIndexes.length - 1], 11);
+  assert.ok(largestGap <= 2);
+});
+
+test('live transfer ETA can select a later overlap stop with an earlier final arrival', async () => {
+  const now = new Date(2026, 6, 15, 8, 0, 0);
+  const etaAt = (minutes) => new Date(now.getTime() + minutes * 60_000).toISOString();
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    if (value.includes('/eta/O/671/1')) {
+      return jsonResponse({ data: [{ eta: etaAt(5) }] });
+    }
+    if (value.includes('/eta/B1/269C/1')) {
+      return jsonResponse({ data: [{ eta: etaAt(17) }] });
+    }
+    if (value.includes('/eta/B2/269C/1')) {
+      return jsonResponse({ data: [{ eta: etaAt(16) }] });
+    }
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const makeSegment = (route, fromStop, toStop, stops, rideDurationMinutes) => ({
+    route,
+    bound: 'I',
+    service_type: '1',
+    fromStop,
+    toStop,
+    stops,
+    rideDurationMinutes,
+    routeInfo: { co: 'KMB', freq: '10' },
+  });
+  const makeRoute = (transferOutIndex, firstStops, secondFromStop, secondStops, rides) => ({
+    transfers: 1,
+    routePairKey: '1t|671|I|1->269C|I|1',
+    transferOutIndex,
+    transferWalkDistanceKm: 0.05,
+    walkTimeOrigin: 0,
+    walkTimeDest: 0,
+    walkTimeTransfer: 0,
+    segments: [
+      makeSegment('671', 'O', firstStops[firstStops.length - 1], firstStops, rides[0]),
+      makeSegment('269C', secondFromStop, 'D', secondStops, rides[1]),
+    ],
+  });
+  const earlyTransfer = makeRoute(1, ['O', 'K1'], 'B1', ['B1', 'B2', 'D'], [4, 8]);
+  const laterTransfer = makeRoute(2, ['O', 'K1', 'K2'], 'B2', ['B2', 'D'], [6, 6]);
+
+  assert.equal(await engine.applyRouteTiming(earlyTransfer, { timeMode: 'now', now }), true);
+  assert.equal(await engine.applyRouteTiming(laterTransfer, { timeMode: 'now', now }), true);
+
+  const ranked = [earlyTransfer, laterTransfer].sort(engine.compareRouteCandidates);
+  assert.equal(earlyTransfer.segments[1].waitMinutes, 7);
+  assert.equal(laterTransfer.segments[1].waitMinutes, 4);
+  assert.equal(ranked[0], laterTransfer);
+});
+
 test('Now shortlist prioritizes an operating transfer over faster inactive route pairs', async () => {
   const period = { s: '00:00', e: '23:59', n: 50, d: 10, a: ['12:00'] };
   const activeEveryDay = {
