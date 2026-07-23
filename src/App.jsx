@@ -1601,10 +1601,10 @@ const CurrentStopEtaList = ({
                 currentEtas.map((eta, etaIndex) => (
                   <span
                     key={`${eta.eta}|${etaIndex}`}
-                    className={`rounded-full border px-2 py-1 text-[11px] font-bold ${getEtaChipClass(eta.eta)}`}
+                    className={`rounded-full border px-2 py-1 text-[11px] font-bold ${getEtaChipClass(eta.eta)} ${!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) ? 'opacity-40 grayscale' : ''}`}
+                    title={!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) ? 'Not catchable from the calculated ready time' : undefined}
                   >
                     {getEtaText(eta.eta)}
-                    {!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) && ' · not catchable'}
                   </span>
                 ))
               ) : (
@@ -4738,10 +4738,10 @@ const App = () => {
                                         className="flex flex-col items-start gap-0.5"
                                       >
                                         <span
-                                          className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
+                                          className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)} ${option.etaCatchable === false ? 'opacity-40 grayscale' : ''}`}
+                                          title={option.etaCatchable === false ? 'Not catchable from the calculated ready time' : undefined}
                                         >
                                           {option.route}: {getEtaText(option.nextEta)}
-                                          {option.etaCatchable === false ? ' · not catchable' : ''}
                                         </span>
                                         {variantRemark && (
                                           <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
