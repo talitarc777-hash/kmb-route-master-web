@@ -513,6 +513,53 @@ function nearestEncodedSlotDistance(minute, maskHex, slotMinutes = 15) {
     return best;
 }
 
+function getObservedSlotMinutes(period) {
+    if (!period) return [];
+    const minutes = new Set();
+    for (const slot of period.a || []) {
+        const value = timeStringToMinutes(slot);
+        if (Number.isFinite(value)) minutes.add(value);
+    }
+    if (period.m) {
+        let mask;
+        try {
+            mask = BigInt(`0x${period.m}`);
+        } catch {
+            mask = null;
+        }
+        if (mask != null) {
+            const slotMinutes = Number(period.sm) || 15;
+            const slotCount = Math.ceil(1440 / slotMinutes);
+            for (let index = 0; index < slotCount; index++) {
+                if ((mask & (1n << BigInt(index))) !== 0n) {
+                    minutes.add(index * slotMinutes);
+                }
+            }
+        }
+    }
+    return [...minutes].sort((a, b) => a - b);
+}
+
+function findObservedBoardTime(
+    period,
+    referenceTime,
+    direction = 'next',
+    maxGapMinutes = KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN
+) {
+    if (!(referenceTime instanceof Date) || Number.isNaN(referenceTime.getTime())) return null;
+    const requestedMinute = dateToMinutes(referenceTime);
+    const slots = getObservedSlotMinutes(period);
+    if (!Number.isFinite(requestedMinute) || slots.length === 0) return null;
+    const slotMinute = direction === 'previous'
+        ? [...slots].reverse().find((minute) => minute <= requestedMinute)
+        : slots.find((minute) => minute >= requestedMinute);
+    if (!Number.isFinite(slotMinute)) return null;
+    if (Math.abs(slotMinute - requestedMinute) > maxGapMinutes) return null;
+    const selected = new Date(referenceTime);
+    selected.setHours(Math.floor(slotMinute / 60), slotMinute % 60, 0, 0);
+    return selected;
+}
+
 function validateSchedulePeriod(period, plannedDate, toleranceMin, requireObservedSlots = false) {
     if (!period) return { valid: false, reason: 'missing_period' };
     const minute = dateToMinutes(plannedDate);
@@ -520,7 +567,14 @@ function validateSchedulePeriod(period, plannedDate, toleranceMin, requireObserv
     const endMinute = timeStringToMinutes(period.e);
     const startTime = formatMinutesAsTime(startMinute) || period.s;
     const endTime = formatMinutesAsTime(endMinute) || period.e;
-    if (!isMinuteWithinPeriod(minute, startMinute, endMinute)) {
+    const nearest = nearestSlotDistance(minute, period.a || []) ||
+        nearestEncodedSlotDistance(minute, period.m, period.sm || 15);
+    const observedSlotMatched = Boolean(nearest && nearest.deltaMin <= toleranceMin);
+    const withinPercentileWindow = isMinuteWithinPeriod(minute, startMinute, endMinute);
+    // The compact window is based on the 5th/95th percentile, while its slot mask
+    // retains every observed service slot. A matched slot just outside that
+    // percentile window is positive evidence and must not be discarded.
+    if (!withinPercentileWindow && !(requireObservedSlots && observedSlotMatched)) {
         return {
             valid: false,
             reason: 'outside_operation_window',
@@ -528,8 +582,6 @@ function validateSchedulePeriod(period, plannedDate, toleranceMin, requireObserv
             endTime,
         };
     }
-    const nearest = nearestSlotDistance(minute, period.a || []) ||
-        nearestEncodedSlotDistance(minute, period.m, period.sm || 15);
     if (!nearest && requireObservedSlots) {
         return {
             valid: false,
@@ -550,11 +602,14 @@ function validateSchedulePeriod(period, plannedDate, toleranceMin, requireObserv
     }
     return {
         valid: true,
-        reason: 'matched_historical_operation',
+        reason: withinPercentileWindow
+            ? 'matched_historical_operation'
+            : 'matched_observed_slot_outside_percentile_window',
         startTime,
         endTime,
         nearestSlot: nearest?.slot || null,
         nearestSlotDeltaMin: nearest?.deltaMin ?? null,
+        outsidePercentileWindow: !withinPercentileWindow,
         sampleCount: period.n,
         sampleDays: period.d,
     };
@@ -595,6 +650,30 @@ function getScheduleProfile(schedule, collectionName, key, dayClass) {
             sm: Number(schedule.sm) || 15,
         },
     };
+}
+
+function getPlannedSegmentSchedulePeriod(segment, schedule, referenceTime, options = {}) {
+    if (!schedule || !segment || !(referenceTime instanceof Date)) return null;
+    const dayClass = getPlannedDayClass(referenceTime);
+    const routeKey = [segment.route, segment.bound, segment.service_type]
+        .map((part) => String(part || '').trim())
+        .join('|');
+    const station = getScheduleProfile(
+        schedule,
+        'route_stops',
+        `${routeKey}|${String(segment.fromStop || '').trim()}`,
+        dayClass
+    );
+    if (station.period) return { period: station.period, source: 'station_observed_slot' };
+
+    const canUseRouteFallback = options.allowSparseDataFallback &&
+        !station.profileExists &&
+        segment.routeStopRecordExists === true &&
+        !STRICT_STOP_LEVEL_ROUTES.has(String(segment.route || '').toUpperCase()) &&
+        segment.isLoopOrAmbiguousRoute !== true;
+    if (!canUseRouteFallback) return null;
+    const route = getScheduleProfile(schedule, 'routes', routeKey, dayClass);
+    return route.period ? { period: route.period, source: 'route_observed_slot' } : null;
 }
 
 function getHistoricalConfidence(period, nearestObservedSlot) {
@@ -725,7 +804,9 @@ function validateSegmentHistoricalSchedule(segment, boardTime, schedule, options
             ...stationAssessment,
             valid: true,
             status: 'operating_station_level',
-            reason: 'operating at boarding stop in historical window',
+            reason: stationAssessment.outsidePercentileWindow
+                ? 'matched_observed_slot_outside_percentile_window'
+                : 'operating at boarding stop in historical window',
             confidence: getHistoricalConfidence(routeStopPeriod, nearestObservedSlot),
             observedEtaNearRequestedTime: Boolean(
                 nearestObservedSlot && nearestObservedSlot.deltaMin <= KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN
@@ -810,7 +891,7 @@ function shouldLogHistoricalValidation() {
 }
 
 async function validateRouteHistoricalSchedule(route, options = {}) {
-    const schedule = await loadKmbOperationSchedule();
+    const schedule = options.schedule || await loadKmbOperationSchedule();
     if (!schedule) {
         route.historicalScheduleStatus = 'schedule_unavailable';
         route.historicalScheduleRejectReason = 'schedule_unavailable';
@@ -821,7 +902,11 @@ async function validateRouteHistoricalSchedule(route, options = {}) {
 
     let routeConfidenceRank = 3;
     for (const segment of route.segments || []) {
-        const result = validateSegmentHistoricalSchedule(segment, segment.boardTime, schedule, options);
+        const result = validateSegmentHistoricalSchedule(segment, segment.boardTime, schedule, {
+            ...options,
+            requireObservedSlotMatch: options.requireObservedSlotMatch ||
+                String(segment.plannedTimingSource || '').includes('observed_slot'),
+        });
         segment.historicalSchedule = result;
         if (options.logValidation !== false && shouldLogHistoricalValidation()) {
             console.debug('[KMB historical operation]', result.debug || result);
@@ -987,6 +1072,7 @@ function resetSegmentTiming(segment, defaultFrequency) {
     segment.catchableByEta = false;
     segment.timingFallbackReason = null;
     segment.historicalSchedule = null;
+    segment.plannedTimingSource = null;
 }
 
 async function applyCurrentLocationApproach(route, currentLocation, gcpKey) {
@@ -1097,25 +1183,42 @@ async function applyNowTiming(route, now, options = {}) {
     return true;
 }
 
-function applyLeaveTiming(route, departureTime) {
+function applyLeaveTiming(route, departureTime, schedule = null, options = {}) {
     let cursor = new Date(departureTime);
 
     for (let i = 0; i < route.segments.length; i++) {
         const segment = route.segments[i];
-        const waitMinutes = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
+        const fallbackWaitMinutes = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
         const readyTime = new Date(
             cursor.getTime() + (getLegApproachMinutes(route, i) + BOARDING_BUFFER_MIN) * 60000
         );
-        const boardTime = new Date(readyTime.getTime() + waitMinutes * 60000);
+        const scheduleProfile = getPlannedSegmentSchedulePeriod(
+            segment,
+            schedule,
+            readyTime,
+            options
+        );
+        const observedBoardTime = scheduleProfile
+            ? findObservedBoardTime(scheduleProfile.period, readyTime, 'next')
+            : null;
+        const boardTime = observedBoardTime ||
+            new Date(readyTime.getTime() + fallbackWaitMinutes * 60000);
+        const waitMinutes = Math.max(
+            0,
+            Math.round((boardTime.getTime() - readyTime.getTime()) / 60000)
+        );
         const arrivalTime = new Date(
             boardTime.getTime() + getRideDurationMinutes(segment) * 60000
         );
 
-        resetSegmentTiming(segment, waitMinutes);
+        resetSegmentTiming(segment, fallbackWaitMinutes);
         segment.readyTime = readyTime.toISOString();
         segment.boardTime = boardTime.toISOString();
         segment.arrivalTime = arrivalTime.toISOString();
         segment.waitMinutes = waitMinutes;
+        segment.plannedTimingSource = observedBoardTime
+            ? scheduleProfile.source
+            : 'frequency_fallback';
 
         if (i === 0) route.originWaitTime = waitMinutes;
         cursor = arrivalTime;
@@ -1130,38 +1233,61 @@ function applyLeaveTiming(route, departureTime) {
     return true;
 }
 
-function applyArriveTiming(route, arrivalDeadline, now) {
+function applyArriveTiming(route, arrivalDeadline, now, schedule = null, options = {}) {
     let cursor = new Date(arrivalDeadline.getTime() - (route.walkTimeDest || 0) * 60000);
     let firstLegWait = 0;
+    let plannedFinalArrival = new Date(arrivalDeadline);
 
     for (let i = route.segments.length - 1; i >= 0; i--) {
         const segment = route.segments[i];
-        const waitMinutes = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
-        const arrivalTime = new Date(cursor);
-        const boardTime = new Date(
-            arrivalTime.getTime() - getRideDurationMinutes(segment) * 60000
+        const fallbackWaitMinutes = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
+        const latestBoardTime = new Date(
+            cursor.getTime() - getRideDurationMinutes(segment) * 60000
         );
+        const scheduleProfile = getPlannedSegmentSchedulePeriod(
+            segment,
+            schedule,
+            latestBoardTime,
+            options
+        );
+        const observedBoardTime = scheduleProfile
+            ? findObservedBoardTime(scheduleProfile.period, latestBoardTime, 'previous')
+            : null;
+        const boardTime = observedBoardTime || latestBoardTime;
+        const arrivalTime = observedBoardTime
+            ? new Date(boardTime.getTime() + getRideDurationMinutes(segment) * 60000)
+            : new Date(cursor);
+        const waitMinutes = observedBoardTime ? 0 : fallbackWaitMinutes;
         const readyTime = new Date(boardTime.getTime() - waitMinutes * 60000);
         const previousCursor = new Date(
             readyTime.getTime() - (getLegApproachMinutes(route, i) + BOARDING_BUFFER_MIN) * 60000
         );
 
-        resetSegmentTiming(segment, waitMinutes);
+        resetSegmentTiming(segment, fallbackWaitMinutes);
         segment.readyTime = readyTime.toISOString();
         segment.boardTime = boardTime.toISOString();
         segment.arrivalTime = arrivalTime.toISOString();
         segment.waitMinutes = waitMinutes;
+        segment.plannedTimingSource = observedBoardTime
+            ? scheduleProfile.source
+            : 'frequency_fallback';
 
         if (i === 0) firstLegWait = waitMinutes;
+        if (i === route.segments.length - 1 && observedBoardTime) {
+            plannedFinalArrival = new Date(
+                arrivalTime.getTime() + (route.walkTimeDest || 0) * 60000
+            );
+        }
         cursor = previousCursor;
     }
 
     route.originWaitTime = firstLegWait;
     route.estimatedTime = Math.round(
-        (arrivalDeadline.getTime() - cursor.getTime()) / 60000
+        (plannedFinalArrival.getTime() - cursor.getTime()) / 60000
     );
     route.plannedDepartureTime = cursor.toISOString();
-    route.plannedArrivalTime = arrivalDeadline.toISOString();
+    route.plannedArrivalTime = plannedFinalArrival.toISOString();
+    route.requestedArrivalTime = arrivalDeadline.toISOString();
     return cursor.getTime() >= now.getTime();
 }
 
@@ -1189,17 +1315,23 @@ async function applyRouteTiming(route, options = {}) {
     }
 
     const plannedAnchorTime = buildPlannedDateTime(dateValue, timeValue, now);
+    const schedule = await loadKmbOperationSchedule();
     let isValid = false;
     if (timeMode === 'leave') {
-        isValid = applyLeaveTiming(route, plannedAnchorTime);
+        isValid = applyLeaveTiming(route, plannedAnchorTime, schedule, {
+            allowSparseDataFallback: allowSparseHistoricalFallback,
+        });
     } else {
-        isValid = applyArriveTiming(route, plannedAnchorTime, now);
+        isValid = applyArriveTiming(route, plannedAnchorTime, now, schedule, {
+            allowSparseDataFallback: allowSparseHistoricalFallback,
+        });
     }
 
     if (!isValid) return false;
     return validateRouteHistoricalSchedule(route, {
         allowSparseDataFallback: allowSparseHistoricalFallback,
         requestedDateTime: plannedAnchorTime,
+        schedule,
     });
 }
 
@@ -1299,13 +1431,18 @@ async function earlyFilterPlannedCandidates(candidates, options = {}) {
     for (const route of candidates) {
         applyStraightLineWalkingEstimate(route);
         const timingValid = options.timeMode === 'leave'
-            ? applyLeaveTiming(route, plannedAnchorTime)
-            : applyArriveTiming(route, plannedAnchorTime, options.now);
+            ? applyLeaveTiming(route, plannedAnchorTime, schedule, {
+                allowSparseDataFallback: options.allowSparseHistoricalFallback,
+            })
+            : applyArriveTiming(route, plannedAnchorTime, options.now, schedule, {
+                allowSparseDataFallback: options.allowSparseHistoricalFallback,
+            });
         if (!timingValid) continue;
         const historicalValid = await validateRouteHistoricalSchedule(route, {
             allowSparseDataFallback: options.allowSparseHistoricalFallback,
             requestedDateTime: plannedAnchorTime,
             logValidation: false,
+            schedule,
         });
         if (historicalValid || !isDefinitiveEarlyHistoricalRejection(route)) retained.push(route);
     }
@@ -1334,7 +1471,7 @@ async function rankNowCandidatesByTransferService(candidates, now, strictEtaOnly
     if (!schedule) return;
 
     for (const route of transferCandidates) {
-        applyLeaveTiming(route, now);
+        applyLeaveTiming(route, now, schedule, { allowSparseDataFallback });
         route._nowTransferScheduleRank = 0;
         for (let i = 1; i < (route.segments || []).length; i++) {
             const segment = route.segments[i];

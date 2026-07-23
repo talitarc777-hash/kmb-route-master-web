@@ -232,6 +232,8 @@ test('arrive-by integration validates the estimated latest boarding time', async
   assert.equal(valid, true);
   assert.equal(new Date(route.segments[0].boardTime).getHours(), 9);
   assert.equal(new Date(route.segments[0].boardTime).getMinutes(), 25);
+  assert.equal(route.segments[0].waitMinutes, 0);
+  assert.equal(route.segments[0].plannedTimingSource, 'station_observed_slot');
   assert.equal(route.segments[0].historicalSchedule.status, 'operating_station_level');
   assert.equal(route.historicalConfidence, 'high');
 });
@@ -263,7 +265,89 @@ test('leave-at integration validates the computed boarding stop and time', async
 
   assert.equal(valid, true);
   assert.equal(new Date(route.segments[0].boardTime).getHours(), 8);
-  assert.equal(new Date(route.segments[0].boardTime).getMinutes(), 16);
-  assert.equal(route.segments[0].historicalSchedule.requestedMinute, 8 * 60 + 16);
+  assert.equal(new Date(route.segments[0].boardTime).getMinutes(), 15);
+  assert.equal(route.segments[0].waitMinutes, 9);
+  assert.equal(route.segments[0].plannedTimingSource, 'station_observed_slot');
+  assert.equal(route.segments[0].historicalSchedule.requestedMinute, 8 * 60 + 15);
   assert.equal(route.segments[0].historicalSchedule.status, 'operating_station_level');
+});
+
+test('leave-at uses observed stop slots for a 606 to 269C connection', async () => {
+  const schedule = {
+    route_stops: {
+      '606|I|1|HEALTHY': {
+        weekday: stationPeriod({
+          start: '12:12', end: '20:29', samples: 20, days: 10,
+          slots: ['20:15', '20:30'],
+        }),
+      },
+      '269C|I|1|KT446': {
+        weekday: stationPeriod({
+          start: '06:00', end: '22:36', samples: 50, days: 10,
+          slots: ['20:45', '21:00'],
+        }),
+      },
+    },
+    routes: {},
+  };
+  const engine = loadEngine(schedule);
+  const makeSegment = (route, fromStop, toStop, rideDurationMinutes) => ({
+    route,
+    bound: 'I',
+    service_type: '1',
+    fromStop,
+    toStop,
+    stops: [fromStop, toStop],
+    routeInfo: {},
+    rideDurationMinutes,
+    routeStopRecordExists: true,
+    boardingStopSequence: 1,
+    isLoopOrAmbiguousRoute: false,
+  });
+  const route = {
+    walkTimeOrigin: 4,
+    walkTimeTransfer: 2,
+    walkTimeDest: 0,
+    segments: [
+      makeSegment('606', 'HEALTHY', 'KT611', 20),
+      makeSegment('269C', 'KT446', 'TIN_SHING', 60),
+    ],
+  };
+
+  const valid = await engine.applyRouteTiming(route, {
+    timeMode: 'leave',
+    dateValue: '2026-07-23',
+    timeValue: '20:10',
+    now: new Date(2026, 6, 23, 18, 0, 0),
+  });
+
+  assert.equal(valid, true);
+  assert.equal(new Date(route.segments[0].readyTime).getMinutes(), 15);
+  assert.equal(new Date(route.segments[0].boardTime).getMinutes(), 15);
+  assert.equal(route.segments[0].waitMinutes, 0);
+  assert.equal(new Date(route.segments[1].boardTime).getHours(), 20);
+  assert.equal(new Date(route.segments[1].boardTime).getMinutes(), 45);
+  assert.equal(route.segments[1].waitMinutes, 7);
+});
+
+test('an observed slot can validate just beyond a percentile operation window', () => {
+  const engine = loadEngine();
+  const schedule = scheduleFor({
+    route: '606',
+    stop: 'HEALTHY',
+    station: stationPeriod({
+      start: '12:12', end: '20:29', samples: 20, days: 10,
+      slots: ['20:15', '20:30'],
+    }),
+  });
+  const result = engine.validateSegmentHistoricalSchedule(
+    segment({ route: '606', fromStop: 'HEALTHY' }),
+    plannedDate(20, 30),
+    schedule,
+    { requireObservedSlotMatch: true },
+  );
+
+  assert.equal(result.valid, true);
+  assert.equal(result.reason, 'matched_observed_slot_outside_percentile_window');
+  assert.equal(result.outsidePercentileWindow, true);
 });
