@@ -293,12 +293,6 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
 // ETA FETCH (per-search cache)
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 const ETA_CACHE = new Map();
-const ETA_CALL_LOG = [];
-
-function logEtaCall(entry) {
-    ETA_CALL_LOG.push({ ts: new Date().toISOString(), ...entry });
-    if (ETA_CALL_LOG.length > 500) ETA_CALL_LOG.shift();
-}
 
 async function fetchETA(stopId, route, serviceType) {
     const key = `${stopId}|${route}|${serviceType}`;
@@ -307,13 +301,11 @@ async function fetchETA(stopId, route, serviceType) {
         if (cached.expiresAt > Date.now()) {
             REQUEST_STATS.etaCacheHits += 1;
             REQUEST_STATS.duplicateRequestsPrevented += 1;
-            logEtaCall({ type: 'cache_hit', key, stopId, route, serviceType });
             return cached.promise;
         }
         ETA_CACHE.delete(key);
     }
     const p = (async () => {
-        const startedAt = Date.now();
         const url = `https://data.etabus.gov.hk/v1/transport/kmb/eta/${stopId}/${route}/${serviceType}`;
         REQUEST_STATS.etaNetworkRequests += 1;
         try {
@@ -321,28 +313,8 @@ async function fetchETA(stopId, route, serviceType) {
             recordPayloadBytes(response);
             const data = await response.json();
             const items = data?.data || [];
-            logEtaCall({
-                type: 'network_ok',
-                key,
-                stopId,
-                route,
-                serviceType,
-                count: items.length,
-                durationMs: Date.now() - startedAt,
-                url,
-            });
             return items;
-        } catch (e) {
-            logEtaCall({
-                type: 'network_error',
-                key,
-                stopId,
-                route,
-                serviceType,
-                durationMs: Date.now() - startedAt,
-                error: String(e?.message || e),
-                url,
-            });
+        } catch {
             return [];
         }
     })();
@@ -351,26 +323,6 @@ async function fetchETA(stopId, route, serviceType) {
 }
 
 function clearETACache() { ETA_CACHE.clear(); }
-function clearEtaCallLog() { ETA_CALL_LOG.length = 0; }
-function getEtaCallLog() { return [...ETA_CALL_LOG]; }
-function formatEtaCallLogTxt() {
-    return ETA_CALL_LOG.map((row, i) => {
-        const parts = [
-            `#${i + 1}`,
-            row.ts,
-            row.type,
-            `route=${row.route || '-'}`,
-            `stop=${row.stopId || '-'}`,
-            `service=${row.serviceType || '-'}`,
-            `count=${row.count ?? '-'}`,
-            `durationMs=${row.durationMs ?? '-'}`,
-            `key=${row.key || '-'}`,
-        ];
-        if (row.error) parts.push(`error=${row.error}`);
-        if (row.url) parts.push(`url=${row.url}`);
-        return parts.join(' | ');
-    }).join('\n');
-}
 function getActiveEtas(etaList, now = new Date(), maxMinutes = ETA_ACTIVE_WINDOW_MIN) {
     const upper = new Date(now.getTime() + maxMinutes * 60000);
     return (etaList || []).filter(e => {
@@ -2112,9 +2064,6 @@ window.routeEngine = {
     fetchETA,
     fetchGCPRoute,
     clearETACache,
-    clearEtaCallLog,
-    getEtaCallLog,
-    formatEtaCallLogTxt,
     getActiveEtas,
     getNextValidBusETA,
     applyRouteTiming,

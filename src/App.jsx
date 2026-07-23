@@ -3085,7 +3085,6 @@ const App = () => {
     const searchAllowFallback = overrides.allowFallbackNonKmb ?? allowFallbackNonKmb;
     const searchStrictEtaOnly = overrides.strictEtaOnly ?? strictEtaOnly;
     const preserveExistingResults = Boolean(overrides.preserveExistingResults);
-    window.routeEngine?.clearEtaCallLog?.();
     setIsLoading(true);
     setSearchError(null);
     setRefreshFeedback(null);
@@ -3870,21 +3869,6 @@ const App = () => {
     setAddToBookmark(null);
   };
 
-  const downloadEtaCallLog = useCallback(() => {
-    const text =
-      window.routeEngine?.formatEtaCallLogTxt?.() ||
-      'No ETA calls captured in this session.';
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'kmb-eta-call-log.txt';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, []);
-
   const handleSwapLocations = () => {
     const fromValue = origin;
     const toValue = destination;
@@ -4447,15 +4431,6 @@ const App = () => {
               ? 'Strict ETA filter (show only routes where every segment has active ETA now)'
               : 'Strict ETA filter is available only for Now mode'}
           </label>
-          <div className="mb-3 shrink-0">
-            <button
-              onClick={downloadEtaCallLog}
-              className="text-[11px] font-bold text-[#E1251B] hover:underline"
-            >
-              Download KMB ETA call log (.txt)
-            </button>
-          </div>
-
           {/* Filter Section */}
           {/* <div className="mb-4 shrink-0 bg-slate-50 p-3 rounded-2xl border border-slate-200">
             <div className="text-xs font-bold text-slate-500 mb-2 flex justify-between items-center">
@@ -4521,7 +4496,8 @@ const App = () => {
               </button>
             </div>
           </div> */}
-        {/* Filter Section - Expandable */}
+        {/* Filter Section - Expandable (temporarily hidden; implementation retained) */}
+        {false && (
         <div className="mb-4 shrink-0 bg-white/80 backdrop-blur rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Accordion Header */}
         <button 
@@ -4617,6 +4593,7 @@ const App = () => {
             </div>
         )}
         </div>
+        )}
 
           <div className="space-y-2 overflow-y-auto flex-1 scrollbar-hide">
             {displayedResultCards.length === 0 && strictEtaOnly && (
