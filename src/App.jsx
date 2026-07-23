@@ -682,25 +682,43 @@ function etaDisplayIdentity(etaValue) {
   return Number.isNaN(etaDate.getTime()) ? String(etaValue) : etaDate.toISOString();
 }
 
+function isEtaCatchableAtReadyTime(etaValue, readyTimeValue) {
+  if (!etaValue || !readyTimeValue) return true;
+  const etaTime = new Date(etaValue).getTime();
+  const readyTime = new Date(readyTimeValue).getTime();
+  if (!Number.isFinite(etaTime) || !Number.isFinite(readyTime)) return true;
+  return etaTime >= readyTime;
+}
+
 function mergeSameVisibleRouteOptions(options = []) {
   const displayOptions = [];
   const optionIndexByKey = new Map();
 
   options.forEach((option) => {
-    const displayKey = [
-      String(option?.route || '').toUpperCase(),
-      etaDisplayIdentity(option?.nextEta),
-    ].join('|');
-    const existingIndex = optionIndexByKey.get(displayKey);
-    if (existingIndex == null) {
-      optionIndexByKey.set(displayKey, displayOptions.length);
-      displayOptions.push(option);
-      return;
-    }
+    const etaRows = Array.isArray(option?.displayEtas) && option.displayEtas.length > 0
+      ? option.displayEtas
+      : [{ eta: option?.nextEta || null, catchable: true }];
+    etaRows.forEach((etaRow) => {
+      const displayOption = {
+        ...option,
+        nextEta: etaRow?.eta || null,
+        etaCatchable: etaRow?.catchable !== false,
+      };
+      const displayKey = [
+        String(displayOption?.route || '').toUpperCase(),
+        etaDisplayIdentity(displayOption?.nextEta),
+      ].join('|');
+      const existingIndex = optionIndexByKey.get(displayKey);
+      if (existingIndex == null) {
+        optionIndexByKey.set(displayKey, displayOptions.length);
+        displayOptions.push(displayOption);
+        return;
+      }
 
-    if (!kmbVariantRemark(displayOptions[existingIndex]) && kmbVariantRemark(option)) {
-      displayOptions[existingIndex] = option;
-    }
+      if (!kmbVariantRemark(displayOptions[existingIndex]) && kmbVariantRemark(displayOption)) {
+        displayOptions[existingIndex] = displayOption;
+      }
+    });
   });
 
   return displayOptions;
@@ -1580,12 +1598,13 @@ const CurrentStopEtaList = ({
             <div className="flex flex-wrap items-center gap-1">
               <span className="text-[10px] font-black text-slate-600">{option.route}</span>
               {currentEtas?.length > 0 ? (
-                currentEtas.slice(0, 3).map((eta, etaIndex) => (
+                currentEtas.map((eta, etaIndex) => (
                   <span
                     key={`${eta.eta}|${etaIndex}`}
                     className={`rounded-full border px-2 py-1 text-[11px] font-bold ${getEtaChipClass(eta.eta)}`}
                   >
                     {getEtaText(eta.eta)}
+                    {!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) && ' · not catchable'}
                   </span>
                 ))
               ) : (
@@ -2121,6 +2140,7 @@ const App = () => {
   const [strictEtaOnly, setStrictEtaOnly] = useState(true);
   const [allowFallbackNonKmb, setAllowFallbackNonKmb] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isGpsTimingEnabled, setIsGpsTimingEnabled] = useState(false);
   const [isResultsMinimized, setIsResultsMinimized] = useState(false);
   const [isRefreshingEta, setIsRefreshingEta] = useState(false);
   const [lastEtaRefreshAt, setLastEtaRefreshAt] = useState(null);
@@ -2145,6 +2165,7 @@ const App = () => {
   const stationLabelLayerRef = useRef(null);
   const currentLocationLayerRef = useRef(null);
   const currentLocationRef = useRef(null);
+  const gpsWatchIdRef = useRef(null);
   const arcgisModulesRef = useRef(null);
   const stopMapRef = useRef({});
   const routeMapRef = useRef({});
@@ -2227,6 +2248,9 @@ const App = () => {
               fromStop: candidateSeg.fromStop,
               readyTime: candidateSeg.readyTime || null,
               nextEta: candidateEta,
+              activeEtas: Array.isArray(candidateSeg.activeEtas) ? candidateSeg.activeEtas : [],
+              catchableEtas: Array.isArray(candidateSeg.catchableEtas) ? candidateSeg.catchableEtas : [],
+              displayEtas: Array.isArray(candidateSeg.displayEtas) ? candidateSeg.displayEtas : [],
               hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
               busInterval: candidateSeg.busInterval ?? null,
             });
@@ -2331,7 +2355,7 @@ const App = () => {
   }, []);
 
   const refreshRouteTiming = useCallback(
-    async (route) => {
+    async (route, liveLocation = null) => {
       if (isFallbackRoute(route)) return route;
       const clonedRoute = {
         ...route,
@@ -2344,10 +2368,13 @@ const App = () => {
         now: new Date(),
         allowNoEtaNow: !strictEtaOnly,
         allowSparseHistoricalFallback: timeMode !== 'now',
+        currentLocation: timeMode === 'now'
+          ? liveLocation || (isGpsTimingEnabled ? currentLocationRef.current : null)
+          : null,
       });
       return isValid ? clonedRoute : null;
     },
-    [dateValue, strictEtaOnly, timeMode, timeValue],
+    [dateValue, isGpsTimingEnabled, strictEtaOnly, timeMode, timeValue],
   );
 
   // Load KMB data
@@ -3113,6 +3140,9 @@ const App = () => {
           excludedRoutesText,
           strictEtaOnly: searchAllowFallback ? false : searchStrictEtaOnly,
           allowSparseHistoricalFallback: timeMode !== 'now',
+          currentLocation: timeMode === 'now' && isGpsTimingEnabled
+            ? currentLocationRef.current
+            : null,
           onProgress: (msg) => {
             if (isCurrentSearch()) setLoadingStatus(msg);
           },
@@ -3860,6 +3890,7 @@ const App = () => {
     const toValue = destination;
     setOrigin(toValue);
     setDestination(fromValue);
+    setIsGpsTimingEnabled(false);
   };
 
   const zoomToLocation = useCallback((lat, lng) => {
@@ -3872,37 +3903,132 @@ const App = () => {
     view.goTo({ target, scale: 1000 }).catch(() => {});
   }, []);
 
-  const handleUseCurrentLocation = async () => {
+  useEffect(() => {
+    if (!isGpsTimingEnabled || !navigator.geolocation) return undefined;
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const nextLocation = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        };
+        currentLocationRef.current = nextLocation;
+        renderCurrentLocationMarker(nextLocation.lat, nextLocation.lng);
+      },
+      () => {},
+      {
+        enableHighAccuracy: true,
+        maximumAge: 15000,
+        timeout: 20000,
+      },
+    );
+    gpsWatchIdRef.current = watchId;
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      if (gpsWatchIdRef.current === watchId) gpsWatchIdRef.current = null;
+    };
+  }, [isGpsTimingEnabled, renderCurrentLocationMarker]);
+
+  const getCurrentGpsLocation = useCallback(async () => {
     if (!navigator.geolocation) {
-      setSearchError('GPS is not supported on this device/browser.');
-      return;
+      throw new Error('GPS is not supported on this device/browser.');
     }
+    const position = await new Promise((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 30000,
+      }),
+    );
+    return {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+    };
+  }, []);
+
+  const gpsErrorMessage = useCallback((err) => (
+    err?.code === 1
+      ? 'Location permission denied. Please allow GPS permission.'
+      : err?.code === 2
+        ? 'Unable to get current location.'
+        : err?.code === 3
+          ? 'GPS request timed out. Please try again.'
+          : err?.message || 'Failed to get current location.'
+  ), []);
+
+  const handleUseCurrentLocation = async () => {
     setIsLocating(true);
     setSearchError(null);
     try {
-      const position = await new Promise((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 12000,
-          maximumAge: 30000,
-        }),
-      );
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
+      const { lat, lng, accuracy } = await getCurrentGpsLocation();
       setOrigin(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-      currentLocationRef.current = { lat, lng };
+      currentLocationRef.current = { lat, lng, accuracy };
+      setIsGpsTimingEnabled(true);
       renderCurrentLocationMarker(lat, lng);
       zoomToLocation(lat, lng);
     } catch (err) {
-      const msg =
-        err?.code === 1
-          ? 'Location permission denied. Please allow GPS permission.'
-          : err?.code === 2
-            ? 'Unable to get current location.'
-            : err?.code === 3
-              ? 'GPS request timed out. Please try again.'
-              : 'Failed to get current location.';
-      setSearchError(msg);
+      setSearchError(gpsErrorMessage(err));
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
+  const handleLocateSelectedRoute = async () => {
+    if (!selectedRoute || isLocating) return;
+    setIsLocating(true);
+    setSearchError(null);
+    setRefreshFeedback({ type: 'loading', message: 'Getting GPS location and checking catchable ETAs...' });
+    try {
+      const location = await getCurrentGpsLocation();
+      currentLocationRef.current = location;
+      setIsGpsTimingEnabled(true);
+      setOrigin(`${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`);
+      renderCurrentLocationMarker(location.lat, location.lng);
+
+      let refreshedRoute = selectedRoute;
+      if (timeMode === 'now' && !isFallbackRoute(selectedRoute)) {
+        window.routeEngine?.clearETACache?.();
+        refreshedRoute = await refreshRouteTiming(selectedRoute, location);
+        if (!refreshedRoute) {
+          zoomToLocation(location.lat, location.lng);
+          setRefreshFeedback({
+            type: 'error',
+            message: 'GPS found, but no bus in the current ETA window can be reached from this location.',
+          });
+          return;
+        }
+        const nextSelectedRoute = {
+          ...refreshedRoute,
+          segmentDisplay: refreshedRoute.segments || [],
+        };
+        setResults((current) => current.map((route) =>
+          route.id === refreshedRoute.id ? refreshedRoute : route));
+        setSelectedRoute(nextSelectedRoute);
+        loadSelectedCurrentEtas(nextSelectedRoute.segmentDisplay);
+      }
+
+      await drawRouteOnMap(refreshedRoute);
+      renderCurrentLocationMarker(location.lat, location.lng);
+      zoomToLocation(location.lat, location.lng);
+
+      const transferMissedCount = (refreshedRoute.segments || []).slice(1).reduce(
+        (sum, segment) => sum + (Number(segment.missedEtaCount) || 0),
+        0,
+      );
+      const nextTransfer = (refreshedRoute.segments || []).slice(1).find(
+        (segment) => segment.catchableByEta,
+      );
+      const nextTransferClock = formatClockTime(nextTransfer?.nextEta);
+      const timingSummary = timeMode === 'now' && !isFallbackRoute(refreshedRoute)
+        ? ` ${refreshedRoute.walkTimeOrigin || 0} min to the first stop${nextTransferClock ? `; next catchable transfer at ${nextTransferClock}` : ''}${transferMissedCount > 0 ? ` (${transferMissedCount} earlier transfer ETA missed)` : ''}.`
+        : '';
+      setRefreshFeedback({
+        type: 'success',
+        message: `GPS location shown.${timingSummary}`,
+      });
+    } catch (err) {
+      setRefreshFeedback({ type: 'error', message: gpsErrorMessage(err) });
     } finally {
       setIsLocating(false);
     }
@@ -4045,8 +4171,14 @@ const App = () => {
                   <AutocompleteInput
                     placeholder="From... (e.g. Mong Kok)"
                     value={origin}
-                    onChange={setOrigin}
-                    onClear={() => setOrigin('')}
+                    onChange={(value) => {
+                      setOrigin(value);
+                      setIsGpsTimingEnabled(false);
+                    }}
+                    onClear={() => {
+                      setOrigin('');
+                      setIsGpsTimingEnabled(false);
+                    }}
                   />
                   <button
                     type="button"
@@ -4055,7 +4187,7 @@ const App = () => {
                     className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
                     title="Use current GPS location"
                   >
-                    {isLocating ? 'Locating...' : 'Use GPS'}
+                    {isLocating ? 'Locating...' : isGpsTimingEnabled ? 'GPS on' : 'Use GPS'}
                   </button>
                 </div>
                 <AutocompleteInput
@@ -4119,6 +4251,18 @@ const App = () => {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 bg-white/90 backdrop-blur px-6 py-4 rounded-2xl shadow-xl text-sm font-bold text-slate-600">
           {'\u{1F5FA}\uFE0F'} {loadingStatus}
         </div>
+      )}
+
+      {selectedRoute && !showBookmarks && (
+        <button
+          type={'button'}
+          onClick={handleLocateSelectedRoute}
+          disabled={isLocating}
+          className={'absolute left-3 top-[88px] z-30 rounded-2xl border border-blue-200 bg-white/95 px-3 py-2 text-xs font-black text-blue-700 shadow-xl backdrop-blur disabled:opacity-50'}
+          title={'Show my location and recalculate catchable buses'}
+        >
+          {isLocating ? 'Locating...' : '\u{1F4CD} My location'}
+        </button>
       )}
 
       {selectedRoute && !showBookmarks && (
@@ -4590,13 +4734,14 @@ const App = () => {
                                     const variantRemark = kmbVariantRemark(option);
                                     return (
                                       <div
-                                        key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}`}
+                                        key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}|${etaDisplayIdentity(option.nextEta)}`}
                                         className="flex flex-col items-start gap-0.5"
                                       >
                                         <span
                                           className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)}`}
                                         >
                                           {option.route}: {getEtaText(option.nextEta)}
+                                          {option.etaCatchable === false ? ' · not catchable' : ''}
                                         </span>
                                         {variantRemark && (
                                           <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
@@ -4888,14 +5033,17 @@ const App = () => {
             {timeMode === 'now' && (
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   window.routeEngine?.clearETACache?.();
-                  loadSelectedCurrentEtas(detailSegments);
+                  await Promise.all([
+                    handleRefreshEtaSession(),
+                    loadSelectedCurrentEtas(detailSegments),
+                  ]);
                 }}
-                disabled={isLoadingSelectedEtas}
+                disabled={isLoadingSelectedEtas || isRefreshingEta}
                 className="text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-2 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isLoadingSelectedEtas ? 'Refreshing...' : 'Refresh current ETA'}
+                {isLoadingSelectedEtas || isRefreshingEta ? 'Refreshing...' : 'Refresh current ETA'}
               </button>
             )}
           </div>
@@ -4958,6 +5106,12 @@ const App = () => {
               </div>
             );
           })()}
+
+          {selectedRoute.gpsTimingApplied && (
+            <div className={'mb-3 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs font-bold text-blue-800'}>
+              {'\u{1F4CD}'} GPS timing: {selectedRoute.walkTimeOrigin || 0} min to the first stop. Catchable ETAs include this approach time.
+            </div>
+          )}
 
           {selectedRoute.walkTimeOrigin > 0 && (
             <div className="flex items-center gap-2 text-sm text-slate-500 mb-2 pl-2 border-l-2 border-dashed border-slate-300">
@@ -5095,6 +5249,12 @@ const App = () => {
                     {nextBoardClock && (
                       <span className="text-[11px] font-semibold text-slate-600">
                         {'\u00B7'} Next board {nextBoardClock}
+                        {selectedRoute.gpsTimingApplied && nextSegment?.catchableByEta
+                          ? ' · catchable from GPS'
+                          : ''}
+                        {selectedRoute.gpsTimingApplied && Number(nextSegment?.missedEtaCount) > 0
+                          ? ` · ${nextSegment.missedEtaCount} earlier ETA missed`
+                          : ''}
                       </span>
                     )}
                   </div>

@@ -975,13 +975,35 @@ function resetSegmentTiming(segment, defaultFrequency) {
     segment.nextEta = null;
     segment.hasActiveEta = false;
     segment.activeEtaCount = 0;
+    segment.activeEtas = [];
+    segment.catchableEtas = [];
+    segment.displayEtas = [];
     segment.busInterval = defaultFrequency;
     segment.readyTime = null;
     segment.boardTime = null;
     segment.arrivalTime = null;
     segment.waitMinutes = null;
+    segment.missedEtaCount = 0;
+    segment.catchableByEta = false;
     segment.timingFallbackReason = null;
     segment.historicalSchedule = null;
+}
+
+async function applyCurrentLocationApproach(route, currentLocation, gcpKey) {
+    const lat = Number(currentLocation?.lat);
+    const lng = Number(currentLocation?.lng);
+    const stopLat = Number(route?.oLat);
+    const stopLng = Number(route?.oLng);
+    if (![lat, lng, stopLat, stopLng].every(Number.isFinite)) return false;
+
+    const walkInfo = await fetchGCPRoute(lat, lng, stopLat, stopLng, 'walking', [], gcpKey);
+    route.originLoc = { lat, lng };
+    route.walkInfoOrigin = walkInfo;
+    route.walkTimeOrigin = walkInfo.duration;
+    route.gpsTimingApplied = true;
+    route.gpsLocation = { lat, lng };
+    route.gpsEvaluatedAt = new Date().toISOString();
+    return true;
 }
 
 async function applyNowTiming(route, now, options = {}) {
@@ -993,13 +1015,30 @@ async function applyNowTiming(route, now, options = {}) {
         const segment = route.segments[i];
         const defaultFrequency = parseFrequencyMinutes(segment.routeInfo?.freq, i === 0 ? 15 : 12);
         const etaList = await fetchSegmentETA(segment);
+        const displayEtas = (etaList || [])
+            .filter((eta) => eta?.eta && Number.isFinite(new Date(eta.eta).getTime()))
+            .sort((a, b) => new Date(a.eta) - new Date(b.eta));
         const readyTime = new Date(
             cursor.getTime() + (getLegApproachMinutes(route, i) + BOARDING_BUFFER_MIN) * 60000
         );
-        const nextValidEta = getNextValidBusETA(etaList, readyTime, now);
+        const activeEtas = getActiveEtas(etaList, now);
+        const nextValidEta = activeEtas.find((eta) => new Date(eta.eta) >= readyTime) || null;
+        const missedEtaCount = activeEtas.filter(
+            (eta) => new Date(eta.eta) < readyTime
+        ).length;
 
         resetSegmentTiming(segment, defaultFrequency);
         segment.readyTime = readyTime.toISOString();
+        segment.missedEtaCount = missedEtaCount;
+        segment.activeEtas = activeEtas.map((eta) => ({
+            ...eta,
+            catchable: new Date(eta.eta) >= readyTime,
+        }));
+        segment.catchableEtas = segment.activeEtas.filter((eta) => eta.catchable);
+        segment.displayEtas = displayEtas.map((eta) => ({
+            ...eta,
+            catchable: new Date(eta.eta) >= readyTime && new Date(eta.eta) > now,
+        }));
 
         if (!nextValidEta) {
             const canUseScheduledTransferFallback = (
@@ -1019,9 +1058,7 @@ async function applyNowTiming(route, now, options = {}) {
                 if (!historicalResult.valid) return false;
                 segment.timingFallbackReason = 'transfer_eta_unavailable_historical_schedule';
             }
-            segment.activeEtaCount = getActiveEtas(etaList, now).filter(
-                (eta) => new Date(eta.eta) >= readyTime
-            ).length;
+            segment.activeEtaCount = segment.catchableEtas.length;
             segment.boardTime = boardTime.toISOString();
             segment.arrivalTime = arrivalTime.toISOString();
             segment.waitMinutes = defaultFrequency;
@@ -1040,6 +1077,7 @@ async function applyNowTiming(route, now, options = {}) {
 
         segment.nextEta = nextValidEta.eta;
         segment.hasActiveEta = true;
+        segment.catchableByEta = true;
         segment.activeEtaCount = validEtaCount;
         segment.boardTime = boardTime.toISOString();
         segment.arrivalTime = arrivalTime.toISOString();
@@ -1135,10 +1173,18 @@ async function applyRouteTiming(route, options = {}) {
         now = new Date(),
         allowNoEtaNow = false,
         allowSparseHistoricalFallback = false,
+        currentLocation = null,
+        gcpKey,
     } = options;
     route.originWaitTime = 0;
 
     if (timeMode === 'now') {
+        if (currentLocation) {
+            await applyCurrentLocationApproach(route, currentLocation, gcpKey);
+        } else {
+            route.gpsTimingApplied = false;
+            route.gpsLocation = null;
+        }
         return applyNowTiming(route, now, { allowNoEta: allowNoEtaNow });
     }
 
@@ -1437,18 +1483,69 @@ function visibleRouteSequenceKey(candidate) {
     return candidate?.routePairKey || candidate?.dedupKey || candidate?.id || '';
 }
 
+function candidateWalkingMinutes(candidate) {
+    const walkValues = [
+        candidate?.walkTimeOrigin,
+        candidate?.walkTimeTransfer,
+        candidate?.walkTimeTransfer2,
+        candidate?.walkTimeDest,
+    ]
+        .map(Number)
+        .filter((value) => Number.isFinite(value) && value >= 0);
+    return walkValues.length > 0 ? walkValues.reduce((sum, value) => sum + value, 0) : Infinity;
+}
+
+function candidateEtaWaitMinutes(candidate) {
+    const segments = candidate?.segments || [];
+    // For a transfer, the connecting leg is the ETA that changes when the
+    // overlapping drop-off station changes. Direct routes use their first leg.
+    const etaSegments = segments.length > 1 ? segments.slice(1) : segments;
+    const segmentWaits = etaSegments
+        .map((segment) => Number(segment?.waitMinutes))
+        .filter((value) => Number.isFinite(value) && value >= 0);
+    if (segmentWaits.length > 0) return segmentWaits.reduce((sum, value) => sum + value, 0);
+    const originWait = Number(candidate?.originWaitTime);
+    return Number.isFinite(originWait) && originWait >= 0 ? originWait : Infinity;
+}
+
+function compareDisplayDuplicateCandidates(a, b) {
+    const walkingA = candidateWalkingMinutes(a);
+    const walkingB = candidateWalkingMinutes(b);
+    if (Number.isFinite(walkingA) && Number.isFinite(walkingB)) {
+        const walkingDelta = walkingA - walkingB;
+        // Walking convenience is the primary choice. ETA only breaks a close
+        // walking-time decision (three minutes or less apart).
+        if (Math.abs(walkingDelta) > 3) return walkingDelta;
+
+        const etaA = candidateEtaWaitMinutes(a);
+        const etaB = candidateEtaWaitMinutes(b);
+        const etaAWithinTarget = etaA <= 10;
+        const etaBWithinTarget = etaB <= 10;
+        if (etaAWithinTarget !== etaBWithinTarget) return etaAWithinTarget ? -1 : 1;
+        if (Number.isFinite(etaA) && Number.isFinite(etaB) && etaA !== etaB) {
+            return etaA - etaB;
+        }
+    } else if (Number.isFinite(walkingA) !== Number.isFinite(walkingB)) {
+        return Number.isFinite(walkingA) ? -1 : 1;
+    }
+
+    return compareRouteCandidates(a, b);
+}
+
 function deduplicateRankedRouteSequences(rankedCandidates) {
-    const seenSequences = new Set();
-    return (rankedCandidates || []).filter((candidate) => {
+    const bestBySequence = new Map();
+    for (const candidate of rankedCandidates || []) {
         const sequenceKey = visibleRouteSequenceKey(candidate);
-        if (seenSequences.has(sequenceKey)) return false;
-        seenSequences.add(sequenceKey);
-        return true;
-    });
+        const currentBest = bestBySequence.get(sequenceKey);
+        if (!currentBest || compareDisplayDuplicateCandidates(candidate, currentBest) < 0) {
+            bestBySequence.set(sequenceKey, candidate);
+        }
+    }
+    return [...bestBySequence.values()].sort(compareRouteCandidates);
 }
 
 async function findRoutes(params) {
-    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, gcpKey, onProgress } = params;
+    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, currentLocation = null, gcpKey, onProgress } = params;
     const planningStartedAt = Date.now();
     const now = new Date();
     const requestStatsBefore = requestStatsSnapshot();
@@ -1791,6 +1888,8 @@ async function findRoutes(params) {
             now,
             allowNoEtaNow: !strictEtaOnly,
             allowSparseHistoricalFallback,
+            currentLocation,
+            gcpKey,
         });
         if (isValid) filteredCandidates.push(route);
     }));
@@ -1815,6 +1914,8 @@ async function findRoutes(params) {
                 now,
                 allowNoEtaNow: !strictEtaOnly,
                 allowSparseHistoricalFallback,
+                currentLocation,
+                gcpKey,
             });
             if (isValid) refinedCandidates.push(route);
         }));

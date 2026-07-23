@@ -189,6 +189,62 @@ test('Now timing keeps a future transfer outside the live ETA horizon when its s
   assert.equal(route.segments[1].historicalSchedule.status, 'operating_station_level');
 });
 
+test('GPS approach time skips an unreachable transfer ETA and selects the next catchable bus', async () => {
+  const now = new Date(2026, 6, 15, 8, 0, 0);
+  const etaAt = (minutes) => new Date(now.getTime() + minutes * 60_000).toISOString();
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    if (value.includes('/api/google/directions/json')) {
+      return jsonResponse({ status: 'ZERO_RESULTS', routes: [] });
+    }
+    if (value.includes('/eta/A/1/1')) {
+      return jsonResponse({ data: [{ eta: etaAt(5) }] });
+    }
+    if (value.includes('/eta/B/2/1')) {
+      return jsonResponse({ data: [
+        { eta: etaAt(12) },
+        { eta: etaAt(18) },
+        { eta: etaAt(180) },
+      ] });
+    }
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const route = {
+    oLat: 22.3000,
+    oLng: 114.1700,
+    walkTimeOrigin: 0,
+    walkTimeTransfer: 2,
+    walkTimeDest: 0,
+    segments: [
+      {
+        route: '1', bound: 'I', service_type: '1', fromStop: 'A', toStop: 'B',
+        stops: ['A', 'B'], rideDurationMinutes: 5, routeInfo: { co: 'KMB', freq: '10' },
+      },
+      {
+        route: '2', bound: 'I', service_type: '1', fromStop: 'B', toStop: 'C',
+        stops: ['B', 'C'], rideDurationMinutes: 5, routeInfo: { co: 'KMB', freq: '10' },
+      },
+    ],
+  };
+
+  assert.equal(await engine.applyRouteTiming(route, {
+    timeMode: 'now',
+    now,
+    currentLocation: { lat: 22.2995, lng: 114.1700 },
+  }), true);
+  assert.equal(route.gpsTimingApplied, true);
+  assert.equal(route.walkTimeOrigin, 1);
+  assert.equal(route.segments[0].nextEta, etaAt(5));
+  assert.equal(route.segments[1].missedEtaCount, 1);
+  assert.equal(route.segments[1].nextEta, etaAt(18));
+  assert.equal(route.segments[1].catchableByEta, true);
+  assert.equal(route.segments[1].activeEtas.length, 2);
+  assert.equal(route.segments[1].displayEtas.length, 3);
+  assert.equal(route.segments[1].displayEtas[0].eta, etaAt(12));
+  assert.equal(route.segments[1].displayEtas[0].catchable, false);
+  assert.equal(route.segments[1].displayEtas[1].catchable, true);
+});
+
 test('shared-corridor retention samples transfer stops across the whole overlap', () => {
   const engine = loadEngine(async (url) => {
     throw new Error('Unexpected network request: ' + url);
@@ -315,6 +371,38 @@ test('same bus sequence displays only its best overlapping transfer stop', () =>
 
   assert.deepEqual(Array.from(displayed, (route) => route.id), ['later', 'different']);
   assert.equal(displayed[0].segments[0].toStop, 'K2');
+});
+
+test('duplicate-card choice prioritizes walking, then a close ETA within ten minutes', () => {
+  const engine = loadEngine(async (url) => {
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const makeCandidate = ({ id, walkTimeTransfer, waitMinutes, estimatedTime }) => ({
+    id,
+    routePairKey: '1t|671|I|1->269C|I|1',
+    transfers: 1,
+    estimatedTime,
+    historicalConfidenceScore: 2,
+    walkTimeOrigin: 0,
+    walkTimeTransfer,
+    walkTimeDest: 0,
+    segments: [
+      { route: '671', waitMinutes: 5 },
+      { route: '269C', waitMinutes },
+    ],
+  });
+
+  const walkingWinner = engine.deduplicateRankedRouteSequences([
+    makeCandidate({ id: 'short-walk', walkTimeTransfer: 5, waitMinutes: 18, estimatedTime: 70 }),
+    makeCandidate({ id: 'long-walk', walkTimeTransfer: 9, waitMinutes: 3, estimatedTime: 60 }),
+  ]);
+  assert.equal(walkingWinner[0].id, 'short-walk');
+
+  const etaWinner = engine.deduplicateRankedRouteSequences([
+    makeCandidate({ id: 'close-walk-late-bus', walkTimeTransfer: 8, waitMinutes: 14, estimatedTime: 70 }),
+    makeCandidate({ id: 'close-walk-quick-bus', walkTimeTransfer: 10, waitMinutes: 4, estimatedTime: 65 }),
+  ]);
+  assert.equal(etaWinner[0].id, 'close-walk-quick-bus');
 });
 
 test('Now shortlist prioritizes an operating transfer over faster inactive route pairs', async () => {
