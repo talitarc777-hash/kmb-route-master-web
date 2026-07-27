@@ -78,3 +78,21 @@ html,
   color: #94a3b8;
   border-color: #94a3b8;
 }
+
+.app-header {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+.safe-bottom-panel {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+@media (min-width: 640px) {
+  .app-header {
+    padding-top: max(1rem, env(safe-area-inset-top));
+  }
+
+  .safe-bottom-panel {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+}

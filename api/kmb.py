@@ -10,6 +10,59 @@ CSDI_BUS_ROUTE_QUERY_URL = (
     "https://portal.csdi.gov.hk/server/rest/services/common/"
     "td_rcd_1638844988873_41214/FeatureServer/0/query"
 )
+ALLOWED_GOOGLE_PATHS = {"geocode/json", "directions/json"}
+ALLOWED_DIRECTIONS_MODES = {"walking", "driving", "transit"}
+HK_BOUNDS = {"min_lat": 21.8, "max_lat": 22.7, "min_lng": 113.7, "max_lng": 114.6}
+
+def normalize_hk_coordinate(value):
+    parts = str(value or "").split(",")
+    if len(parts) != 2:
+        return None
+    try:
+        lat, lng = (float(part) for part in parts)
+    except (TypeError, ValueError):
+        return None
+    if not (HK_BOUNDS["min_lat"] <= lat <= HK_BOUNDS["max_lat"]):
+        return None
+    if not (HK_BOUNDS["min_lng"] <= lng <= HK_BOUNDS["max_lng"]):
+        return None
+    return f"{lat},{lng}"
+
+def build_google_query(subpath, incoming_query, api_key):
+    value = lambda name: str(incoming_query.get(name, [""])[0]).strip()
+    if subpath == "geocode/json":
+        address = value("address")
+        if not address or len(address) > 200:
+            return None
+        return {"address": [address], "components": ["country:hk"], "key": [api_key]}
+
+    origin = normalize_hk_coordinate(value("origin"))
+    destination = normalize_hk_coordinate(value("destination"))
+    mode = value("mode").lower()
+    if not origin or not destination or mode not in ALLOWED_DIRECTIONS_MODES:
+        return None
+
+    query = {
+        "origin": [origin],
+        "destination": [destination],
+        "mode": [mode],
+        "key": [api_key],
+    }
+    waypoints_text = value("waypoints")
+    if waypoints_text:
+        waypoints = [normalize_hk_coordinate(point) for point in waypoints_text.split("|")]
+        if len(waypoints) > 23 or any(point is None for point in waypoints):
+            return None
+        query["waypoints"] = ["|".join(waypoints)]
+    if mode == "transit":
+        query["transit_mode"] = ["bus"]
+    if value("alternatives") == "true":
+        query["alternatives"] = ["true"]
+    for time_key in ("departure_time", "arrival_time"):
+        time_value = value(time_key)
+        if re.fullmatch(r"\d{9,12}", time_value):
+            query[time_key] = [time_value]
+    return query
 
 class handler(BaseHTTPRequestHandler):
     def send_json(self, payload, status_code=200, cache_control="no-store"):
@@ -51,12 +104,24 @@ class handler(BaseHTTPRequestHandler):
                     "routes": [],
                 }, status_code=503)
             
-            # 2. Extract the sub-path (e.g., place/autocomplete/json)
+            # 2. Extract and restrict the Google Maps API sub-path.
             google_subpath = path.replace('/api/google/', '')
+            if google_subpath not in ALLOWED_GOOGLE_PATHS:
+                return self.send_json({
+                    "status": "NOT_FOUND",
+                    "error_message": "Unsupported Google Maps API path.",
+                    "routes": [],
+                }, status_code=404)
             
-            # 3. Rebuild the query parameters and add the key
-            query_params['key'] = [api_key]
-            new_query = urllib.parse.urlencode(query_params, doseq=True)
+            # 3. Restrict parameters to the app's Hong Kong planning requests.
+            google_query = build_google_query(google_subpath, query_params, api_key)
+            if google_query is None:
+                return self.send_json({
+                    "status": "INVALID_REQUEST",
+                    "error_message": "The Google request is outside the supported Hong Kong route-planning shape.",
+                    "routes": [],
+                }, status_code=400)
+            new_query = urllib.parse.urlencode(google_query, doseq=True)
             
             target_url = f"https://maps.googleapis.com/maps/api/{google_subpath}?{new_query}"
         

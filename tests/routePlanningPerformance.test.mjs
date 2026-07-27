@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 import {
+  buildKmbNetworkIndexes,
   clearKmbStaticInflightForTests,
   createLatestRequestTracker,
   filterRouteOptionsByGoogleTransitPermission,
@@ -13,6 +14,7 @@ import {
   buildKmbGeometryCacheKey,
   filterKmbOverlayVariantsByDirection,
 } from '../src/utils/kmbGeometryCache.js';
+import { findLocalKmbStopSuggestions } from '../src/utils/locationSearch.js';
 
 const engineSource = await readFile(new URL('../public/routeEngine.js', import.meta.url), 'utf8');
 
@@ -510,6 +512,47 @@ test('planned search rejects a clearly inactive route before Google enrichment',
   assert.equal(urls.some((url) => url.includes('/eta/')), false);
 });
 
+test('Google ride refinement is opt-in and never borrows another bus route duration', async () => {
+  const operationSchedule = schedule();
+  const urls = [];
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    urls.push(value);
+    if (value.includes('kmb_operation_time_slots')) return jsonResponse(operationSchedule);
+    if (value.includes('/api/google/')) {
+      return jsonResponse({
+        status: 'OK',
+        routes: [{
+          legs: [{
+            steps: [{
+              travel_mode: 'TRANSIT',
+              duration: { value: 60 },
+              transit_details: {
+                line: { short_name: '999', vehicle: { type: 'BUS' } },
+              },
+            }],
+          }],
+        }],
+      });
+    }
+    throw new Error(`Unexpected network request: ${url}`);
+  });
+
+  const result = await engine.findRoutes({
+    ...directFixture(),
+    timeMode: 'leave',
+    dateValue: '2026-07-15',
+    timeValue: '08:00',
+    useGoogleRefinement: true,
+  });
+
+  assert.equal(result.debugSummary.googleRefinementEnabled, true);
+  assert.equal(result.debugSummary.googleRideCandidatesRefined, 1);
+  assert.equal(result.debugSummary.requests.gcpNetworkRequests, 1);
+  assert.equal(result.filteredCandidates[0].segments[0].rideDurationSource, 'heuristic_per_stop');
+  assert.equal(urls.filter((url) => url.includes('/api/google/')).length, 1);
+});
+
 test('Now search rejects a route with no live ETA before Google enrichment', async () => {
   const urls = [];
   const engine = loadEngine(async (url) => {
@@ -572,6 +615,96 @@ test('does not create meaningless same-number transfers such as 116 to 116', asy
   assert.equal(result.filteredCandidates.length, 0);
   assert.equal(result.debugSummary.candidatesGenerated, 0);
   assert.equal(urls.length, 0);
+});
+
+test('direct search retains a slightly farther boarding stop when the closest stop is too late', async () => {
+  const urls = [];
+  const engine = loadEngine(async (url) => {
+    urls.push(String(url));
+    if (String(url).includes('/eta/')) return jsonResponse({ data: [] });
+    throw new Error(`Unexpected network request: ${url}`);
+  });
+  const route = { route: 'R', bound: 'I', service_type: '1' };
+  const stopMap = {
+    A: { lat: 22.3040, lng: 114.1000, name_en: 'Earlier boarding stop' },
+    B: { lat: 22.3200, lng: 114.1000, name_en: 'Destination stop' },
+    C: { lat: 22.3000, lng: 114.1000, name_en: 'Closest but too late' },
+  };
+
+  const result = await engine.findRoutes({
+    originLoc: { lat: 22.3000, lng: 114.1000 },
+    destLoc: { lat: 22.3200, lng: 114.1000 },
+    stopMap,
+    routeMap: { 'R|I|1': { ...route, co: 'KMB', freq: '10' } },
+    routeStops: { 'R|I|1': ['A', 'B', 'C'] },
+    stopRoutes: {
+      A: [{ ...route, seq: 1 }],
+      B: [{ ...route, seq: 2 }],
+      C: [{ ...route, seq: 3 }],
+    },
+    timeMode: 'now',
+    dateValue: '',
+    timeValue: '',
+    excludedRoutesText: '',
+    strictEtaOnly: false,
+    allowSparseHistoricalFallback: false,
+  });
+
+  assert.equal(result.filteredCandidates.length, 1);
+  assert.equal(result.filteredCandidates[0].segments[0].fromStop, 'A');
+  assert.equal(urls.some((url) => url.includes('/api/google/')), false);
+});
+
+test('two-transfer search uses a genuine middle route that does not already reach the destination', async () => {
+  const engine = loadEngine(async (url) => {
+    if (String(url).includes('/eta/')) return jsonResponse({ data: [] });
+    throw new Error(`Unexpected network request: ${url}`);
+  });
+  const first = { route: 'A', bound: 'I', service_type: '1' };
+  const middle = { route: 'B', bound: 'I', service_type: '1' };
+  const final = { route: 'C', bound: 'I', service_type: '1' };
+  const stopMap = {
+    O: { lat: 22.3000, lng: 114.1000, name_en: 'Origin' },
+    A1: { lat: 22.3100, lng: 114.1000, name_en: 'First alight' },
+    B1: { lat: 22.3101, lng: 114.1000, name_en: 'Middle board' },
+    B2: { lat: 22.3200, lng: 114.1000, name_en: 'Middle alight' },
+    C1: { lat: 22.3201, lng: 114.1000, name_en: 'Final board' },
+    D: { lat: 22.3300, lng: 114.1000, name_en: 'Destination' },
+  };
+  const withSeq = (route, seq) => ({ ...route, seq });
+
+  const result = await engine.findRoutes({
+    originLoc: { lat: stopMap.O.lat, lng: stopMap.O.lng },
+    destLoc: { lat: stopMap.D.lat, lng: stopMap.D.lng },
+    stopMap,
+    routeMap: {
+      'A|I|1': { ...first, co: 'KMB', freq: '10' },
+      'B|I|1': { ...middle, co: 'KMB', freq: '10' },
+      'C|I|1': { ...final, co: 'KMB', freq: '10' },
+    },
+    routeStops: {
+      'A|I|1': ['O', 'A1'],
+      'B|I|1': ['B1', 'B2'],
+      'C|I|1': ['C1', 'D'],
+    },
+    stopRoutes: {
+      O: [withSeq(first, 1)], A1: [withSeq(first, 2)],
+      B1: [withSeq(middle, 1)], B2: [withSeq(middle, 2)],
+      C1: [withSeq(final, 1)], D: [withSeq(final, 2)],
+    },
+    timeMode: 'now',
+    dateValue: '',
+    timeValue: '',
+    excludedRoutesText: '',
+    strictEtaOnly: false,
+    allowSparseHistoricalFallback: false,
+  });
+
+  assert.ok(result.filteredCandidates.length > 0);
+  assert.equal(
+    result.filteredCandidates[0].segments.map((segment) => segment.route).join(' -> '),
+    'A -> B -> C',
+  );
 });
 
 test('shared-corridor transfers keep KT609-like early options until live ranking', async () => {
@@ -654,8 +787,9 @@ test('duplicate route records produce one candidate and reuse enrichment request
   assert.equal(result.debugSummary.candidatesGenerated, 1);
   assert.equal(result.filteredCandidates.length, 1);
   assert.equal(urls.some((url) => url.includes('/eta/')), false);
+  assert.equal(urls.some((url) => url.includes('/api/google/')), false);
   assert.equal(repeated.debugSummary.candidatesGenerated, 1);
-  assert.ok(repeated.debugSummary.requests.gcpCacheHits >= 3);
+  assert.equal(repeated.debugSummary.requests.gcpCacheHits, 0);
   assert.equal(repeated.debugSummary.requests.gcpNetworkRequests, 0);
 });
 
@@ -676,6 +810,43 @@ test('static KMB loader shares concurrent payload downloads', async () => {
 
   assert.equal(calls, 3);
   assert.equal(first, second);
+});
+
+test('KMB network indexes sort route stops by sequence and skip invalid coordinates', () => {
+  const network = buildKmbNetworkIndexes({
+    stopsData: {
+      data: [
+        { stop: 'A', name_en: 'A', lat: '22.30', long: '114.17' },
+        { stop: 'B', name_en: 'B', lat: '22.31', long: '114.18' },
+        { stop: 'BAD', name_en: 'Bad', lat: '', long: 'not-a-number' },
+      ],
+    },
+    routesData: {
+      data: [{ route: '1', bound: 'I', service_type: '1', co: 'KMB' }],
+    },
+    routeStopsData: {
+      data: [
+        { route: '1', bound: 'I', service_type: '1', stop: 'B', seq: '2' },
+        { route: '1', bound: 'I', service_type: '1', stop: 'A', seq: '1' },
+      ],
+    },
+  });
+
+  assert.deepEqual(network.routeStops['1|I|1'], ['A', 'B']);
+  assert.equal(network.stopMap.BAD, undefined);
+  assert.equal(network.stopRoutes.A[0].seq, 1);
+  assert.equal(network.routeMap['1|I|1'].co, 'KMB');
+});
+
+test('local KMB stop suggestions prioritize exact stop IDs without an external lookup', () => {
+  const suggestions = findLocalKmbStopSuggestions({
+    KT609: { name_tc: '觀塘法院', name_en: 'Kwun Tong Law Courts', lat: 22.31, lng: 114.23 },
+    KT610: { name_tc: '觀塘站', name_en: 'Kwun Tong Station', lat: 22.312, lng: 114.226 },
+  }, 'KT609');
+
+  assert.equal(suggestions[0].place_id, 'kmb-stop:KT609');
+  assert.equal(suggestions[0].lat, 22.31);
+  assert.match(suggestions[0].description, /觀塘法院/);
 });
 
 test('latest-request tracker marks an earlier result stale', () => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { publishApiBaseUrl, toApiUrl } from './utils/apiBase.js';
 import {
+  buildKmbNetworkIndexes,
   createLatestRequestTracker,
   filterRouteOptionsByGoogleTransitPermission,
   loadKmbPayloads,
@@ -9,6 +10,7 @@ import {
   buildKmbGeometryCacheKey,
   filterKmbOverlayVariantsByDirection,
 } from './utils/kmbGeometryCache.js';
+import { findLocalKmbStopSuggestions } from './utils/locationSearch.js';
 
 publishApiBaseUrl();
 
@@ -24,18 +26,15 @@ const ROUTE_COLORS = [
   '#65A30D',
 ];
 
-const GCP_CACHE_LIMIT = 200;
+const PERSISTENT_CACHE_LIMIT = 200;
 const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
-const GCP_AUTOCOMPLETE_CACHE_KEY = 'kmb_gcp_autocomplete_cache_v1';
 const GCP_TRANSIT_GAP_CACHE_KEY = 'kmb_gcp_transit_gap_cache_v1';
 const STATIC_OPERATOR_FARE_CACHE_KEY = 'kmb_static_operator_fare_cache_v1';
 const CSDI_ROUTE_GEOMETRY_CACHE_KEY = 'kmb_csdi_route_geometry_cache_v1';
 const GCP_GEOCODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const GCP_AUTOCOMPLETE_TTL_MS = 12 * 60 * 60 * 1000;
 const GCP_TRANSIT_GAP_TTL_MS = 15 * 60 * 1000;
 const STATIC_OPERATOR_FARE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CSDI_ROUTE_GEOMETRY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ARCGIS_JS_URL = 'https://js.arcgis.com/4.29/';
 const CSDI_BUS_ROUTE_QUERY_URL =
   'https://portal.csdi.gov.hk/server/rest/services/common/' +
@@ -79,14 +78,6 @@ const geocodeCacheState = {
   ttlMs: GCP_GEOCODE_TTL_MS,
 };
 
-const autocompleteCacheState = {
-  memory: new Map(),
-  inflight: new Map(),
-  persisted: null,
-  storageKey: GCP_AUTOCOMPLETE_CACHE_KEY,
-  ttlMs: GCP_AUTOCOMPLETE_TTL_MS,
-};
-
 const transitGapCacheState = {
   memory: new Map(),
   inflight: new Map(),
@@ -111,7 +102,7 @@ const csdiRouteGeometryCacheState = {
   ttlMs: CSDI_ROUTE_GEOMETRY_TTL_MS,
 };
 
-function loadGcpCache(state) {
+function loadPersistentCache(state) {
   if (state.persisted) return state.persisted;
   state.persisted = new Map();
   try {
@@ -130,59 +121,59 @@ function loadGcpCache(state) {
   return state.persisted;
 }
 
-function saveGcpCache(state) {
+function savePersistentCache(state) {
   try {
     const now = Date.now();
-    const rows = Array.from(loadGcpCache(state).entries())
+    const rows = Array.from(loadPersistentCache(state).entries())
       .map(([key, row]) => ({ key, ...row }))
       .filter((row) => row.expiresAt > now)
       .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
-      .slice(0, GCP_CACHE_LIMIT);
+      .slice(0, PERSISTENT_CACHE_LIMIT);
     localStorage.setItem(state.storageKey, JSON.stringify(rows));
   } catch {
     // Ignore quota/storage errors to avoid blocking UI.
   }
 }
 
-function getCachedGcpValue(state, key) {
+function getCachedValue(state, key) {
   const memoryHit = state.memory.get(key);
   if (memoryHit) {
     if (memoryHit.expiresAt > Date.now()) return memoryHit.value;
     state.memory.delete(key);
   }
-  const cache = loadGcpCache(state);
+  const cache = loadPersistentCache(state);
   const hit = cache.get(key);
   if (!hit) return null;
   if (hit.expiresAt <= Date.now()) {
     cache.delete(key);
-    saveGcpCache(state);
+    savePersistentCache(state);
     return null;
   }
   state.memory.set(key, { value: hit.value, expiresAt: hit.expiresAt });
   return hit.value;
 }
 
-function setCachedGcpValue(state, key, value) {
+function setCachedValue(state, key, value) {
   const expiresAt = Date.now() + state.ttlMs;
   state.memory.set(key, { value, expiresAt });
-  const cache = loadGcpCache(state);
+  const cache = loadPersistentCache(state);
   cache.set(key, {
     value,
     savedAt: Date.now(),
     expiresAt,
   });
-  saveGcpCache(state);
+  savePersistentCache(state);
 }
 
-async function fetchGcpWithCache(state, key, fetcher) {
-  const cached = getCachedGcpValue(state, key);
+async function fetchWithPersistentCache(state, key, fetcher) {
+  const cached = getCachedValue(state, key);
   if (cached) return cached;
   if (state.inflight.has(key)) return state.inflight.get(key);
 
   const request = (async () => {
     try {
       const value = await fetcher();
-      if (value !== null && value !== undefined) setCachedGcpValue(state, key, value);
+      if (value !== null && value !== undefined) setCachedValue(state, key, value);
       return value;
     } finally {
       state.inflight.delete(key);
@@ -396,7 +387,7 @@ async function fetchCsdiRouteFeatures(routeNumber) {
   const route = String(routeNumber || '').trim().toUpperCase();
   if (!/^[A-Z0-9]{1,8}$/.test(route)) return [];
 
-  return fetchGcpWithCache(csdiRouteGeometryCacheState, route, async () => {
+  return fetchWithPersistentCache(csdiRouteGeometryCacheState, route, async () => {
     const urls = [
       toApiUrl(`/api/kmb/route-geometry?route=${encodeURIComponent(route)}`),
       buildDirectCsdiRouteUrl(route),
@@ -435,58 +426,11 @@ function parseLocationInput(input) {
   return { type: 'text', query: trimmed };
 }
 
-function parseNominatimPlaceId(placeId) {
-  if (typeof placeId !== 'string' || !placeId.startsWith('nominatim:')) return null;
-  const pair = placeId.slice('nominatim:'.length).split(',');
-  if (pair.length !== 2) return null;
-  const lat = Number(pair[0]);
-  const lng = Number(pair[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng };
-}
-
-function buildNominatimSuggestion(row) {
-  const lat = Number(row?.lat);
-  const lng = Number(row?.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  const label = String(row?.display_name || '').trim();
-  if (!label) return null;
-  const pieces = label.split(',').map((part) => part.trim()).filter(Boolean);
-  return {
-    place_id: `nominatim:${lat},${lng}`,
-    description: label,
-    structured_formatting: {
-      main_text: pieces[0] || label,
-      secondary_text: pieces.slice(1).join(', '),
-    },
-  };
-}
-
-async function searchNominatim(query, limit = 1) {
-  const search = new URLSearchParams({
-    format: 'jsonv2',
-    countrycodes: 'hk',
-    addressdetails: '0',
-    limit: String(Math.max(1, limit)),
-    q: query,
-  });
-  const response = await fetch(`${NOMINATIM_SEARCH_URL}?${search.toString()}`);
-  if (!response.ok) return [];
-  const payload = await response.json();
-  if (!Array.isArray(payload)) return [];
-  return payload;
-}
-
-async function geocode(query, placeId = null) {
-  const selectedNominatim = parseNominatimPlaceId(placeId);
-  if (selectedNominatim) return { ...selectedNominatim, name: query };
-
+async function geocode(query) {
   const normalizedQuery = query.trim().toLowerCase();
-  const cacheKey = placeId ? `pid:${placeId}` : `q:${normalizedQuery}`;
-  return fetchGcpWithCache(geocodeCacheState, cacheKey, async () => {
-    const queryPart = placeId
-      ? `place_id=${encodeURIComponent(placeId)}`
-      : `address=${encodeURIComponent(query)}&components=country:hk`;
+  const cacheKey = `q:${normalizedQuery}`;
+  return fetchWithPersistentCache(geocodeCacheState, cacheKey, async () => {
+    const queryPart = `address=${encodeURIComponent(query)}&components=country:hk`;
 
     try {
       const res = await fetch(toApiUrl(`/api/google/geocode/json?${queryPart}`));
@@ -498,23 +442,26 @@ async function geocode(query, placeId = null) {
         }
       }
     } catch {
-      // Continue to fallback geocoder below.
+      // A free-text place cannot be resolved without the optional Google service.
     }
 
-    const fallbackRows = await searchNominatim(query, 1);
-    const fallback = buildNominatimSuggestion(fallbackRows[0]);
-    if (!fallback) return null;
-    const loc = parseNominatimPlaceId(fallback.place_id);
-    return loc ? { ...loc, name: query } : null;
+    return null;
   });
 }
 
 async function resolveLocation(inputObj) {
-  const rawText = typeof inputObj === 'string' ? inputObj : inputObj.name;
-  const placeId = typeof inputObj === 'object' ? inputObj.place_id : null;
+  const directLat = Number(typeof inputObj === 'object' ? inputObj?.lat : null);
+  const directLng = Number(typeof inputObj === 'object' ? inputObj?.lng : null);
+  const rawText = typeof inputObj === 'string' ? inputObj : inputObj?.name;
+  if (Number.isFinite(directLat) && Number.isFinite(directLng)) {
+    return { lat: directLat, lng: directLng, name: rawText || 'KMB stop' };
+  }
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    throw new Error('Please enter both an origin and a destination.');
+  }
   const parsed = parseLocationInput(rawText);
   if (parsed.type === 'coords') return { lat: parsed.lat, lng: parsed.lng, name: rawText };
-  const result = await geocode(rawText, placeId);
+  const result = await geocode(rawText);
   if (!result) throw new Error(`Cannot find location: "${rawText}"`);
   return { ...result, name: rawText };
 }
@@ -1034,7 +981,7 @@ async function lookupStaticOperatorFare(operator, route) {
   if (!operatorKey || !routeLabel) return null;
 
   const cacheKey = `${operatorKey}:${routeLabel.toUpperCase()}`;
-  return fetchGcpWithCache(staticOperatorFareCacheState, cacheKey, async () => {
+  return fetchWithPersistentCache(staticOperatorFareCacheState, cacheKey, async () => {
     const query = new URLSearchParams({ operator: operatorKey, route: routeLabel });
     const response = await fetch(toApiUrl(`/api/operators/fare?${query.toString()}`));
     if (!response.ok) return null;
@@ -1058,7 +1005,7 @@ async function lookupStaticRailLeg(leg) {
     destinationLabel.toUpperCase(),
   ].join(':');
 
-  return fetchGcpWithCache(staticOperatorFareCacheState, cacheKey, async () => {
+  return fetchWithPersistentCache(staticOperatorFareCacheState, cacheKey, async () => {
     const query = new URLSearchParams({
       operator: operatorKey,
       line: lineLabel,
@@ -1378,7 +1325,7 @@ async function generateGoogleTransitGapCandidates(gap, options = {}) {
     Math.floor(referenceTime.getTime() / GCP_TRANSIT_GAP_TTL_MS),
   ].join('|');
 
-  const data = await fetchGcpWithCache(transitGapCacheState, cacheKey, async () => {
+  const data = await fetchWithPersistentCache(transitGapCacheState, cacheKey, async () => {
     const response = await fetch(toApiUrl(`/api/google/directions/json?${query.toString()}`));
     return response.json();
   });
@@ -1462,55 +1409,21 @@ function annotateGapRepairCandidates(candidates, gap) {
 }
 
 // Autocomplete Input Component
-const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
+const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) => {
   const displayValue = typeof value === 'string' ? value : value?.name || '';
   const [suggestions, setSuggestions] = useState([]);
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    let active = true;
-    const timer = setTimeout(async () => {
-      const trimmedValue = displayValue.trim();
-      const hasSelectedPlace = Boolean(value && typeof value === 'object' && value.place_id);
-      const parsedValue = trimmedValue ? parseLocationInput(trimmedValue) : null;
-
-      if (trimmedValue.length < 2 || hasSelectedPlace || parsedValue?.type === 'coords') {
-        setSuggestions([]);
-        return;
-      }
-      try {
-        const key = trimmedValue.toLowerCase();
-        const predictions = await fetchGcpWithCache(
-          autocompleteCacheState,
-          key,
-          async () => {
-            try {
-              const res = await fetch(
-                toApiUrl(`/api/google/place/autocomplete/json?input=${encodeURIComponent(trimmedValue)}&components=country:hk`),
-              );
-              const data = await res.json();
-              if (data?.status === 'OK' && Array.isArray(data.predictions)) {
-                return data.predictions.slice(0, 5);
-              }
-            } catch {
-              // Continue to fallback autocomplete below.
-            }
-
-            const rows = await searchNominatim(trimmedValue, 5);
-            return rows.map(buildNominatimSuggestion).filter(Boolean).slice(0, 5);
-          },
-        );
-        if (active) setSuggestions(predictions || []);
-      } catch (e) {
-        console.error('Fetch Error:', e);
-        if (active) setSuggestions([]);
-      }
-    }, 350);
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [value, displayValue]);
+    const trimmedValue = displayValue.trim();
+    const hasSelectedPlace = Boolean(value && typeof value === 'object' && value.place_id);
+    const parsedValue = trimmedValue ? parseLocationInput(trimmedValue) : null;
+    if (trimmedValue.length < 2 || hasSelectedPlace || parsedValue?.type === 'coords') {
+      setSuggestions([]);
+      return;
+    }
+    setSuggestions(findLocalKmbStopSuggestions(stopMap, trimmedValue, 5));
+  }, [value, displayValue, stopMap]);
 
   return (
     <div className="relative w-full">
@@ -1546,7 +1459,12 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
             <div
               key={`${s.place_id}:${s.description}`}
               onMouseDown={() => {
-                onChange({ name: s.description, place_id: s.place_id });
+                onChange({
+                  name: s.description,
+                  place_id: s.place_id,
+                  lat: s.lat,
+                  lng: s.lng,
+                });
                 setShow(false);
               }}
               className="px-4 py-3 hover:bg-slate-50 cursor-pointer text-sm border-b border-slate-100"
@@ -2175,6 +2093,8 @@ const App = () => {
   const searchCacheRef = useRef(new Map());
   const kmbRouteGeometryCacheRef = useRef(new Map());
   const kmbRoadGeometryCacheRef = useRef(new Map());
+  const mapDrawRequestRef = useRef(0);
+  const overlayDrawRequestRef = useRef(0);
   const selectedEtaRequestRef = useRef(0);
   const searchRequestTrackerRef = useRef(null);
   if (!searchRequestTrackerRef.current) {
@@ -2424,44 +2344,11 @@ const App = () => {
       setLoadingStatus('Processing Map Data...');
       const { stopsData, routesData, routeStopsData } = payloads;
 
-      // 1. Process Stops (ID -> Name/Lat/Long)
-      const sm = {};
-      stopsData.data.forEach(s => {
-        sm[s.stop] = {
-          name_en: s.name_en,
-          name_tc: s.name_tc,
-          lat: parseFloat(s.lat),
-          lng: parseFloat(s.long),
-        };
-      });
-      stopMapRef.current = sm;
-
-      // 2. Process Routes
-      const rm = {};
-      routesData.data.forEach(r => {
-        // Create a unique key for each route direction
-        rm[`${r.route}|${r.bound}|${r.service_type}`] = r;
-      });
-      routeMapRef.current = rm;
-
-      // 3. Process Route-Stop Relationships (The sequences)
-      const rs = {};
-      const sr = {};
-      routeStopsData.data.forEach(item => {
-        const key = `${item.route}|${item.bound}|${item.service_type}`;
-        if (!rs[key]) rs[key] = [];
-        rs[key].push(item.stop);
-        
-        if (!sr[item.stop]) sr[item.stop] = [];
-        sr[item.stop].push({
-          route: item.route,
-          bound: item.bound,
-          service_type: item.service_type,
-          seq: parseInt(item.seq),
-        });
-      });
-      routeStopsRef.current = rs;
-      stopRoutesRef.current = sr;
+      const network = buildKmbNetworkIndexes({ stopsData, routesData, routeStopsData });
+      stopMapRef.current = network.stopMap;
+      routeMapRef.current = network.routeMap;
+      routeStopsRef.current = network.routeStops;
+      stopRoutesRef.current = network.stopRoutes;
 
       setLoadingStatus('Ready');
       setDataLoaded(true);
@@ -2576,21 +2463,16 @@ const App = () => {
     }
   };
 
-  const clearMapGraphics = () => graphicsLayerRef.current?.removeAll();
-  const clearOverlayStopGraphics = () => {
-    const layer = graphicsLayerRef.current;
-    if (!layer?.graphics) return;
-    const graphics = typeof layer.graphics.toArray === 'function'
-      ? layer.graphics.toArray()
-      : Array.from(layer.graphics || []);
-    graphics
-      .filter((graphic) => graphic?.attributes?.source === 'route-overlay')
-      .forEach((graphic) => layer.remove(graphic));
+  const removeMapGraphics = () => graphicsLayerRef.current?.removeAll();
+  const clearMapGraphics = () => {
+    mapDrawRequestRef.current += 1;
+    removeMapGraphics();
   };
   const clearRouteOverlay = () => {
+    overlayDrawRequestRef.current += 1;
     routeOverlayLayerRef.current?.removeAll();
     routeOverlayStopLayerRef.current?.removeAll();
-    clearOverlayStopGraphics();
+    setIsOverlayLoading(false);
     setOverlayFeedback(null);
   };
   const clearStationLabel = () => stationLabelLayerRef.current?.removeAll();
@@ -2953,7 +2835,9 @@ const App = () => {
       console.warn('CSDI bus route geometry unavailable:', err);
     }
 
-    if (!window.routeEngine?.fetchGCPRoute) return local.geometry;
+    if (options.allowGoogleFallback !== true || !window.routeEngine?.fetchGCPRoute) {
+      return local.geometry;
+    }
 
     try {
       const start = local.stops[0];
@@ -2982,8 +2866,9 @@ const App = () => {
     leg.destination_stop,
   ].map(mapPointFromStop).filter(Boolean);
 
-  const drawFallbackRouteOnMap = async (route) => {
-    clearMapGraphics();
+  const drawFallbackRouteOnMap = async (route, requestId) => {
+    const isCurrentDraw = () => mapDrawRequestRef.current === requestId;
+    if (!isCurrentDraw()) return;
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = graphicsLayerRef.current;
     const view = viewRef.current;
@@ -3047,7 +2932,9 @@ const App = () => {
           leg.source_segment.routeKey || leg.source_segment.stops.join('>'),
           leg.source_segment.route,
           leg.source_segment.routeInfo?.co || leg.operator,
+          { allowGoogleFallback: allowFallbackNonKmb },
         );
+        if (!isCurrentDraw()) return;
       }
 
       const isWalking = leg.operator === 'WALK' || leg.mode === 'walking';
@@ -3064,6 +2951,7 @@ const App = () => {
 
     const lats = allPoints.map((point) => point.lat);
     const lngs = allPoints.map((point) => point.lng);
+    if (!isCurrentDraw()) return;
     view.goTo(
       new Extent({
         xmin: Math.min(...lngs) - 0.005,
@@ -3139,6 +3027,7 @@ const App = () => {
           excludedRoutesText,
           strictEtaOnly: searchAllowFallback ? false : searchStrictEtaOnly,
           allowSparseHistoricalFallback: timeMode !== 'now',
+          useGoogleRefinement: searchAllowFallback,
           currentLocation: timeMode === 'now' && isGpsTimingEnabled
             ? currentLocationRef.current
             : null,
@@ -3305,11 +3194,14 @@ const App = () => {
 
   // Draw route on map
   const drawRouteOnMap = async (route) => {
+    const requestId = mapDrawRequestRef.current + 1;
+    mapDrawRequestRef.current = requestId;
+    const isCurrentDraw = () => mapDrawRequestRef.current === requestId;
+    removeMapGraphics();
     if (isFallbackRoute(route)) {
-      await drawFallbackRouteOnMap(route);
+      await drawFallbackRouteOnMap(route, requestId);
       return;
     }
-    clearMapGraphics();
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = graphicsLayerRef.current;
     const view = viewRef.current;
@@ -3388,7 +3280,9 @@ const App = () => {
         seg.routeKey || (seg.stops || []).join('>'),
         seg.route,
         seg.routeInfo?.co || 'KMB',
+        { allowGoogleFallback: allowFallbackNonKmb },
       );
+      if (!isCurrentDraw()) return;
 
       if (routeGeometry.length >= 2) drawPoly(routeGeometry, color, 6, 'solid');
       segStops.forEach((s, idx) => {
@@ -3420,7 +3314,7 @@ const App = () => {
       );
     }
 
-    if (allLats.length > 0) {
+    if (isCurrentDraw() && allLats.length > 0) {
       const minLat = Math.min(...allLats);
       const maxLat = Math.max(...allLats);
       const minLng = Math.min(...allLngs);
@@ -3434,7 +3328,7 @@ const App = () => {
           ymax: maxLat + 0.005,
           spatialReference: { wkid: 4326 },
         }).expand(1.1),
-      );
+      ).catch(() => {});
     }
   };
 
@@ -3529,15 +3423,17 @@ const App = () => {
         : '';
     const { Graphic, Polyline, Point, Extent } = arcgisModulesRef.current || {};
     const layer = routeOverlayLayerRef.current;
-    const stopLayer = graphicsLayerRef.current;
+    const stopLayer = routeOverlayStopLayerRef.current;
     const view = viewRef.current;
     if (!routeNumber || !layer || !stopLayer || !view || !Graphic || !Polyline || !Point || !Extent) return;
 
+    const requestId = overlayDrawRequestRef.current + 1;
+    overlayDrawRequestRef.current = requestId;
+    const isCurrentDraw = () => overlayDrawRequestRef.current === requestId;
     setIsOverlayLoading(true);
     setOverlayFeedback(null);
     layer.removeAll();
-    routeOverlayStopLayerRef.current?.removeAll();
-    clearOverlayStopGraphics();
+    stopLayer.removeAll();
 
     try {
       const variantKeys = Object.keys(routeStopsRef.current || {})
@@ -3569,17 +3465,20 @@ const App = () => {
         const { stops } = getKmbStopSequenceGeometry(stopIds, key);
         const overlayRouteInfo = routeMapRef.current[key] || {};
         const overlayDestinationName = overlayRouteInfo.dest_en || overlayRouteInfo.dest_tc || '';
-        const citybusOverlayStops = await getCompactOperatorOverlayStops('citybus', routeNumber, {
-          referenceStops: stops,
-          destinationName: overlayDestinationName,
-        });
-        const geometry = await getKmbRoadGeometry(
-          stopIds,
-          key,
-          routeNumber,
-          overlayRouteInfo.co || 'KMB',
-          { fullRoute: true },
-        );
+        const [citybusOverlayStops, geometry] = await Promise.all([
+          getCompactOperatorOverlayStops('citybus', routeNumber, {
+            referenceStops: stops,
+            destinationName: overlayDestinationName,
+          }),
+          getKmbRoadGeometry(
+            stopIds,
+            key,
+            routeNumber,
+            overlayRouteInfo.co || 'KMB',
+            { fullRoute: true, allowGoogleFallback: allowFallbackNonKmb },
+          ),
+        ]);
+        if (!isCurrentDraw()) return;
         if (stops.length < 2 || geometry.length < 2) continue;
 
         layer.add(
@@ -3674,6 +3573,7 @@ const App = () => {
         });
       }
 
+      if (!isCurrentDraw()) return;
       if (pointsForExtent.length > 1) {
         const lats = pointsForExtent.map((point) => point.lat);
         const lngs = pointsForExtent.map((point) => point.lng);
@@ -3698,10 +3598,11 @@ const App = () => {
           ` · ${selectedStopCount} KMB stops`,
       );
     } catch (error) {
+      if (!isCurrentDraw()) return;
       console.error('Unable to draw full KMB route overlay:', error);
       setOverlayFeedback(`Could not show the full route for ${routeNumber}`);
     } finally {
-      setIsOverlayLoading(false);
+      if (isCurrentDraw()) setIsOverlayLoading(false);
     }
   };
 
@@ -3888,7 +3789,7 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!isGpsTimingEnabled || !navigator.geolocation) return undefined;
+    if (!isGpsTimingEnabled || timeMode !== 'now' || !navigator.geolocation) return undefined;
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const nextLocation = {
@@ -3899,7 +3800,12 @@ const App = () => {
         currentLocationRef.current = nextLocation;
         renderCurrentLocationMarker(nextLocation.lat, nextLocation.lng);
       },
-      () => {},
+      (error) => {
+        if (error?.code === 1) {
+          setIsGpsTimingEnabled(false);
+          setSearchError('Location permission was removed. Enable it again to use live GPS.');
+        }
+      },
       {
         enableHighAccuracy: true,
         maximumAge: 15000,
@@ -3911,7 +3817,7 @@ const App = () => {
       navigator.geolocation.clearWatch(watchId);
       if (gpsWatchIdRef.current === watchId) gpsWatchIdRef.current = null;
     };
-  }, [isGpsTimingEnabled, renderCurrentLocationMarker]);
+  }, [isGpsTimingEnabled, renderCurrentLocationMarker, timeMode]);
 
   const getCurrentGpsLocation = useCallback(async () => {
     if (!navigator.geolocation) {
@@ -3942,6 +3848,11 @@ const App = () => {
   ), []);
 
   const handleUseCurrentLocation = async () => {
+    if (isGpsTimingEnabled) {
+      setIsGpsTimingEnabled(false);
+      currentLocationLayerRef.current?.removeAll();
+      return;
+    }
     setIsLocating(true);
     setSearchError(null);
     try {
@@ -3966,8 +3877,7 @@ const App = () => {
     try {
       const location = await getCurrentGpsLocation();
       currentLocationRef.current = location;
-      setIsGpsTimingEnabled(true);
-      setOrigin(`${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`);
+      setIsGpsTimingEnabled(timeMode === 'now');
       renderCurrentLocationMarker(location.lat, location.lng);
 
       let refreshedRoute = selectedRoute;
@@ -4070,17 +3980,17 @@ const App = () => {
 
       {/* Header */}
       <div
-        className={`absolute top-0 left-0 right-0 z-20 p-4 transition-all ${
-          isSearchOpen ? 'bg-white shadow-xl' : ''
+        className={`app-header absolute top-0 left-0 right-0 z-20 p-2 sm:p-4 transition-all ${
+          isSearchOpen ? 'max-h-[100dvh] overflow-y-auto bg-white shadow-xl' : ''
         }`}
       >
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 bg-white/80 backdrop-blur p-2 rounded-2xl border border-white/50 shadow-sm">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
+          <div className="min-w-0 flex items-center gap-2 sm:gap-3 bg-white/80 backdrop-blur p-1.5 sm:p-2 rounded-2xl border border-white/50 shadow-sm">
             {/* Replaced CSS Icon with PWA Image */}
-            <img src="/pwa-192x192.png" alt="KMB Bus" className="w-10 h-10 rounded-xl shadow-sm object-contain" />
+            <img src="/pwa-192x192.png" alt="KMB Bus" className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl shadow-sm object-contain" />
             
-            <h1 className="text-xl font-black italic uppercase tracking-tighter">
-              KMB <span className="text-[#E1251B]">Route Master</span>
+            <h1 className="whitespace-nowrap text-base sm:text-xl font-black italic uppercase tracking-tighter">
+              KMB <span className="hidden min-[380px]:inline text-[#E1251B]">Route Master</span>
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -4089,7 +3999,7 @@ const App = () => {
                 setShowBookmarks((v) => !v);
                 setIsSearchOpen(false);
               }}
-              className="p-3 bg-white rounded-2xl shadow-md text-xl"
+              className="flex h-11 w-11 items-center justify-center bg-white rounded-2xl shadow-md text-lg sm:text-xl"
               title="Bookmarks"
             >
               {'\u2B50'}
@@ -4105,7 +4015,7 @@ const App = () => {
                 });
                 setShowBookmarks(false);
               }}
-              className="p-3 bg-white rounded-2xl shadow-md text-xl"
+              className="flex h-11 w-11 items-center justify-center bg-white rounded-2xl shadow-md text-lg sm:text-xl"
             >
               {isSearchOpen ? '\u2715' : '\uD83D\uDD0D'}
             </button>
@@ -4113,15 +4023,18 @@ const App = () => {
         </div>
 
         {isSearchOpen && (
-          <form onSubmit={handleSearch} className="max-w-xl mx-auto mt-4 space-y-3">
-            <div className="bg-slate-50 p-2 rounded-2xl flex items-center justify-between border border-slate-200">
-              <div className="flex gap-2">
+          <form onSubmit={handleSearch} className="max-w-xl mx-auto mt-2 sm:mt-4 space-y-3 pb-2">
+            <div className="bg-slate-50 p-2 rounded-2xl flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border border-slate-200">
+              <div className="grid w-full grid-cols-3 gap-1 sm:w-auto sm:gap-2">
                 {['now', 'leave', 'arrive'].map((mode) => (
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => setTimeMode(mode)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                    onClick={() => {
+                      setTimeMode(mode);
+                      if (mode !== 'now') setIsGpsTimingEnabled(false);
+                    }}
+                    className={`min-h-10 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all ${
                       timeMode === mode
                         ? 'bg-[#E1251B] text-white'
                         : 'bg-transparent text-slate-500 hover:text-slate-800'
@@ -4132,19 +4045,20 @@ const App = () => {
                 ))}
               </div>
               {timeMode !== 'now' && (
-                <div className="flex items-center gap-2">
+                <div className="grid w-full grid-cols-2 items-center gap-2 sm:flex sm:w-auto">
                   <input
                     type="time"
                     value={timeValue}
                     onChange={(e) => setTimeValue(e.target.value)}
-                    className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
+                    aria-label="Journey time"
+                    className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 outline-none cursor-pointer"
                   />
                   <input
                     type="date"
                     value={dateValue}
                     onChange={(e) => setDateValue(e.target.value)}
-                    className="bg-transparent text-sm font-bold text-slate-700 outline-none w-5 cursor-pointer"
-                    style={{ color: 'transparent', textShadow: '0 0 0 #334155' }}
+                    aria-label="Journey date"
+                    className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 outline-none cursor-pointer sm:w-[142px]"
                   />
                 </div>
               )}
@@ -4154,6 +4068,7 @@ const App = () => {
                 <div className="grid grid-cols-[1fr_auto] gap-2">
                   <AutocompleteInput
                     placeholder="From... (e.g. Mong Kok)"
+                    stopMap={stopMapRef.current}
                     value={origin}
                     onChange={(value) => {
                       setOrigin(value);
@@ -4169,13 +4084,14 @@ const App = () => {
                     onClick={handleUseCurrentLocation}
                     disabled={isLocating}
                     className="h-[52px] px-3 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:text-[#E1251B] hover:border-[#E1251B] transition disabled:opacity-50"
-                    title="Use current GPS location"
+                    title={isGpsTimingEnabled ? 'Stop live GPS updates' : 'Use current GPS location'}
                   >
-                    {isLocating ? 'Locating...' : isGpsTimingEnabled ? 'GPS on' : 'Use GPS'}
+                    {isLocating ? 'Locating...' : isGpsTimingEnabled ? 'Stop GPS' : 'Use GPS'}
                   </button>
                 </div>
                 <AutocompleteInput
                   placeholder="To... (e.g. Tsim Sha Tsui)"
+                  stopMap={stopMapRef.current}
                   value={destination}
                   onChange={setDestination}
                   onClear={() => setDestination('')}
@@ -4200,7 +4116,7 @@ const App = () => {
               <span className="leading-snug">
                 Use Google Transit for KMB unavailable gaps
                 <span className="block text-[11px] font-semibold text-slate-400">
-                  Keeps KMB results, then asks Google for segments with no ETA or no KMB route.
+                  Off keeps route ranking local and KMB-only. On also permits capped timing and geometry refinement.
                 </span>
               </span>
             </label>
@@ -4242,7 +4158,7 @@ const App = () => {
           type={'button'}
           onClick={handleLocateSelectedRoute}
           disabled={isLocating}
-          className={'absolute left-3 top-[88px] z-30 rounded-2xl border border-blue-200 bg-white/95 px-3 py-2 text-xs font-black text-blue-700 shadow-xl backdrop-blur disabled:opacity-50'}
+          className={'absolute left-3 top-[72px] z-30 min-h-11 rounded-2xl border border-blue-200 bg-white/95 px-3 py-2 text-xs font-black text-blue-700 shadow-xl backdrop-blur disabled:opacity-50 sm:top-[88px]'}
           title={'Show my location and recalculate catchable buses'}
         >
           {isLocating ? 'Locating...' : '\u{1F4CD} My location'}
@@ -4252,7 +4168,7 @@ const App = () => {
       {selectedRoute && !showBookmarks && (
         <form
           onSubmit={drawFullKmbRouteOverlay}
-          className="absolute top-[88px] right-3 z-30 w-[min(92vw,300px)] rounded-2xl border border-slate-200 bg-white/90 backdrop-blur p-2 shadow-xl"
+          className="absolute left-3 right-3 top-[124px] z-30 w-auto rounded-2xl border border-slate-200 bg-white/90 backdrop-blur p-2 shadow-xl sm:left-auto sm:right-3 sm:top-[88px] sm:w-[min(92vw,300px)]"
         >
           <div className="flex items-center gap-2">
             <input
@@ -4321,7 +4237,7 @@ const App = () => {
 
       {/* Bookmark panel */}
       {showBookmarks && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl max-h-[60vh] overflow-y-auto scrollbar-hide slide-up">
+        <div className="safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 bg-white p-3 sm:p-4 rounded-t-[2rem] shadow-2xl max-h-[70dvh] sm:max-h-[60vh] overflow-y-auto scrollbar-hide slide-up">
           <BookmarkPanel
             stopMap={stopMapRef.current}
             stopRoutes={stopRoutesRef.current}
@@ -4335,8 +4251,8 @@ const App = () => {
       {/* Results panel */}
       {results.length > 0 && !selectedRoute && !showBookmarks && (
         <div
-          className={`absolute bottom-0 left-0 right-0 z-20 bg-white p-4 rounded-t-[2rem] shadow-2xl scrollbar-hide slide-up flex flex-col ${
-            isResultsMinimized ? 'max-h-[110px] overflow-hidden' : 'max-h-[70vh] md:max-h-[60vh] overflow-y-auto'
+          className={`safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 bg-white p-3 sm:p-4 rounded-t-[2rem] shadow-2xl scrollbar-hide slide-up flex flex-col ${
+            isResultsMinimized ? 'max-h-[110px] overflow-hidden' : 'max-h-[75dvh] md:max-h-[60vh] overflow-y-auto'
           }`}
         >
           <div className="mb-3 shrink-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -4363,7 +4279,7 @@ const App = () => {
               <button
                 type="button"
                 onClick={() => setIsResultsMinimized((v) => !v)}
-                className="text-[11px] font-bold text-slate-500 hover:text-[#E1251B] border border-slate-200 rounded-lg px-2 py-1"
+                className="min-h-11 text-[11px] font-bold text-slate-500 hover:text-[#E1251B] border border-slate-200 rounded-lg px-3 py-1"
               >
                 {isResultsMinimized ? 'Expand' : 'Minimize'}
               </button>
@@ -4402,7 +4318,7 @@ const App = () => {
             <span className="leading-snug">
               Use Google Transit for KMB unavailable gaps
               <span className="block text-[11px] font-semibold text-slate-400">
-                Re-runs this search and asks Google Transit only for missing/no-ETA KMB gaps.
+                Re-runs locally first, then permits Google gap, timing, and geometry fallbacks.
               </span>
             </span>
           </label>
@@ -4605,7 +4521,7 @@ const App = () => {
               card.type === 'fallback' ? (
                 <div
                   key={card.key}
-                  className="p-4 bg-blue-50 rounded-2xl border-2 border-blue-100 cursor-pointer hover:border-blue-500 transition-colors"
+                className="p-3 sm:p-4 bg-blue-50 rounded-2xl border-2 border-blue-100 cursor-pointer hover:border-blue-500 transition-colors"
                   onClick={() => handleSelectRoute(card)}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -4672,7 +4588,7 @@ const App = () => {
               ) : (
                 <div
                   key={card.key}
-                  className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
+                  className="p-3 sm:p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 cursor-pointer hover:border-[#E1251B] transition-colors"
                   onClick={() => handleSelectRoute(card)}
                 >
                   {(() => {
@@ -4688,8 +4604,8 @@ const App = () => {
                       </div>
                     );
                   })()}
-                  <div className="flex justify-between items-center">
-                    <div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
                       <div className="font-black text-lg flex items-center gap-2 flex-wrap">
                         {card.segmentDisplay.map((seg, si) => (
                           <React.Fragment key={si}>
@@ -4775,7 +4691,7 @@ const App = () => {
                         );
                       })()}
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <div className="text-[#E1251B] font-bold text-lg">
                         ~{card.representative.estimatedTime}min
                       </div>
@@ -4793,7 +4709,7 @@ const App = () => {
       {/* Selected fallback detail */}
       {selectedRoute && isFallbackRoute(selectedRoute) && !showBookmarks && (
         <div
-          className="absolute bottom-0 left-0 right-0 z-20 overflow-y-auto rounded-t-[2rem] bg-white p-4 shadow-2xl scrollbar-hide slide-up"
+          className="safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 overflow-y-auto rounded-t-[2rem] bg-white p-4 shadow-2xl scrollbar-hide slide-up"
           style={{ height: `${routeDetailHeight}vh` }}
         >
           <RouteDetailResizeHandle
@@ -4983,7 +4899,7 @@ const App = () => {
       {/* Selected route detail */}
       {selectedRoute && !isFallbackRoute(selectedRoute) && !showBookmarks && (
         <div
-          className="absolute bottom-0 left-0 right-0 z-20 overflow-y-auto rounded-t-[2rem] bg-white p-4 shadow-2xl scrollbar-hide slide-up"
+          className="safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 overflow-y-auto rounded-t-[2rem] bg-white p-4 shadow-2xl scrollbar-hide slide-up"
           style={{ height: `${routeDetailHeight}vh` }}
         >
           <RouteDetailResizeHandle
@@ -5018,7 +4934,7 @@ const App = () => {
                   ]);
                 }}
                 disabled={isLoadingSelectedEtas || isRefreshingEta}
-                className="text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-2 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="min-h-11 text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-3 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoadingSelectedEtas || isRefreshingEta ? 'Refreshing...' : 'Refresh current ETA'}
               </button>

@@ -40,19 +40,20 @@ if (!process.env.GCP_API_KEY || process.env.GCP_API_KEY === 'your_gcp_api_key_he
   process.exit(1);
 }
 
-const autocompleteOk = await checkEndpoint('Places autocomplete', 'place/autocomplete/json', {
-  input: 'central',
-  components: 'country:hk',
-});
-
 const geocodeOk = await checkEndpoint('Geocoding', 'geocode/json', {
   address: 'central',
   components: 'country:hk',
 });
 
-if (!autocompleteOk || !geocodeOk) {
-  console.error('GCP_API_KEY test failed. Check that Places API and Geocoding API are enabled, billing is active, and key restrictions allow server-side web service calls.');
+const directionsOk = await checkEndpoint('Directions', 'directions/json', {
+  origin: '22.2819,114.1589',
+  destination: '22.2866,114.1937',
+  mode: 'walking',
+});
+
+if (!geocodeOk || !directionsOk) {
+  console.error('GCP_API_KEY test failed. Check that Geocoding and Directions APIs are enabled, billing is active, and key restrictions allow server-side web service calls.');
   process.exit(1);
 }
 
-console.log('GCP_API_KEY looks usable for autocomplete and geocoding.');
+console.log('GCP_API_KEY looks usable for geocoding and directions.');

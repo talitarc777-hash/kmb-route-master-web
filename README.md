@@ -8,7 +8,7 @@ A React route planner for Hong Kong. It searches KMB routes locally, validates l
 - Nearby-stop lookup through an in-browser spatial index
 - Live KMB ETA filtering with a user-controlled strict ETA option
 - Leave-at and arrive-by validation against compact historical service windows
-- Walking, transit ride-time, and road-geometry refinement through Google Maps APIs
+- Local walking estimates with optional, capped Google ride-time refinement
 - Optional Google Transit options when KMB is unavailable or has an ETA gap
 - KMB monthly-pass treatment: KMB legs are ranked as zero additional fare
 - Citybus, Tram, MTR, Light Rail, and MTR Bus fare/rail metadata from cached or official open data
@@ -35,7 +35,7 @@ For Google-backed features, set this server-side value:
 GCP_API_KEY=your_google_maps_platform_key
 ```
 
-Enable the Places, Geocoding, and Directions APIs for that key. Do not expose the key through a `VITE_` variable.
+Enable only the Geocoding and Directions APIs for that key. The server proxy rejects other Google Maps API paths, strips unsupported parameters, and accepts Directions coordinates only within Hong Kong. Do not expose the key through a `VITE_` variable.
 
 If the frontend and API are hosted separately, also set:
 
@@ -60,7 +60,7 @@ The production build is written to `dist/`.
 
 ### 1. Resolve the journey
 
-The app converts the entered origin and destination into WGS84 coordinates. Google Geocoding is used through the server proxy when configured, with local/browser-safe fallbacks where available. The same coordinates are reused throughout the search.
+The app converts the entered origin and destination into WGS84 coordinates. KMB stop suggestions are matched locally without a network request. A submitted free-text place that is not a selected KMB stop uses one cached Google Geocoding request through the server proxy. The same coordinates are reused throughout the search.
 
 ### 2. Load KMB network data
 
@@ -105,7 +105,7 @@ Total time combines:
 - waiting/boarding allowance
 - in-vehicle ride time
 
-The local baseline estimates ride time from stop count. Google Directions Transit can refine the in-vehicle duration for a matched leg. Walking and waiting calculations remain local. If Google refinement fails, the local estimate is retained.
+The local baseline estimates walking time from straight-line distance and ride time from stop count. A normal KMB search therefore makes no Google Directions request. When Google services are explicitly enabled, Directions Transit may refine only the eight best KMB candidates, and only a bus step whose route number matches the KMB leg is accepted. If refinement fails or returns another route, the local estimate is retained.
 
 ### 6. Optional Google Transit gap search
 
@@ -127,7 +127,16 @@ KMB legs count as HKD 0 for this user's monthly pass. Options with unknown non-K
 
 The selected result is drawn on the ArcGIS map. The app first requests the Transport Department **Bus Route** geometry from the official CSDI ArcGIS FeatureServer. It chooses the direction/variant whose line is closest to the selected KMB boarding and alighting stops, then trims the official shape to that travelled section.
 
-CSDI responses are cached in browser storage for up to 30 days, while the server proxy exposes a seven-day shared cache. Google Directions driving geometry is requested only when CSDI is unavailable or has no safely matched line. If both sources fail, the app draws the local KMB stop sequence.
+CSDI responses are cached in browser storage for up to 30 days, while the server proxy exposes a seven-day shared cache. If Google services are enabled, Google Directions driving geometry can be used when CSDI is unavailable or has no safely matched line. Otherwise the app immediately draws the local KMB stop sequence.
+
+## External Request Minimisation
+
+- KMB stop-name autocomplete runs locally in the browser.
+- External type-ahead is disabled; a free-text place is geocoded only after the user submits the search.
+- KMB candidate walking time is calculated locally instead of requesting one Directions route per candidate.
+- Google ride refinement is opt-in and capped at eight candidates.
+- Candidate service validation is capped at 120 diverse routes and the UI returns at most 30 ranked results.
+- CSDI and optional Google geometry responses use persistent browser caches.
 
 ## Operation-Time Data
 
@@ -187,6 +196,8 @@ The `functions/api/` handlers can proxy KMB and Google requests. The current Clo
 ```text
 src/App.jsx                         Main UI, search orchestration, ranking, map display
 src/utils/apiBase.js               Same-origin or external API URL handling
+src/utils/locationSearch.js        Local KMB stop-name matching
+src/utils/routePlanningRequests.js KMB data loading, validation, and ordered network indexes
 public/routeEngine.js              KMB graph search, ETA/schedule validation, timing
 public/operator-data/              Runtime schedules and compact operator datasets
 api/kmb.py                         Vercel KMB, CSDI geometry, and Google proxy

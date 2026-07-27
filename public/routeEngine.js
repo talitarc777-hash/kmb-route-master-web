@@ -1,15 +1,15 @@
 /**
- * KMB Route Engine ??Bidirectional Search with Spatial Grid
+ * KMB Route Engine - bidirectional search with a spatial grid
  *
  * Algorithm:
  *  1. Build a spatial grid of all stops (O(1) neighbor lookups)
- *  2. Build ORIGIN SET ??routes departing from within 600m of origin
- *  3. Build DEST SET   ??routes arriving  at  stops within 600m of dest
- *  4. Direct routes    ??set intersection (ORIGIN SET ??DEST SET, same route)
- *  5. 1-Transfer       ??for each origin route, scan forward stops;
+ *  2. Build ORIGIN SET from routes departing within 600m of the origin
+ *  3. Build DEST SET from routes arriving within 600m of the destination
+ *  4. Find direct routes from the intersection of those sets
+ *  5. For one transfer, scan forward stops on each origin route;
  *                        check the spatial grid for dest-set routes nearby
- *  6. 2-Transfer       ??extend 1-transfer dropoffs using the same approach
- *  7. Rank & dedup     ??by (estimatedTime, transfers, walk)
+ *  6. For two transfers, search a genuine middle route between both sets
+ *  7. Rank and deduplicate by time, transfers, and walking
  */
 
 'use strict';
@@ -19,10 +19,11 @@
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 const WALK_RADIUS_KM = 0.6;   // walk from origin/dest to bus stop
 const TRANSFER_WALK_KM = 0.6;   // walk between transfer stops
-const MAX_FINAL = 100;   // results shown to user (increased for debugging)
+const MAX_FINAL = 30;
+const MAX_NETWORK_CANDIDATES = 120;
 const RIDE_MIN_PER_STOP = 1.5;  // minutes per bus stop
 const BOARDING_BUFFER_MIN = 1; // small safety buffer before boarding each leg
-const GRID_DEG = 0.005; // spatial grid cell ??500m
+const GRID_DEG = 0.005; // spatial grid cell, approximately 500m
 const ETA_ACTIVE_WINDOW_MIN = 120; // ETA must be within this window to be considered active
 const ETA_CACHE_TTL_MS = 30 * 1000;
 const RIDE_TIME_CACHE_BUCKET_MS = 30 * 60 * 1000;
@@ -38,6 +39,10 @@ const KMB_HIGH_CONFIDENCE_MIN_SAMPLES = 30;
 const KMB_HIGH_CONFIDENCE_MIN_SAMPLE_DAYS = 7;
 const EARLY_HISTORICAL_BOUNDARY_GUARD_MIN = 30;
 const MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR = 8;
+const MAX_GOOGLE_RIDE_REFINEMENT_CANDIDATES = 8;
+const MAX_ROUTE_ACCESS_STOPS = 6;
+const MAX_TWO_TRANSFER_CANDIDATES = 40;
+const SIMPLE_CANDIDATES_BEFORE_SKIPPING_TWO_TRANSFER = 12;
 const PREFERRED_TRANSFER_WALK_KM = 0.25;
 const STRICT_STOP_LEVEL_ROUTES = new Set(['110']);
 const SPATIAL_GRID_CACHE = new WeakMap();
@@ -100,7 +105,7 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-// SPATIAL GRID  ??build once per search, reuse for all lookups
+// SPATIAL GRID - build once per stop-map object and reuse for all lookups
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function buildSpatialGrid(stopMap) {
     if (stopMap && typeof stopMap === 'object' && SPATIAL_GRID_CACHE.has(stopMap)) {
@@ -108,17 +113,21 @@ function buildSpatialGrid(stopMap) {
     }
     const grid = new Map();
     for (const [id, s] of Object.entries(stopMap)) {
-        const gx = Math.floor(s.lat / GRID_DEG);
-        const gy = Math.floor(s.lng / GRID_DEG);
+        const lat = Number(s?.lat);
+        const lng = Number(s?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const gx = Math.floor(lat / GRID_DEG);
+        const gy = Math.floor(lng / GRID_DEG);
         const k = `${gx},${gy}`;
         if (!grid.has(k)) grid.set(k, []);
-        grid.get(k).push({ id, ...s });
+        grid.get(k).push({ id, ...s, lat, lng });
     }
     if (stopMap && typeof stopMap === 'object') SPATIAL_GRID_CACHE.set(stopMap, grid);
     return grid;
 }
 
 function nearbyFromGrid(grid, lat, lng, radiusKm) {
+    if (!(grid instanceof Map) || ![lat, lng, radiusKm].every(Number.isFinite)) return [];
     const cells = Math.ceil(radiusKm / (GRID_DEG * 111)) + 1;
     const gx = Math.floor(lat / GRID_DEG);
     const gy = Math.floor(lng / GRID_DEG);
@@ -243,7 +252,10 @@ function getGcpRouteCacheTtl(mode) {
     return mode === 'driving' ? GCP_DRIVING_ROUTE_CACHE_TTL_MS : GCP_CACHE_TTL_MS;
 }
 
-async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermediateStops = [], _gcpKey) {
+async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermediateStops = []) {
+    if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) {
+        throw new Error('Cannot request route geometry with invalid coordinates.');
+    }
     const wpSig = getWaypointSignature(intermediateStops);
     const cacheKey = `${mode}|${lat1.toFixed(4)},${lng1.toFixed(4)}->${lat2.toFixed(4)},${lng2.toFixed(4)}|${wpSig}`;
     const cached = getGcpCachedValue(cacheKey);
@@ -957,15 +969,11 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
                     const shortName = String(step?.transit_details?.line?.short_name || '').trim().toUpperCase();
                     return vehicleType === 'BUS' && (!routeCode || shortName === routeCode);
                 });
-                const usableSteps = matchingBusSteps.length > 0
-                    ? matchingBusSteps
-                    : transitSteps.filter((step) => String(step?.transit_details?.line?.vehicle?.type || '').toUpperCase() === 'BUS');
-
-                if (usableSteps.length > 0) {
+                if (matchingBusSteps.length > 0) {
                     const duration = Math.max(
                         1,
                         Math.round(
-                            usableSteps.reduce((sum, step) => sum + (step?.duration?.value || 0), 0) / 60
+                            matchingBusSteps.reduce((sum, step) => sum + (step?.duration?.value || 0), 0) / 60
                         )
                     );
                     const payload = { duration, source: 'google_transit_bus_duration' };
@@ -1027,14 +1035,14 @@ function resetSegmentTiming(segment, defaultFrequency) {
     segment.plannedTimingSource = null;
 }
 
-async function applyCurrentLocationApproach(route, currentLocation, gcpKey) {
+function applyCurrentLocationApproach(route, currentLocation) {
     const lat = Number(currentLocation?.lat);
     const lng = Number(currentLocation?.lng);
     const stopLat = Number(route?.oLat);
     const stopLng = Number(route?.oLng);
     if (![lat, lng, stopLat, stopLng].every(Number.isFinite)) return false;
 
-    const walkInfo = await fetchGCPRoute(lat, lng, stopLat, stopLng, 'walking', [], gcpKey);
+    const walkInfo = getFallbackRoute(lat, lng, stopLat, stopLng, 'walking');
     route.originLoc = { lat, lng };
     route.walkInfoOrigin = walkInfo;
     route.walkTimeOrigin = walkInfo.duration;
@@ -1252,13 +1260,12 @@ async function applyRouteTiming(route, options = {}) {
         allowNoEtaNow = false,
         allowSparseHistoricalFallback = false,
         currentLocation = null,
-        gcpKey,
     } = options;
     route.originWaitTime = 0;
 
     if (timeMode === 'now') {
         if (currentLocation) {
-            await applyCurrentLocationApproach(route, currentLocation, gcpKey);
+            applyCurrentLocationApproach(route, currentLocation);
         } else {
             route.gpsTimingApplied = false;
             route.gpsLocation = null;
@@ -1497,6 +1504,23 @@ function normalizedRouteCode(value) {
     return String(value || '').trim().toUpperCase();
 }
 
+function routeStopIndex(stops, stopId, routeAtStop) {
+    const sequenceIndex = Number(routeAtStop?.seq) - 1;
+    if (Number.isInteger(sequenceIndex) && sequenceIndex >= 0 && stops[sequenceIndex] === stopId) {
+        return sequenceIndex;
+    }
+    return stops.indexOf(stopId);
+}
+
+function addRouteAccessEntry(accessMap, routeKey, entry) {
+    if (!accessMap.has(routeKey)) accessMap.set(routeKey, []);
+    const entries = accessMap.get(routeKey);
+    if (entries.some((current) => current.stop.id === entry.stop.id && current.index === entry.index)) return;
+    entries.push(entry);
+    entries.sort((left, right) => left.stop.distance - right.stop.distance || left.index - right.index);
+    if (entries.length > MAX_ROUTE_ACCESS_STOPS) entries.length = MAX_ROUTE_ACCESS_STOPS;
+}
+
 function hasRepeatedRouteTransfer(route) {
     const seen = new Set();
     for (const segment of route?.segments || []) {
@@ -1562,7 +1586,7 @@ function compareRouteCandidates(a, b) {
 }
 
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-// MAIN ROUTE FINDER ??Bidirectional
+// MAIN ROUTE FINDER - bidirectional network search
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function visibleRouteSequenceKey(candidate) {
     const routeCodes = (candidate?.segments || [])
@@ -1633,8 +1657,149 @@ function deduplicateRankedRouteSequences(rankedCandidates) {
     return [...bestBySequence.values()].sort(compareRouteCandidates);
 }
 
+function findTwoTransferCandidates({
+    originRouteSet,
+    destStopIndex,
+    stopMap,
+    stopRoutes,
+    routeStops,
+    routeMap,
+    originLoc,
+    destLoc,
+    grid,
+    dedupSeen,
+}) {
+    const candidates = [];
+
+    search:
+    for (const [firstRouteKey, originEntries] of originRouteSet) {
+        for (const originEntry of originEntries) {
+            const firstRouteCode = normalizedRouteCode(originEntry.route?.route);
+            for (let firstOutIndex = originEntry.index + 1;
+                firstOutIndex < originEntry.stops.length;
+                firstOutIndex++) {
+                const firstOutId = originEntry.stops[firstOutIndex];
+                const firstOutStop = stopMap[firstOutId];
+                if (!firstOutStop) continue;
+
+                const firstBoardingStops = nearbyFromGrid(
+                    grid,
+                    firstOutStop.lat,
+                    firstOutStop.lng,
+                    TRANSFER_WALK_KM
+                ).slice(0, 4);
+
+                for (const middleBoardStop of firstBoardingStops) {
+                    const middleRows = stopRoutes[middleBoardStop.id] || [];
+                    const seenMiddleRoutes = new Set();
+                    for (const middleRoute of middleRows) {
+                        const middleRouteKey = `${middleRoute.route}|${middleRoute.bound}|${middleRoute.service_type}`;
+                        if (seenMiddleRoutes.has(middleRouteKey)) continue;
+                        seenMiddleRoutes.add(middleRouteKey);
+                        const middleRouteCode = normalizedRouteCode(middleRoute.route);
+                        if (!middleRouteCode || middleRouteCode === firstRouteCode) continue;
+
+                        const middleStops = routeStops[middleRouteKey] || [];
+                        const middleInIndex = routeStopIndex(
+                            middleStops,
+                            middleBoardStop.id,
+                            middleRoute
+                        );
+                        if (middleInIndex < 0) continue;
+
+                        for (let middleOutIndex = middleInIndex + 1;
+                            middleOutIndex < middleStops.length;
+                            middleOutIndex++) {
+                            const middleOutId = middleStops[middleOutIndex];
+                            const middleOutStop = stopMap[middleOutId];
+                            if (!middleOutStop) continue;
+
+                            const finalBoardingStops = nearbyFromGrid(
+                                grid,
+                                middleOutStop.lat,
+                                middleOutStop.lng,
+                                TRANSFER_WALK_KM
+                            ).slice(0, 4);
+
+                            for (const finalBoardStop of finalBoardingStops) {
+                                for (const destinationEntry of destStopIndex.get(finalBoardStop.id) || []) {
+                                    const finalRouteCode = normalizedRouteCode(destinationEntry.route?.route);
+                                    if (!finalRouteCode || finalRouteCode === firstRouteCode ||
+                                        finalRouteCode === middleRouteCode) continue;
+
+                                    const routeSequenceKey =
+                                        `2t|${firstRouteKey}->${middleRouteKey}->${destinationEntry.routeKey}`;
+                                    const dedupKey = `${routeSequenceKey}|` +
+                                        `${firstOutId}->${middleBoardStop.id}|` +
+                                        `${middleOutId}->${finalBoardStop.id}`;
+                                    if (dedupSeen.has(dedupKey)) continue;
+                                    dedupSeen.add(dedupKey);
+
+                                    const firstStops = originEntry.stops.slice(
+                                        originEntry.index,
+                                        firstOutIndex + 1
+                                    );
+                                    const secondStops = middleStops.slice(
+                                        middleInIndex,
+                                        middleOutIndex + 1
+                                    );
+                                    const thirdStops = destinationEntry.stops.slice(
+                                        destinationEntry.transferIdx,
+                                        destinationEntry.dIdx + 1
+                                    );
+                                    const heuristicScore = (
+                                        firstStops.length + secondStops.length + thirdStops.length
+                                    ) * RIDE_MIN_PER_STOP +
+                                        originEntry.stop.distance * 12 +
+                                        destinationEntry.dStop.distance * 12 +
+                                        (middleBoardStop.distance + finalBoardStop.distance) * 10;
+
+                                    candidates.push({
+                                        id: `t2-${candidates.length}`,
+                                        transfers: 2,
+                                        totalStops: firstStops.length + secondStops.length + thirdStops.length,
+                                        dedupKey,
+                                        routePairKey: routeSequenceKey,
+                                        _hScore: heuristicScore,
+                                        transferOutIndex: firstOutIndex,
+                                        transferInIndex: middleInIndex,
+                                        transferWalkDistanceKm: middleBoardStop.distance,
+                                        segments: [
+                                            { route: originEntry.route.route, bound: originEntry.route.bound, service_type: originEntry.route.service_type, routeKey: firstRouteKey, fromStop: originEntry.stop.id, toStop: firstOutId, stops: firstStops, routeInfo: routeMap[firstRouteKey] },
+                                            { route: middleRoute.route, bound: middleRoute.bound, service_type: middleRoute.service_type, routeKey: middleRouteKey, fromStop: middleBoardStop.id, toStop: middleOutId, stops: secondStops, routeInfo: routeMap[middleRouteKey] },
+                                            { route: destinationEntry.route.route, bound: destinationEntry.route.bound, service_type: destinationEntry.route.service_type, routeKey: destinationEntry.routeKey, fromStop: finalBoardStop.id, toStop: destinationEntry.dStop.id, stops: thirdStops, routeInfo: routeMap[destinationEntry.routeKey] },
+                                        ],
+                                        originLoc,
+                                        destLoc,
+                                        oLat: originEntry.stop.lat,
+                                        oLng: originEntry.stop.lng,
+                                        oDist: originEntry.stop.distance,
+                                        dLat: destinationEntry.dStop.lat,
+                                        dLng: destinationEntry.dStop.lng,
+                                        dDist: destinationEntry.dStop.distance,
+                                        t1Lat: firstOutStop.lat,
+                                        t1Lng: firstOutStop.lng,
+                                        t2Lat: middleBoardStop.lat,
+                                        t2Lng: middleBoardStop.lng,
+                                        t3Lat: middleOutStop.lat,
+                                        t3Lng: middleOutStop.lng,
+                                        t4Lat: finalBoardStop.lat,
+                                        t4Lng: finalBoardStop.lng,
+                                    });
+                                    if (candidates.length >= MAX_TWO_TRANSFER_CANDIDATES) break search;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return candidates;
+}
+
 async function findRoutes(params) {
-    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, currentLocation = null, gcpKey, onProgress } = params;
+    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, currentLocation = null, useGoogleRefinement = false, onProgress } = params;
     const planningStartedAt = Date.now();
     const now = new Date();
     const requestStatsBefore = requestStatsSnapshot();
@@ -1645,6 +1810,13 @@ async function findRoutes(params) {
         stageTimings[name] = now - stageStartedAt;
         stageStartedAt = now;
     };
+
+    if (![originLoc?.lat, originLoc?.lng, destLoc?.lat, destLoc?.lng].every(Number.isFinite)) {
+        throw new Error('Route planning requires valid origin and destination coordinates.');
+    }
+    if (!stopMap || !routeMap || !routeStops || !stopRoutes) {
+        throw new Error('KMB route data is not ready. Please reload the app and try again.');
+    }
 
     // Build spatial grid once
     const grid = buildSpatialGrid(stopMap);
@@ -1667,48 +1839,67 @@ async function findRoutes(params) {
 
     onProgress?.('Building route index...');
 
-    // ?€?€ Build ORIGIN ROUTE SET
+    // Build origin-route access entries.
     // routeKey ??{ oStop, oIdx, stops, route }  (best = closest origin stop)
     const originRouteSet = new Map();
     for (const oStop of originStops) {
         for (const r of (stopRoutes[oStop.id] || [])) {
-            if (excludedRoutes.has(r.route.toUpperCase())) continue;
+            if (excludedRoutes.has(normalizedRouteCode(r?.route))) continue;
 
             const key = `${r.route}|${r.bound}|${r.service_type}`;
             const stops = routeStops[key] || [];
-            const idx = stops.indexOf(oStop.id);
+            const idx = routeStopIndex(stops, oStop.id, r);
             if (idx === -1) continue;
-            if (!originRouteSet.has(key) || originRouteSet.get(key).oStop.distance > oStop.distance)
-                originRouteSet.set(key, { oStop, oIdx: idx, stops, route: r, routeKey: key });
+            addRouteAccessEntry(originRouteSet, key, {
+                stop: oStop,
+                index: idx,
+                stops,
+                route: r,
+                routeKey: key,
+            });
         }
     }
 
-    // ?€?€ Build DEST ROUTE SET
+    // Build destination-route access entries.
     // routeKey ??{ dStop, dIdx, stops, route }  (best = closest dest stop)
     const destRouteSet = new Map();
     for (const dStop of destStops) {
         for (const r of (stopRoutes[dStop.id] || [])) {
-            if (excludedRoutes.has(r.route.toUpperCase())) continue;
+            if (excludedRoutes.has(normalizedRouteCode(r?.route))) continue;
 
             const key = `${r.route}|${r.bound}|${r.service_type}`;
             const stops = routeStops[key] || [];
-            const idx = stops.indexOf(dStop.id);
+            const idx = routeStopIndex(stops, dStop.id, r);
             if (idx === -1) continue;
-            if (!destRouteSet.has(key) || destRouteSet.get(key).dStop.distance > dStop.distance)
-                destRouteSet.set(key, { dStop, dIdx: idx, stops, route: r, routeKey: key });
+            addRouteAccessEntry(destRouteSet, key, {
+                stop: dStop,
+                index: idx,
+                stops,
+                route: r,
+                routeKey: key,
+            });
         }
     }
 
-    // ?€?€ Build DEST STOP INDEX
+    // Index stops that can board a destination-reaching route.
     // For every stop that appears BEFORE the dest stop on any dest-set route,
     // map stopId ??[{ routeKey, dIdx, dStop, route }]
     // This is what makes fast 1-transfer matching possible.
     const destStopIndex = new Map(); // stopId ??[destRouteEntry]
-    for (const [key, dest] of destRouteSet) {
-        for (let i = 0; i < dest.dIdx; i++) {
-            const sid = dest.stops[i];
-            if (!destStopIndex.has(sid)) destStopIndex.set(sid, []);
-            destStopIndex.get(sid).push({ ...dest, transferIdx: i });
+    for (const destinationEntries of destRouteSet.values()) {
+        for (const destinationEntry of destinationEntries) {
+            for (let i = 0; i < destinationEntry.index; i++) {
+                const sid = destinationEntry.stops[i];
+                if (!destStopIndex.has(sid)) destStopIndex.set(sid, []);
+                destStopIndex.get(sid).push({
+                    route: destinationEntry.route,
+                    routeKey: destinationEntry.routeKey,
+                    stops: destinationEntry.stops,
+                    dStop: destinationEntry.stop,
+                    dIdx: destinationEntry.index,
+                    transferIdx: i,
+                });
+            }
         }
     }
 
@@ -1716,14 +1907,26 @@ async function findRoutes(params) {
     const dedupSeen = new Set();
     const foundByDedupKey = new Map();
 
-    // ?€?€ DIRECT routes (ORIGIN ??DEST, same routeKey, oIdx < dIdx) 
+    // Direct routes: same variant, with the boarding stop before alighting.
     onProgress?.('Finding direct routes...');
-    for (const [key, orig] of originRouteSet) {
+    for (const [key, originEntries] of originRouteSet) {
         if (!destRouteSet.has(key)) continue;
-        const dest = destRouteSet.get(key);
-        if (orig.oIdx >= dest.dIdx) continue; // going wrong way
+        const validPairs = originEntries.flatMap((originEntry) =>
+            destRouteSet.get(key)
+                .filter((destinationEntry) => originEntry.index < destinationEntry.index)
+                .map((destinationEntry) => ({ originEntry, destinationEntry }))
+        );
+        if (validPairs.length === 0) continue;
+        validPairs.sort((left, right) => {
+            const leftScore = left.originEntry.stop.distance + left.destinationEntry.stop.distance;
+            const rightScore = right.originEntry.stop.distance + right.destinationEntry.stop.distance;
+            return leftScore - rightScore ||
+                (left.destinationEntry.index - left.originEntry.index) -
+                (right.destinationEntry.index - right.originEntry.index);
+        });
+        const { originEntry, destinationEntry } = validPairs[0];
 
-        const segStops = orig.stops.slice(orig.oIdx, dest.dIdx + 1);
+        const segStops = originEntry.stops.slice(originEntry.index, destinationEntry.index + 1);
         const dk = `direct|${key}`;
         if (dedupSeen.has(dk)) continue;
         dedupSeen.add(dk);
@@ -1731,20 +1934,28 @@ async function findRoutes(params) {
         found.push({
             id: `d-${found.length}`, transfers: 0,
             totalStops: segStops.length, dedupKey: dk,
-            segments: [{ route: orig.route.route, bound: orig.route.bound, service_type: orig.route.service_type, routeKey: key, fromStop: orig.oStop.id, toStop: dest.dStop.id, stops: segStops, routeInfo: routeMap[key] }],
+            segments: [{ route: originEntry.route.route, bound: originEntry.route.bound, service_type: originEntry.route.service_type, routeKey: key, fromStop: originEntry.stop.id, toStop: destinationEntry.stop.id, stops: segStops, routeInfo: routeMap[key] }],
             originLoc, destLoc,
-            oLat: orig.oStop.lat, oLng: orig.oStop.lng, oDist: orig.oStop.distance,
-            dLat: dest.dStop.lat, dLng: dest.dStop.lng, dDist: dest.dStop.distance,
+            oLat: originEntry.stop.lat, oLng: originEntry.stop.lng, oDist: originEntry.stop.distance,
+            dLat: destinationEntry.stop.lat, dLng: destinationEntry.stop.lng, dDist: destinationEntry.stop.distance,
         });
         foundByDedupKey.set(dk, found[found.length - 1]);
     }
 
-    // ?€?€ 1-TRANSFER routes
+    // One-transfer routes.
     // For each origin route, walk its stops forward. For each stop, check its
     // neighbors in the spatial grid. If any neighbor's stopId is in destStopIndex,
     // we found a valid transfer.
     onProgress?.('Finding 1-transfer routes...');
-    for (const [r1Key, orig] of originRouteSet) {
+    for (const [r1Key, originEntries] of originRouteSet) {
+      for (const originEntry of originEntries) {
+        const orig = {
+            oStop: originEntry.stop,
+            oIdx: originEntry.index,
+            stops: originEntry.stops,
+            route: originEntry.route,
+            routeKey: originEntry.routeKey,
+        };
         for (let i = orig.oIdx + 1; i < orig.stops.length; i++) {
             const transferStopId = orig.stops[i];
             const transferStop = stopMap[transferStopId];
@@ -1815,11 +2026,11 @@ async function findRoutes(params) {
                 }
             }
         }
+      }
     }
 
-    // ?€?€ 2-TRANSFER routes
-    // Seed from 1-transfer results. At the dropoff of seg2, look for a 3rd leg
-    // that reaches the destination. Same grid trick.
+    // Two-transfer routes use a genuine middle route between the origin and
+    // destination route sets, and are skipped when simpler choices are plentiful.
     onProgress?.('Finding 2-transfer routes...');
     const directCandidates = found.filter((candidate) => candidate.transfers === 0);
     const retainedOneTransferCandidates = retainTransferVariants(
@@ -1828,46 +2039,19 @@ async function findRoutes(params) {
     found.length = 0;
     found.push(...directCandidates, ...retainedOneTransferCandidates);
 
-    const oneTransfers = retainedOneTransferCandidates;
-    for (const parent of oneTransfers.slice(0, 40)) { // cap seeds, not exploration
-        const seg2 = parent.segments[1];
-        const dropStop = stopMap[seg2.toStop];
-        if (!dropStop) continue;
-        const usedRouteCodes = new Set(
-            parent.segments.map((segment) => normalizedRouteCode(segment.route))
-        );
-
-        const nearby3 = nearbyFromGrid(grid, dropStop.lat, dropStop.lng, TRANSFER_WALK_KM);
-        for (const nb3 of nearby3) {
-            const destMatches3 = destStopIndex.get(nb3.id) || [];
-            for (const dest3 of destMatches3) {
-                if (dest3.routeKey === seg2.routeKey) continue;
-                if (usedRouteCodes.has(normalizedRouteCode(dest3.route?.route))) continue;
-
-                const seg3Stops = dest3.stops.slice(dest3.transferIdx, dest3.dIdx + 1);
-                const dk = `2t|${parent.segments[0].routeKey}->${parent.segments[1].routeKey}->${dest3.routeKey}`;
-                if (dedupSeen.has(dk)) continue;
-                dedupSeen.add(dk);
-
-                found.push({
-                    id: `t2-${found.length}`, transfers: 2,
-                    totalStops: parent.totalStops + seg3Stops.length,
-                    dedupKey: dk,
-                    segments: [
-                        ...parent.segments,
-                        { route: dest3.route.route, bound: dest3.route.bound, service_type: dest3.route.service_type, routeKey: dest3.routeKey, fromStop: nb3.id, toStop: dest3.dStop.id, stops: seg3Stops, routeInfo: routeMap[dest3.routeKey] },
-                    ],
-                    originLoc, destLoc,
-                    oLat: parent.oLat, oLng: parent.oLng, oDist: parent.oDist,
-                    dLat: dest3.dStop.lat, dLng: dest3.dStop.lng, dDist: dest3.dStop.distance,
-                    t1Lat: parent.t1Lat, t1Lng: parent.t1Lng,
-                    t2Lat: parent.t2Lat, t2Lng: parent.t2Lng,
-                    t3Lat: dropStop.lat, t3Lng: dropStop.lng,
-                    t4Lat: nb3.lat, t4Lng: nb3.lng,
-                });
-                foundByDedupKey.set(dk, found[found.length - 1]);
-            }
-        }
+    if (found.length < SIMPLE_CANDIDATES_BEFORE_SKIPPING_TWO_TRANSFER) {
+        found.push(...findTwoTransferCandidates({
+            originRouteSet,
+            destStopIndex,
+            stopMap,
+            stopRoutes,
+            routeStops,
+            routeMap,
+            originLoc,
+            destLoc,
+            grid,
+            dedupSeen,
+        }));
     }
 
     for (const route of found) {
@@ -1876,7 +2060,7 @@ async function findRoutes(params) {
         }
     }
 
-    // ?€?€ Initial heuristic sort (to prioritize for GCP/ETA enrichments)
+    // Initial heuristic sort prioritizes service validation work.
     // A transfer is commonly outside KMB's live ETA horizon. Prioritize candidates
     // whose future legs are supported for this day and approximate boarding time,
     // so inactive express services cannot consume the bounded shortlist.
@@ -1899,8 +2083,8 @@ async function findRoutes(params) {
         return score(a) - score(b);
     });
 
-    // Take top 200 unique candidates for GCP + ETA enrichment
-    const seenForGCP = new Set();
+    // Bound service validation work after preserving route and transfer diversity.
+    const seenForValidation = new Set();
     const originRoutePairs = new Map();
     const routePairVariantCount = new Map();
     const candidates = [];
@@ -1910,7 +2094,7 @@ async function findRoutes(params) {
             repeatedRouteCandidatesRejected += 1;
             continue;
         }
-        if (!seenForGCP.has(c.dedupKey)) {
+        if (!seenForValidation.has(c.dedupKey)) {
             const origR = c.segments[0].routeKey || c.segments[0].route;
             const pairKey = c.routePairKey || c.dedupKey;
             const pairs = originRoutePairs.get(origR) || new Set();
@@ -1919,17 +2103,17 @@ async function findRoutes(params) {
             // Limit route combinations per origin while preserving several transfer points
             // for the same pair until ETA and walking-time validation can rank them.
             if ((pairs.has(pairKey) || pairs.size < 6) && variantCount < MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR) {
-                seenForGCP.add(c.dedupKey);
+                seenForValidation.add(c.dedupKey);
                 pairs.add(pairKey);
                 originRoutePairs.set(origR, pairs);
                 routePairVariantCount.set(pairKey, variantCount + 1);
                 candidates.push(c);
-                if (candidates.length >= 200) break;
+                if (candidates.length >= MAX_NETWORK_CANDIDATES) break;
             }
         }
     }
 
-    // ?€?€ Parallel GCP walking times
+    // Local walking estimates avoid one Directions request per candidate.
     finishStage('candidateGeneration');
     const earlyFilter = await earlyFilterPlannedCandidates(candidates, {
         timeMode,
@@ -1944,28 +2128,11 @@ async function findRoutes(params) {
     const networkCandidates = earlyNowFilter.candidates;
     finishStage('earlyServiceFilter');
 
-    onProgress?.('Calculating walking times...');
-    await Promise.all(networkCandidates.map(async route => {
-        const [wO, wD] = await Promise.all([
-            fetchGCPRoute(originLoc.lat, originLoc.lng, route.oLat, route.oLng, 'walking', [], gcpKey),
-            fetchGCPRoute(route.dLat, route.dLng, destLoc.lat, destLoc.lng, 'walking', [], gcpKey),
-        ]);
-        route.walkInfoOrigin = wO; route.walkTimeOrigin = wO.duration;
-        route.walkInfoDest = wD; route.walkTimeDest = wD.duration;
-        route.walkTimeTransfer = 0; route.walkTimeTransfer2 = 0;
-
-        if (route.transfers >= 1) {
-            const tw = await fetchGCPRoute(route.t1Lat, route.t1Lng, route.t2Lat, route.t2Lng, 'walking', [], gcpKey);
-            route.walkInfoTransfer = tw; route.walkTimeTransfer = tw.duration;
-        }
-        if (route.transfers >= 2) {
-            const tw2 = await fetchGCPRoute(route.t3Lat, route.t3Lng, route.t4Lat, route.t4Lng, 'walking', [], gcpKey);
-            route.walkInfoTransfer2 = tw2; route.walkTimeTransfer2 = tw2.duration;
-        }
-    }));
+    onProgress?.('Estimating walking times locally...');
+    networkCandidates.forEach(applyStraightLineWalkingEstimate);
     finishStage('walkingEnrichment');
 
-    // ?€?€ ETA filter + accurate time calculation
+    // ETA and historical-service validation.
     onProgress?.('Checking scheduled services...');
     const filteredCandidates = [];
 
@@ -1978,17 +2145,23 @@ async function findRoutes(params) {
             allowNoEtaNow: !strictEtaOnly,
             allowSparseHistoricalFallback,
             currentLocation,
-            gcpKey,
         });
         if (isValid) filteredCandidates.push(route);
     }));
     finishStage('serviceValidation');
 
-    // ?€?€ Final sort: time ??transfers ??walk
-    if (filteredCandidates.length > 0) {
+    // Optional Google ride refinement is bounded and explicitly enabled.
+    let googleRideCandidatesRefined = 0;
+    if (useGoogleRefinement && filteredCandidates.length > 0) {
         onProgress?.('Refining in-vehicle bus time...');
         const plannedAnchorTime = buildPlannedDateTime(dateValue, timeValue, now);
-        await enrichGoogleRideDurations(filteredCandidates, stopMap, {
+        filteredCandidates.sort(compareRouteCandidates);
+        const rideRefinementCandidates = filteredCandidates.slice(
+            0,
+            MAX_GOOGLE_RIDE_REFINEMENT_CANDIDATES
+        );
+        googleRideCandidatesRefined = rideRefinementCandidates.length;
+        await enrichGoogleRideDurations(rideRefinementCandidates, stopMap, {
             timeMode,
             departureTime: timeMode === 'now' ? now : plannedAnchorTime,
             arrivalTime: plannedAnchorTime,
@@ -2004,7 +2177,6 @@ async function findRoutes(params) {
                 allowNoEtaNow: !strictEtaOnly,
                 allowSparseHistoricalFallback,
                 currentLocation,
-                gcpKey,
             });
             if (isValid) refinedCandidates.push(route);
         }));
@@ -2035,6 +2207,8 @@ async function findRoutes(params) {
         earlyHistoricalRejected: earlyFilter.rejectedCount,
         earlyLiveEtaRejected: earlyNowFilter.rejectedCount,
         repeatedRouteCandidatesRejected,
+        googleRefinementEnabled: useGoogleRefinement,
+        googleRideCandidatesRefined,
         candidatesAfterEarlyFilter: networkCandidates.length,
         candidatesAfterServiceValidation: filteredCandidates.length,
         finalCandidateCount: finalCandidates.length,

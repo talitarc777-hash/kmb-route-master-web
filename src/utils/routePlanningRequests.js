@@ -40,6 +40,74 @@ export async function loadKmbPayloads(endpoints, sourceLabel, fetchImpl = fetch)
   }
 }
 
+function payloadRows(payload, label) {
+  if (!Array.isArray(payload?.data)) {
+    throw new Error(`KMB ${label} payload format error (missing data array).`);
+  }
+  return payload.data;
+}
+
+export function buildKmbNetworkIndexes({ stopsData, routesData, routeStopsData }) {
+  const stopRows = payloadRows(stopsData, 'stop');
+  const routeRows = payloadRows(routesData, 'route');
+  const routeStopRows = payloadRows(routeStopsData, 'route-stop');
+  const stopMap = {};
+  const routeMap = {};
+  const routeStopGroups = new Map();
+  const stopRoutes = {};
+
+  for (const stop of stopRows) {
+    const stopId = String(stop?.stop || '').trim();
+    const lat = Number(stop?.lat);
+    const lng = Number(stop?.long);
+    if (!stopId || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    stopMap[stopId] = {
+      name_en: stop.name_en,
+      name_tc: stop.name_tc,
+      lat,
+      lng,
+    };
+  }
+
+  for (const route of routeRows) {
+    const routeCode = String(route?.route || '').trim();
+    const bound = String(route?.bound || '').trim();
+    const serviceType = String(route?.service_type || '').trim();
+    if (!routeCode || !bound || !serviceType) continue;
+    routeMap[`${routeCode}|${bound}|${serviceType}`] = route;
+  }
+
+  routeStopRows.forEach((row, sourceIndex) => {
+    const routeCode = String(row?.route || '').trim();
+    const bound = String(row?.bound || '').trim();
+    const serviceType = String(row?.service_type || '').trim();
+    const stopId = String(row?.stop || '').trim();
+    const sequence = Number(row?.seq);
+    if (!routeCode || !bound || !serviceType || !stopId || !Number.isFinite(sequence)) return;
+
+    const routeKey = `${routeCode}|${bound}|${serviceType}`;
+    if (!routeStopGroups.has(routeKey)) routeStopGroups.set(routeKey, []);
+    routeStopGroups.get(routeKey).push({ stopId, sequence, sourceIndex });
+
+    if (!stopRoutes[stopId]) stopRoutes[stopId] = [];
+    stopRoutes[stopId].push({
+      route: routeCode,
+      bound,
+      service_type: serviceType,
+      seq: sequence,
+    });
+  });
+
+  const routeStops = {};
+  for (const [routeKey, rows] of routeStopGroups) {
+    routeStops[routeKey] = rows
+      .sort((left, right) => left.sequence - right.sequence || left.sourceIndex - right.sourceIndex)
+      .map((row) => row.stopId);
+  }
+
+  return { stopMap, routeMap, routeStops, stopRoutes };
+}
+
 export function createLatestRequestTracker() {
   let latestId = 0;
   return {
