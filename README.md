@@ -9,7 +9,7 @@ A React route planner for Hong Kong. It searches KMB routes locally, validates l
 - Live KMB ETA filtering with a user-controlled strict ETA option
 - Official Transport Department service-alert matching and disruption-aware ranking
 - Leave-at and arrive-by validation against compact historical service windows
-- Local walking estimates with optional, capped Google ride-time refinement
+- Google Directions walking times with optional, capped Google ride-time refinement
 - Optional Google Transit options when KMB is unavailable or has an ETA gap
 - KMB monthly-pass treatment: KMB legs are ranked as zero additional fare
 - Citybus, Tram, MTR, Light Rail, and MTR Bus fare/rail metadata from cached or official open data
@@ -61,7 +61,7 @@ The production build is written to `dist/`.
 
 ### 1. Resolve the journey
 
-The app converts the entered origin and destination into WGS84 coordinates. KMB stop suggestions are matched locally and shown first. After three typed characters and a 400 ms pause, the same dropdown also shows Hong Kong place predictions from Google Maps. Selecting a Google prediction resolves its place ID through one Geocoding request; an unselected free-text place is geocoded only when the search is submitted. The same coordinates are reused throughout the search.
+The app converts the entered origin and destination into WGS84 coordinates. After three typed characters and a 400 ms pause, the dropdown shows Hong Kong place predictions from Google Maps only. Selecting a prediction resolves its place ID through one Geocoding request; unselected free text is geocoded only when the search is submitted. The same coordinates are reused throughout the search.
 
 ### 2. Load KMB network data
 
@@ -106,7 +106,7 @@ Total time combines:
 - waiting/boarding allowance
 - in-vehicle ride time
 
-The local baseline estimates walking time from straight-line distance and ride time from stop count. A normal KMB search therefore makes no Google Directions request. When Google services are explicitly enabled, Directions Transit may refine only the eight best KMB candidates, and only a bus step whose route number matches the KMB leg is accepted. If refinement fails or returns another route, the local estimate is retained.
+Candidate discovery uses geographic proximity, but the walking time shown and used for route timing/ranking comes from Google Directions walking routes for access, interchange, and destination legs. Duplicate walking requests are shared and processed with bounded concurrency. A straight-line estimate is retained only as a resilience fallback when Google Directions cannot return a walking route. When Google ride refinement is explicitly enabled, Directions Transit may refine only the eight best KMB candidates, and only a bus step whose route number matches the KMB leg is accepted. If refinement fails or returns another route, the local ride estimate is retained.
 
 ### 6. Optional Google Transit gap search
 
@@ -132,9 +132,8 @@ CSDI responses are cached in browser storage for up to 30 days, while the server
 
 ## External Request Minimisation
 
-- KMB stop-name autocomplete runs locally and is displayed before Google predictions.
-- Google Maps autocomplete waits for three characters and a 400 ms typing pause, and cancels stale requests. Predictions are not persistently cached.
-- KMB candidate walking time is calculated locally instead of requesting one Directions route per candidate.
+- Google Maps is the only autocomplete suggestion source. It waits for three characters and a 400 ms typing pause and cancels stale requests. Predictions are not persistently cached.
+- Access, interchange, destination, and live-GPS approach walking times use Google Directions. Identical walking legs share cached/in-flight requests, and requests run with bounded concurrency.
 - Google ride refinement is opt-in and capped at eight candidates.
 - Candidate service validation is capped at 120 diverse routes and the UI returns at most 30 ranked results.
 - CSDI and optional Google geometry responses use persistent browser caches.
@@ -207,7 +206,7 @@ The `functions/api/` handlers can proxy KMB and Google requests. The current Clo
 ```text
 src/App.jsx                         Main UI, search orchestration, ranking, map display
 src/utils/apiBase.js               Same-origin or external API URL handling
-src/utils/locationSearch.js        Local KMB stop-name matching
+src/utils/locationSearch.js        Google place-prediction normalization
 src/utils/routePlanningRequests.js KMB data loading, validation, and ordered network indexes
 public/routeEngine.js              KMB graph search, ETA/schedule validation, timing
 public/operator-data/              Runtime schedules and compact operator datasets

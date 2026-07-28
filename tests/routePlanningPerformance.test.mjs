@@ -14,10 +14,7 @@ import {
   buildKmbGeometryCacheKey,
   filterKmbOverlayVariantsByDirection,
 } from '../src/utils/kmbGeometryCache.js';
-import {
-  findLocalKmbStopSuggestions,
-  normalizeGooglePlaceSuggestions,
-} from '../src/utils/locationSearch.js';
+import { normalizeGooglePlaceSuggestions } from '../src/utils/locationSearch.js';
 
 const engineSource = await readFile(new URL('../public/routeEngine.js', import.meta.url), 'utf8');
 
@@ -200,7 +197,13 @@ test('GPS approach time skips an unreachable transfer ETA and selects the next c
   const engine = loadEngine(async (url) => {
     const value = String(url);
     if (value.includes('/api/google/directions/json')) {
-      return jsonResponse({ status: 'ZERO_RESULTS', routes: [] });
+      return jsonResponse({
+        status: 'OK',
+        routes: [{
+          legs: [{ distance: { value: 250 }, duration: { value: 180 } }],
+          overview_polyline: { points: '' },
+        }],
+      });
     }
     if (value.includes('/eta/A/1/1')) {
       return jsonResponse({ data: [{ eta: etaAt(5) }] });
@@ -238,7 +241,8 @@ test('GPS approach time skips an unreachable transfer ETA and selects the next c
     currentLocation: { lat: 22.2995, lng: 114.1700 },
   }), true);
   assert.equal(route.gpsTimingApplied, true);
-  assert.equal(route.walkTimeOrigin, 1);
+  assert.equal(route.walkTimeOrigin, 3);
+  assert.equal(route.walkInfoOrigin.source, 'google_directions');
   assert.equal(route.segments[0].nextEta, etaAt(5));
   assert.equal(route.segments[1].missedEtaCount, 1);
   assert.equal(route.segments[1].nextEta, etaAt(18));
@@ -625,6 +629,15 @@ test('direct search retains a slightly farther boarding stop when the closest st
   const engine = loadEngine(async (url) => {
     urls.push(String(url));
     if (String(url).includes('/eta/')) return jsonResponse({ data: [] });
+    if (String(url).includes('/api/google/directions/json')) {
+      return jsonResponse({
+        status: 'OK',
+        routes: [{
+          legs: [{ distance: { value: 520 }, duration: { value: 360 } }],
+          overview_polyline: { points: '' },
+        }],
+      });
+    }
     throw new Error(`Unexpected network request: ${url}`);
   });
   const route = { route: 'R', bound: 'I', service_type: '1' };
@@ -655,12 +668,15 @@ test('direct search retains a slightly farther boarding stop when the closest st
 
   assert.equal(result.filteredCandidates.length, 1);
   assert.equal(result.filteredCandidates[0].segments[0].fromStop, 'A');
-  assert.equal(urls.some((url) => url.includes('/api/google/')), false);
+  assert.equal(result.filteredCandidates[0].walkTimeOrigin, 6);
+  assert.equal(result.filteredCandidates[0].walkInfoOrigin.source, 'google_directions');
+  assert.equal(urls.filter((url) => url.includes('/api/google/')).length, 1);
 });
 
 test('two-transfer search uses a genuine middle route that does not already reach the destination', async () => {
   const engine = loadEngine(async (url) => {
     if (String(url).includes('/eta/')) return jsonResponse({ data: [] });
+    if (String(url).includes('/api/google/')) return jsonResponse({ status: 'ZERO_RESULTS', routes: [] });
     throw new Error(`Unexpected network request: ${url}`);
   });
   const first = { route: 'A', bound: 'I', service_type: '1' };
@@ -839,17 +855,6 @@ test('KMB network indexes sort route stops by sequence and skip invalid coordina
   assert.equal(network.stopMap.BAD, undefined);
   assert.equal(network.stopRoutes.A[0].seq, 1);
   assert.equal(network.routeMap['1|I|1'].co, 'KMB');
-});
-
-test('local KMB stop suggestions prioritize exact stop IDs without an external lookup', () => {
-  const suggestions = findLocalKmbStopSuggestions({
-    KT609: { name_tc: '觀塘法院', name_en: 'Kwun Tong Law Courts', lat: 22.31, lng: 114.23 },
-    KT610: { name_tc: '觀塘站', name_en: 'Kwun Tong Station', lat: 22.312, lng: 114.226 },
-  }, 'KT609');
-
-  assert.equal(suggestions[0].place_id, 'kmb-stop:KT609');
-  assert.equal(suggestions[0].lat, 22.31);
-  assert.match(suggestions[0].description, /觀塘法院/);
 });
 
 test('Google autocomplete predictions are normalized for the shared place dropdown', () => {

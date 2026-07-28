@@ -10,10 +10,7 @@ import {
   buildKmbGeometryCacheKey,
   filterKmbOverlayVariantsByDirection,
 } from './utils/kmbGeometryCache.js';
-import {
-  findLocalKmbStopSuggestions,
-  normalizeGooglePlaceSuggestions,
-} from './utils/locationSearch.js';
+import { normalizeGooglePlaceSuggestions } from './utils/locationSearch.js';
 import {
   applyServiceAlertsToRoutes,
   parseTdServiceAlerts,
@@ -1465,7 +1462,7 @@ function annotateGapRepairCandidates(candidates, gap) {
 }
 
 // Autocomplete Input Component
-const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) => {
+const AutocompleteInput = ({ value, onChange, placeholder, onClear }) => {
   const displayValue = typeof value === 'string' ? value : value?.name || '';
   const [suggestions, setSuggestions] = useState([]);
   const [show, setShow] = useState(false);
@@ -1478,17 +1475,12 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) =
     const trimmedValue = displayValue.trim();
     const hasSelectedPlace = Boolean(value && typeof value === 'object' && value.place_id);
     const parsedValue = trimmedValue ? parseLocationInput(trimmedValue) : null;
-    if (trimmedValue.length < 2 || hasSelectedPlace || parsedValue?.type === 'coords') {
+    if (trimmedValue.length < 3 || hasSelectedPlace || parsedValue?.type === 'coords') {
       setSuggestions([]);
       setIsGoogleLoading(false);
       return undefined;
     }
-    const localSuggestions = findLocalKmbStopSuggestions(stopMap, trimmedValue, 4);
-    setSuggestions(localSuggestions);
-    if (trimmedValue.length < 3) {
-      setIsGoogleLoading(false);
-      return undefined;
-    }
+    setSuggestions([]);
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(async () => {
@@ -1502,16 +1494,10 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) =
         const payload = await response.json();
         if (!response.ok) throw new Error(payload?.error_message || `HTTP ${response.status}`);
         if (autocompleteRequestRef.current !== requestId) return;
-        const googleSuggestions = normalizeGooglePlaceSuggestions(payload, 5);
-        setSuggestions([
-          ...localSuggestions,
-          ...googleSuggestions.filter((googleSuggestion) =>
-            !localSuggestions.some((localSuggestion) =>
-              localSuggestion.description === googleSuggestion.description)),
-        ]);
+        setSuggestions(normalizeGooglePlaceSuggestions(payload, 8));
       } catch (error) {
         if (error?.name !== 'AbortError' && autocompleteRequestRef.current === requestId) {
-          setSuggestions(localSuggestions);
+          setSuggestions([]);
         }
       } finally {
         if (autocompleteRequestRef.current === requestId) setIsGoogleLoading(false);
@@ -1522,7 +1508,7 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) =
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [value, displayValue, stopMap]);
+  }, [value, displayValue]);
 
   const showsGoogleContent = isGoogleLoading || suggestions.some((suggestion) =>
     suggestion.source === 'google');
@@ -1572,17 +1558,12 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) =
                 });
                 setShow(false);
               }}
-              className={`block w-full border-b border-slate-100 px-4 py-3 text-left text-sm hover:bg-slate-50 ${s.source === 'kmb' ? 'bg-red-50/30' : 'bg-white'}`}
+              className="block w-full border-b border-slate-100 bg-white px-4 py-3 text-left text-sm hover:bg-slate-50"
             >
               <span className="font-bold text-slate-800">{s.structured_formatting?.main_text}</span>
               <span className="ml-1 text-xs text-slate-400">
                 {s.structured_formatting?.secondary_text}
               </span>
-              {s.source === 'kmb' && (
-                <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-black text-[#E1251B]">
-                  KMB stop
-                </span>
-              )}
             </button>
           ))}
           {isGoogleLoading && (
@@ -3983,7 +3964,7 @@ const App = () => {
     const toValue = destination;
     setOrigin(toValue);
     setDestination(fromValue);
-    setIsGpsTimingEnabled(false);
+    stopGpsTracking();
   };
 
   const zoomToLocation = useCallback((lat, lng) => {
@@ -4011,6 +3992,8 @@ const App = () => {
       (error) => {
         if (error?.code === 1) {
           setIsGpsTimingEnabled(false);
+          currentLocationRef.current = null;
+          currentLocationLayerRef.current?.removeAll();
           setSearchError('Location permission was removed. Enable it again to use live GPS.');
         }
       },
@@ -4055,10 +4038,15 @@ const App = () => {
           : err?.message || 'Failed to get current location.'
   ), []);
 
+  const stopGpsTracking = useCallback(() => {
+    setIsGpsTimingEnabled(false);
+    currentLocationRef.current = null;
+    currentLocationLayerRef.current?.removeAll();
+  }, []);
+
   const handleUseCurrentLocation = async () => {
     if (isGpsTimingEnabled) {
-      setIsGpsTimingEnabled(false);
-      currentLocationLayerRef.current?.removeAll();
+      stopGpsTracking();
       return;
     }
     setIsLocating(true);
@@ -4079,6 +4067,11 @@ const App = () => {
 
   const handleLocateSelectedRoute = async () => {
     if (!selectedRoute || isLocating) return;
+    if (isGpsTimingEnabled) {
+      stopGpsTracking();
+      setRefreshFeedback({ type: 'success', message: 'Live GPS stopped and location marker removed.' });
+      return;
+    }
     setIsLocating(true);
     setSearchError(null);
     setRefreshFeedback({ type: 'loading', message: 'Getting GPS location and checking catchable ETAs...' });
@@ -4240,7 +4233,7 @@ const App = () => {
                     type="button"
                     onClick={() => {
                       setTimeMode(mode);
-                      if (mode !== 'now') setIsGpsTimingEnabled(false);
+                      if (mode !== 'now') stopGpsTracking();
                     }}
                     className={`min-h-10 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all ${
                       timeMode === mode
@@ -4276,15 +4269,14 @@ const App = () => {
                 <div className="grid grid-cols-[1fr_auto] gap-2">
                   <AutocompleteInput
                     placeholder="From... (e.g. Mong Kok)"
-                    stopMap={stopMapRef.current}
                     value={origin}
                     onChange={(value) => {
                       setOrigin(value);
-                      setIsGpsTimingEnabled(false);
+                      stopGpsTracking();
                     }}
                     onClear={() => {
                       setOrigin('');
-                      setIsGpsTimingEnabled(false);
+                      stopGpsTracking();
                     }}
                   />
                   <button
@@ -4299,7 +4291,6 @@ const App = () => {
                 </div>
                 <AutocompleteInput
                   placeholder="To... (e.g. Tsim Sha Tsui)"
-                  stopMap={stopMapRef.current}
                   value={destination}
                   onChange={setDestination}
                   onClear={() => setDestination('')}
@@ -4367,9 +4358,9 @@ const App = () => {
           onClick={handleLocateSelectedRoute}
           disabled={isLocating}
           className={'absolute left-3 top-[72px] z-30 min-h-11 rounded-2xl border border-blue-200 bg-white/95 px-3 py-2 text-xs font-black text-blue-700 shadow-xl backdrop-blur disabled:opacity-50 sm:top-[88px]'}
-          title={'Show my location and recalculate catchable buses'}
+          title={isGpsTimingEnabled ? 'Stop live GPS updates' : 'Show my location and recalculate catchable buses'}
         >
-          {isLocating ? 'Locating...' : '\u{1F4CD} My location'}
+          {isLocating ? 'Locating...' : isGpsTimingEnabled ? 'Stop GPS' : '\u{1F4CD} My location'}
         </button>
       )}
 

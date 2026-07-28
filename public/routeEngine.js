@@ -40,6 +40,7 @@ const KMB_HIGH_CONFIDENCE_MIN_SAMPLE_DAYS = 7;
 const EARLY_HISTORICAL_BOUNDARY_GUARD_MIN = 30;
 const MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR = 8;
 const MAX_GOOGLE_RIDE_REFINEMENT_CANDIDATES = 8;
+const GOOGLE_WALKING_CONCURRENCY = 8;
 const MAX_ROUTE_ACCESS_STOPS = 6;
 const MAX_TWO_TRANSFER_CANDIDATES = 40;
 const SIMPLE_CANDIDATES_BEFORE_SKIPPING_TWO_TRANSFER = 12;
@@ -167,6 +168,7 @@ function getFallbackRoute(lat1, lng1, lat2, lng2, mode) {
         distance: d * 1000,
         duration: Math.ceil(d / (mode === 'walking' ? 4 : 30) * 60),
         geometry: [[lng1, lat1], [lng2, lat2]],
+        source: 'straight_line_fallback',
     };
 }
 
@@ -257,7 +259,7 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
         throw new Error('Cannot request route geometry with invalid coordinates.');
     }
     const wpSig = getWaypointSignature(intermediateStops);
-    const cacheKey = `${mode}|${lat1.toFixed(4)},${lng1.toFixed(4)}->${lat2.toFixed(4)},${lng2.toFixed(4)}|${wpSig}`;
+    const cacheKey = `route-v2|${mode}|${lat1.toFixed(4)},${lng1.toFixed(4)}->${lat2.toFixed(4)},${lng2.toFixed(4)}|${wpSig}`;
     const cached = getGcpCachedValue(cacheKey);
     if (cached) return cached;
 
@@ -281,6 +283,7 @@ async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermedi
                     distance: r.legs.reduce((s, l) => s + l.distance.value, 0),
                     duration: Math.ceil(r.legs.reduce((s, l) => s + l.duration.value, 0) / 60),
                     geometry: decodePolyline(r.overview_polyline.points),
+                    source: 'google_directions',
                 };
                 setGcpCachedValue(cacheKey, out, getGcpRouteCacheTtl(mode));
                 return out;
@@ -1035,14 +1038,14 @@ function resetSegmentTiming(segment, defaultFrequency) {
     segment.plannedTimingSource = null;
 }
 
-function applyCurrentLocationApproach(route, currentLocation) {
+async function applyCurrentLocationApproach(route, currentLocation) {
     const lat = Number(currentLocation?.lat);
     const lng = Number(currentLocation?.lng);
     const stopLat = Number(route?.oLat);
     const stopLng = Number(route?.oLng);
     if (![lat, lng, stopLat, stopLng].every(Number.isFinite)) return false;
 
-    const walkInfo = getFallbackRoute(lat, lng, stopLat, stopLng, 'walking');
+    const walkInfo = await fetchGCPRoute(lat, lng, stopLat, stopLng, 'walking');
     route.originLoc = { lat, lng };
     route.walkInfoOrigin = walkInfo;
     route.walkTimeOrigin = walkInfo.duration;
@@ -1265,7 +1268,7 @@ async function applyRouteTiming(route, options = {}) {
 
     if (timeMode === 'now') {
         if (currentLocation) {
-            applyCurrentLocationApproach(route, currentLocation);
+            await applyCurrentLocationApproach(route, currentLocation);
         } else {
             route.gpsTimingApplied = false;
             route.gpsLocation = null;
@@ -1348,6 +1351,72 @@ function applyStraightLineWalkingEstimate(route) {
         route.walkInfoTransfer2 = transferWalk;
         route.walkTimeTransfer2 = transferWalk.duration;
     }
+}
+
+async function enrichGoogleWalkingEstimates(routes) {
+    const jobs = new Map();
+    const addLeg = (route, infoProperty, timeProperty, lat1, lng1, lat2, lng2) => {
+        const coordinates = [lat1, lng1, lat2, lng2].map(Number);
+        if (!coordinates.every(Number.isFinite)) return;
+        if (haversine(...coordinates) <= 0.001) {
+            route[infoProperty] = {
+                distance: 0,
+                duration: 0,
+                geometry: [[coordinates[1], coordinates[0]], [coordinates[3], coordinates[2]]],
+                source: 'same_location',
+            };
+            route[timeProperty] = 0;
+            return;
+        }
+        const key = coordinates.map(value => value.toFixed(4)).join('|');
+        if (!jobs.has(key)) jobs.set(key, { coordinates, assignments: [] });
+        jobs.get(key).assignments.push({ route, infoProperty, timeProperty });
+    };
+
+    for (const route of routes || []) {
+        route.walkTimeTransfer = 0;
+        route.walkTimeTransfer2 = 0;
+        route.walkInfoTransfer = null;
+        route.walkInfoTransfer2 = null;
+        addLeg(
+            route, 'walkInfoOrigin', 'walkTimeOrigin',
+            route.originLoc?.lat, route.originLoc?.lng, route.oLat, route.oLng
+        );
+        addLeg(
+            route, 'walkInfoDest', 'walkTimeDest',
+            route.dLat, route.dLng, route.destLoc?.lat, route.destLoc?.lng
+        );
+        if (route.transfers >= 1) {
+            addLeg(
+                route, 'walkInfoTransfer', 'walkTimeTransfer',
+                route.t1Lat, route.t1Lng, route.t2Lat, route.t2Lng
+            );
+        }
+        if (route.transfers >= 2) {
+            addLeg(
+                route, 'walkInfoTransfer2', 'walkTimeTransfer2',
+                route.t3Lat, route.t3Lng, route.t4Lat, route.t4Lng
+            );
+        }
+    }
+
+    const pending = Array.from(jobs.values());
+    let nextIndex = 0;
+    let fallbackCount = 0;
+    const worker = async () => {
+        while (nextIndex < pending.length) {
+            const job = pending[nextIndex++];
+            const walkInfo = await fetchGCPRoute(...job.coordinates, 'walking');
+            if (walkInfo.source !== 'google_directions') fallbackCount += 1;
+            for (const assignment of job.assignments) {
+                assignment.route[assignment.infoProperty] = walkInfo;
+                assignment.route[assignment.timeProperty] = walkInfo.duration;
+            }
+        }
+    };
+    const workerCount = Math.min(GOOGLE_WALKING_CONCURRENCY, pending.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return { uniqueLegCount: pending.length, fallbackCount };
 }
 
 function isDefinitiveEarlyHistoricalRejection(route) {
@@ -2113,7 +2182,9 @@ async function findRoutes(params) {
         }
     }
 
-    // Local walking estimates avoid one Directions request per candidate.
+    // A preliminary estimate is used only to reject clearly inactive planned services
+    // before paid Google walking requests are made. Displayed/ranked walking times are
+    // replaced with Google Directions durations below.
     finishStage('candidateGeneration');
     const earlyFilter = await earlyFilterPlannedCandidates(candidates, {
         timeMode,
@@ -2128,8 +2199,8 @@ async function findRoutes(params) {
     const networkCandidates = earlyNowFilter.candidates;
     finishStage('earlyServiceFilter');
 
-    onProgress?.('Estimating walking times locally...');
-    networkCandidates.forEach(applyStraightLineWalkingEstimate);
+    onProgress?.('Calculating walking times with Google Maps...');
+    const googleWalkingSummary = await enrichGoogleWalkingEstimates(networkCandidates);
     finishStage('walkingEnrichment');
 
     // ETA and historical-service validation.
@@ -2209,6 +2280,8 @@ async function findRoutes(params) {
         repeatedRouteCandidatesRejected,
         googleRefinementEnabled: useGoogleRefinement,
         googleRideCandidatesRefined,
+        googleWalkingUniqueLegs: googleWalkingSummary.uniqueLegCount,
+        googleWalkingFallbacks: googleWalkingSummary.fallbackCount,
         candidatesAfterEarlyFilter: networkCandidates.length,
         candidatesAfterServiceValidation: filteredCandidates.length,
         finalCandidateCount: finalCandidates.length,
