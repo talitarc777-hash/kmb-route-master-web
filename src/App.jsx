@@ -10,7 +10,16 @@ import {
   buildKmbGeometryCacheKey,
   filterKmbOverlayVariantsByDirection,
 } from './utils/kmbGeometryCache.js';
-import { findLocalKmbStopSuggestions } from './utils/locationSearch.js';
+import {
+  findLocalKmbStopSuggestions,
+  normalizeGooglePlaceSuggestions,
+} from './utils/locationSearch.js';
+import {
+  applyServiceAlertsToRoutes,
+  parseTdServiceAlerts,
+  rankRoutesByDisruption,
+  serviceAlertLabel,
+} from './utils/serviceAlerts.js';
 
 publishApiBaseUrl();
 
@@ -426,11 +435,13 @@ function parseLocationInput(input) {
   return { type: 'text', query: trimmed };
 }
 
-async function geocode(query) {
+async function geocode(query, placeId = null) {
   const normalizedQuery = query.trim().toLowerCase();
-  const cacheKey = `q:${normalizedQuery}`;
+  const cacheKey = placeId ? `pid:${placeId}` : `q:${normalizedQuery}`;
   return fetchWithPersistentCache(geocodeCacheState, cacheKey, async () => {
-    const queryPart = `address=${encodeURIComponent(query)}&components=country:hk`;
+    const queryPart = placeId
+      ? `place_id=${encodeURIComponent(placeId)}`
+      : `address=${encodeURIComponent(query)}&components=country:hk`;
 
     try {
       const res = await fetch(toApiUrl(`/api/google/geocode/json?${queryPart}`));
@@ -450,8 +461,10 @@ async function geocode(query) {
 }
 
 async function resolveLocation(inputObj) {
-  const directLat = Number(typeof inputObj === 'object' ? inputObj?.lat : null);
-  const directLng = Number(typeof inputObj === 'object' ? inputObj?.lng : null);
+  const hasDirectCoordinates = typeof inputObj === 'object' &&
+    inputObj?.lat != null && inputObj?.lng != null;
+  const directLat = hasDirectCoordinates ? Number(inputObj.lat) : NaN;
+  const directLng = hasDirectCoordinates ? Number(inputObj.lng) : NaN;
   const rawText = typeof inputObj === 'string' ? inputObj : inputObj?.name;
   if (Number.isFinite(directLat) && Number.isFinite(directLng)) {
     return { lat: directLat, lng: directLng, name: rawText || 'KMB stop' };
@@ -461,7 +474,10 @@ async function resolveLocation(inputObj) {
   }
   const parsed = parseLocationInput(rawText);
   if (parsed.type === 'coords') return { lat: parsed.lat, lng: parsed.lng, name: rawText };
-  const result = await geocode(rawText);
+  const placeId = typeof inputObj === 'object' && inputObj?.source === 'google'
+    ? inputObj.place_id
+    : null;
+  const result = await geocode(rawText, placeId);
   if (!result) throw new Error(`Cannot find location: "${rawText}"`);
   return { ...result, name: rawText };
 }
@@ -629,6 +645,14 @@ function etaDisplayIdentity(etaValue) {
   return Number.isNaN(etaDate.getTime()) ? String(etaValue) : etaDate.toISOString();
 }
 
+async function fetchOfficialServiceAlerts() {
+  const response = await fetch(toApiUrl('/api/kmb/service-alerts'), {
+    headers: { Accept: 'application/xml, text/xml' },
+  });
+  if (!response.ok) throw new Error(`Service-alert feed returned HTTP ${response.status}`);
+  return parseTdServiceAlerts(await response.text());
+}
+
 function isEtaCatchableAtReadyTime(etaValue, readyTimeValue) {
   if (!etaValue || !readyTimeValue) return true;
   const etaTime = new Date(etaValue).getTime();
@@ -747,10 +771,42 @@ function knownFareForRanking(route) {
   return 0;
 }
 
-function estimatedTimeForRanking(route) {
+function baseEstimatedTimeForRanking(route) {
   return isFallbackRoute(route)
     ? route.estimated_time_min ?? route.estimatedTime ?? 9999
     : route.estimatedTime ?? 9999;
+}
+
+function estimatedTimeForRanking(route) {
+  return baseEstimatedTimeForRanking(route) + (Number(route?.disruptionPenaltyMinutes) || 0);
+}
+
+function serviceAlertBadgeClass(severity) {
+  if (severity === 'suspended') return 'border-red-200 bg-red-50 text-red-700';
+  if (severity === 'diversion') return 'border-orange-200 bg-orange-50 text-orange-700';
+  return 'border-amber-200 bg-amber-50 text-amber-700';
+}
+
+function serviceAlertSummary(route) {
+  const alerts = route?.serviceAlerts || [];
+  if (alerts.length === 0) return null;
+  const severity = route.serviceAlertSeverity || 'info';
+  const routeCodes = [...new Set(alerts.map((alert) => alert.routeCode).filter(Boolean))];
+  const description = severity === 'suspended'
+    ? 'service suspended'
+    : severity === 'diversion'
+      ? 'diversion or stop change reported'
+      : severity === 'delay'
+        ? 'possible delay reported'
+        : 'service notice';
+  const penalty = Number(route.disruptionPenaltyMinutes) || 0;
+  return {
+    severity,
+    compact: `${routeCodes.length > 0 ? `Route ${routeCodes.join(', ')}: ` : ''}${description}` +
+      `${penalty > 0 && Number.isFinite(penalty) ? ` · ranked +${penalty} min` : ''}`,
+    detail: serviceAlertLabel(alerts[0]),
+    count: alerts.length,
+  };
 }
 
 function rankCombinedTransportOptions(routes) {
@@ -1413,17 +1469,63 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) =
   const displayValue = typeof value === 'string' ? value : value?.name || '';
   const [suggestions, setSuggestions] = useState([]);
   const [show, setShow] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const autocompleteRequestRef = useRef(0);
 
   useEffect(() => {
+    const requestId = autocompleteRequestRef.current + 1;
+    autocompleteRequestRef.current = requestId;
     const trimmedValue = displayValue.trim();
     const hasSelectedPlace = Boolean(value && typeof value === 'object' && value.place_id);
     const parsedValue = trimmedValue ? parseLocationInput(trimmedValue) : null;
     if (trimmedValue.length < 2 || hasSelectedPlace || parsedValue?.type === 'coords') {
       setSuggestions([]);
-      return;
+      setIsGoogleLoading(false);
+      return undefined;
     }
-    setSuggestions(findLocalKmbStopSuggestions(stopMap, trimmedValue, 5));
+    const localSuggestions = findLocalKmbStopSuggestions(stopMap, trimmedValue, 4);
+    setSuggestions(localSuggestions);
+    if (trimmedValue.length < 3) {
+      setIsGoogleLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setIsGoogleLoading(true);
+      try {
+        const query = new URLSearchParams({ input: trimmedValue });
+        const response = await fetch(
+          toApiUrl(`/api/google/place/autocomplete/json?${query.toString()}`),
+          { signal: controller.signal },
+        );
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.error_message || `HTTP ${response.status}`);
+        if (autocompleteRequestRef.current !== requestId) return;
+        const googleSuggestions = normalizeGooglePlaceSuggestions(payload, 5);
+        setSuggestions([
+          ...localSuggestions,
+          ...googleSuggestions.filter((googleSuggestion) =>
+            !localSuggestions.some((localSuggestion) =>
+              localSuggestion.description === googleSuggestion.description)),
+        ]);
+      } catch (error) {
+        if (error?.name !== 'AbortError' && autocompleteRequestRef.current === requestId) {
+          setSuggestions(localSuggestions);
+        }
+      } finally {
+        if (autocompleteRequestRef.current === requestId) setIsGoogleLoading(false);
+      }
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [value, displayValue, stopMap]);
+
+  const showsGoogleContent = isGoogleLoading || suggestions.some((suggestion) =>
+    suggestion.source === 'google');
 
   return (
     <div className="relative w-full">
@@ -1431,6 +1533,7 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) =
         className={`w-full p-4 bg-slate-50 rounded-2xl font-bold border border-slate-200 ${onClear ? 'pr-12' : ''}`}
         placeholder={placeholder}
         value={displayValue}
+        autoComplete="off"
         onChange={(e) => {
           onChange(e.target.value);
           setShow(true);
@@ -1453,28 +1556,49 @@ const AutocompleteInput = ({ value, onChange, placeholder, onClear, stopMap }) =
           {'\u2715'}
         </button>
       )}
-      {show && suggestions.length > 0 && (
+      {show && (suggestions.length > 0 || isGoogleLoading) && (
         <div className="absolute top-full left-0 right-0 z-50 bg-white border border-slate-200 rounded-xl shadow-xl mt-1 overflow-hidden">
           {suggestions.map((s) => (
-            <div
+            <button
+              type="button"
               key={`${s.place_id}:${s.description}`}
               onMouseDown={() => {
                 onChange({
                   name: s.description,
                   place_id: s.place_id,
+                  source: s.source,
                   lat: s.lat,
                   lng: s.lng,
                 });
                 setShow(false);
               }}
-              className="px-4 py-3 hover:bg-slate-50 cursor-pointer text-sm border-b border-slate-100"
+              className={`block w-full border-b border-slate-100 px-4 py-3 text-left text-sm hover:bg-slate-50 ${s.source === 'kmb' ? 'bg-red-50/30' : 'bg-white'}`}
             >
-              <span className="font-bold">{s.structured_formatting?.main_text}</span>
-              <span className="text-slate-400 ml-1 text-xs">
+              <span className="font-bold text-slate-800">{s.structured_formatting?.main_text}</span>
+              <span className="ml-1 text-xs text-slate-400">
                 {s.structured_formatting?.secondary_text}
               </span>
-            </div>
+              {s.source === 'kmb' && (
+                <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-black text-[#E1251B]">
+                  KMB stop
+                </span>
+              )}
+            </button>
           ))}
+          {isGoogleLoading && (
+            <div className="px-4 py-2 text-xs font-semibold text-slate-400" aria-live="polite">
+              Searching Google Maps...
+            </div>
+          )}
+          {showsGoogleContent && (
+            <div
+              className="border-t border-slate-100 bg-white px-4 py-2 text-right text-xs font-normal text-[#5e5e5e]"
+              translate="no"
+              aria-label="Google Maps"
+            >
+              Google Maps
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1536,6 +1660,14 @@ const CurrentStopEtaList = ({
                 {variantRemark}
               </span>
             )}
+            {option.serviceAlerts?.length > 0 && (
+              <span
+                className={`rounded-md border px-1.5 py-0.5 text-[9px] font-bold leading-tight ${serviceAlertBadgeClass(option.serviceAlertSeverity)}`}
+                title={serviceAlertLabel(option.serviceAlerts[0])}
+              >
+                {'\u26A0\uFE0F'} official service alert
+              </span>
+            )}
           </div>
         );
       })}
@@ -1570,6 +1702,25 @@ const RouteDetailResizeHandle = ({ height, onPointerDown, onChange }) => (
     </div>
   </div>
 );
+
+const ServiceAlertNotice = ({ route, detailed = false }) => {
+  const summary = serviceAlertSummary(route);
+  if (!summary) return null;
+  return (
+    <div
+      className={`rounded-xl border px-2.5 py-2 text-[11px] font-bold ${serviceAlertBadgeClass(summary.severity)}`}
+      title={summary.detail}
+    >
+      <div>{'\u26A0\uFE0F'} Official alert: {summary.compact}</div>
+      {detailed && (
+        <div className="mt-1 font-medium leading-relaxed opacity-90">
+          {summary.detail}
+          {summary.count > 1 ? ` (+${summary.count - 1} more alert${summary.count > 2 ? 's' : ''})` : ''}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Bookmark Panel Component
 const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }) => {
@@ -2068,6 +2219,9 @@ const App = () => {
   const [isOverlayDirectionManual, setIsOverlayDirectionManual] = useState(false);
   const [isOverlayLoading, setIsOverlayLoading] = useState(false);
   const [overlayFeedback, setOverlayFeedback] = useState(null);
+  const [serviceAlerts, setServiceAlerts] = useState([]);
+  const [serviceAlertError, setServiceAlertError] = useState(null);
+  const [serviceAlertsUpdatedAt, setServiceAlertsUpdatedAt] = useState(null);
 
   // Add-to-bookmark modal state
   const [addToBookmark, setAddToBookmark] = useState(null);
@@ -2101,17 +2255,32 @@ const App = () => {
     searchRequestTrackerRef.current = createLatestRequestTracker();
   }
 
-  const displayedResults = useMemo(() => {
+  const serviceAlertResult = useMemo(() => {
     const permittedResults = filterRouteOptionsByGoogleTransitPermission(
       results,
       allowFallbackNonKmb,
     );
-    if (!strictEtaOnly || timeMode !== 'now') return permittedResults;
-    return permittedResults.filter((route) =>
+    const annotated = applyServiceAlertsToRoutes(permittedResults, serviceAlerts);
+    annotated.routes = rankRoutesByDisruption(
+      annotated.routes,
+      baseEstimatedTimeForRanking,
+    );
+    return annotated;
+  }, [allowFallbackNonKmb, results, serviceAlerts]);
+
+  const displayedResults = useMemo(() => {
+    if (!strictEtaOnly || timeMode !== 'now') return serviceAlertResult.routes;
+    return serviceAlertResult.routes.filter((route) =>
       isFallbackRoute(route) ||
       (route.segments || []).every((seg, index) => hasUsableNowTiming(seg, index)),
     );
-  }, [allowFallbackNonKmb, results, strictEtaOnly, timeMode]);
+  }, [serviceAlertResult, strictEtaOnly, timeMode]);
+
+  const selectedRouteWithAlerts = useMemo(() => {
+    if (!selectedRoute) return null;
+    const annotated = applyServiceAlertsToRoutes([selectedRoute], serviceAlerts);
+    return annotated.routes[0] || annotated.suppressedRoutes[0] || selectedRoute;
+  }, [selectedRoute, serviceAlerts]);
 
   const displayedResultCards = useMemo(() => {
     const groups = new Map();
@@ -2141,7 +2310,7 @@ const App = () => {
 
     Array.from(groups.entries()).forEach(([groupKey, groupRoutes]) => {
       const sortedRoutes = [...groupRoutes].sort(
-        (a, b) => (a.estimatedTime || 9999) - (b.estimatedTime || 9999),
+        (a, b) => estimatedTimeForRanking(a) - estimatedTimeForRanking(b),
       );
       const representative = sortedRoutes[0];
       const segmentDisplay = (representative.segments || []).map((seg, si) => {
@@ -2157,6 +2326,9 @@ const App = () => {
             ? rawCandidateEta
             : null;
           const previous = routeOptionMap.get(optionKey);
+          const optionAlerts = (routeCandidate.serviceAlerts || []).filter(
+            (alert) => alert.routeCode === String(candidateSeg.route).trim().toUpperCase(),
+          );
           const shouldReplace =
             !previous ||
             (candidateEta && (!previous.nextEta || candidateEta < previous.nextEta));
@@ -2173,6 +2345,8 @@ const App = () => {
               displayEtas: Array.isArray(candidateSeg.displayEtas) ? candidateSeg.displayEtas : [],
               hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
               busInterval: candidateSeg.busInterval ?? null,
+              serviceAlerts: optionAlerts,
+              serviceAlertSeverity: optionAlerts[0]?.severity || null,
             });
           }
         });
@@ -2304,6 +2478,40 @@ const App = () => {
 
   useEffect(() => {
     initArcGIS();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    const refreshServiceAlerts = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const alerts = await fetchOfficialServiceAlerts();
+        if (!active) return;
+        setServiceAlerts(alerts);
+        setServiceAlertsUpdatedAt(new Date());
+        setServiceAlertError(null);
+      } catch (error) {
+        if (active) {
+          setServiceAlertError(error?.message || 'Official service alerts are unavailable.');
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshServiceAlerts();
+    };
+
+    refreshServiceAlerts();
+    const intervalId = window.setInterval(refreshServiceAlerts, 2 * 60 * 1000);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const loadKMBData = async () => {
@@ -4266,6 +4474,11 @@ const App = () => {
                   Last refreshed: {formatRefreshTime(lastEtaRefreshAt)}
                 </div>
               )}
+              {serviceAlertsUpdatedAt && (
+                <div className="text-[10px] font-semibold text-slate-400">
+                  Traffic alerts checked: {formatRefreshTime(serviceAlertsUpdatedAt)} · {serviceAlerts.length} active
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -4291,6 +4504,16 @@ const App = () => {
               className={`mb-3 p-2 border rounded-xl text-xs font-bold ${refreshStatusClass}`}
             >
               {refreshFeedback.message}
+            </div>
+          )}
+          {serviceAlertError && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs font-bold text-amber-700">
+              {'\u26A0\uFE0F'} Official traffic alerts unavailable; route ranking currently uses ETA and schedule data only.
+            </div>
+          )}
+          {serviceAlertResult.suppressedRoutes.length > 0 && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2 text-xs font-bold text-red-700">
+              {serviceAlertResult.suppressedRoutes.length} route option{serviceAlertResult.suppressedRoutes.length > 1 ? 's were' : ' was'} hidden because an official notice explicitly reports a suspended service.
             </div>
           )}
           {!isResultsMinimized && (
@@ -4512,7 +4735,7 @@ const App = () => {
         )}
 
           <div className="space-y-2 overflow-y-auto flex-1 scrollbar-hide">
-            {displayedResultCards.length === 0 && strictEtaOnly && (
+            {displayedResultCards.length === 0 && serviceAlertResult.suppressedRoutes.length === 0 && strictEtaOnly && (
               <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-700">
                 No routes match strict ETA filter right now. Try turning off strict ETA filter.
               </div>
@@ -4554,6 +4777,11 @@ const App = () => {
                       {card.representative.repairReason && (
                         <div className="mt-2 text-[11px] font-bold text-blue-600">
                           {card.representative.repairReason}
+                        </div>
+                      )}
+                      {card.representative.serviceAlerts?.length > 0 && (
+                        <div className="mt-2">
+                          <ServiceAlertNotice route={card.representative} />
                         </div>
                       )}
                       {(() => {
@@ -4632,9 +4860,16 @@ const App = () => {
                                       >
                                         <span
                                           className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)} ${option.etaCatchable === false ? 'opacity-40 grayscale' : ''}`}
-                                          title={option.etaCatchable === false ? 'Not catchable from the calculated ready time' : undefined}
+                                          title={[
+                                            option.etaCatchable === false
+                                              ? 'Not catchable from the calculated ready time'
+                                              : '',
+                                            option.serviceAlerts?.[0]
+                                              ? serviceAlertLabel(option.serviceAlerts[0])
+                                              : '',
+                                          ].filter(Boolean).join(' · ') || undefined}
                                         >
-                                          {option.route}: {getEtaText(option.nextEta)}
+                                          {option.serviceAlerts?.length > 0 ? '\u26A0\uFE0F ' : ''}{option.route}: {getEtaText(option.nextEta)}
                                         </span>
                                         {variantRemark && (
                                           <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
@@ -4672,6 +4907,11 @@ const App = () => {
                           <span>{'\u00B7'} {'\u23F1'} {card.representative.originWaitTime}min wait</span>
                         )}
                       </div>
+                      {card.representative.serviceAlerts?.length > 0 && (
+                        <div className="mt-2">
+                          <ServiceAlertNotice route={card.representative} />
+                        </div>
+                      )}
                       {(() => {
                         const plannedClock = plannedJourneyClock(card.representative);
                         if (!plannedClock) return null;
@@ -4762,6 +5002,12 @@ const App = () => {
               <div className="text-sm font-black text-slate-700">{formatHybridFare(selectedRoute)}</div>
             </div>
           </div>
+
+          {selectedRouteWithAlerts?.serviceAlerts?.length > 0 && (
+            <div className="mb-4">
+              <ServiceAlertNotice route={selectedRouteWithAlerts} detailed />
+            </div>
+          )}
 
           {(() => {
             const plannedClock = plannedJourneyClock(selectedRoute);
@@ -4970,6 +5216,11 @@ const App = () => {
               ~{selectedRoute.estimatedTime}min
             </span>
           </div>
+          {selectedRouteWithAlerts?.serviceAlerts?.length > 0 && (
+            <div className="mb-3">
+              <ServiceAlertNotice route={selectedRouteWithAlerts} detailed />
+            </div>
+          )}
           {(() => {
             const plannedClock = plannedJourneyClock(selectedRoute);
             if (!plannedClock) return null;

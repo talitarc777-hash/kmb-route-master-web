@@ -6,6 +6,7 @@ const KMB_ENDPOINTS = {
 const CSDI_BUS_ROUTE_QUERY_URL =
   'https://portal.csdi.gov.hk/server/rest/services/common/' +
   'td_rcd_1638844988873_41214/FeatureServer/0/query';
+const TD_SERVICE_ALERTS_URL = 'https://www.td.gov.hk/en/special_news/trafficnews.xml';
 
 const baseJsonHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,9 +15,13 @@ const baseJsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',
 };
 
-function responseHeaders(cacheControl = 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800') {
+function responseHeaders(
+  cacheControl = 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800',
+  contentType = 'application/json; charset=utf-8',
+) {
   return {
     ...baseJsonHeaders,
+    'Content-Type': contentType,
     'Cache-Control': cacheControl,
   };
 }
@@ -45,6 +50,15 @@ export async function onRequestGet({ request, params }) {
   const routeName = routeNameFromParams(params);
   let upstreamUrl = KMB_ENDPOINTS[routeName];
   let cacheControl = 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800';
+  let contentType = 'application/json; charset=utf-8';
+  let expectsXml = false;
+
+  if (routeName === 'service-alerts') {
+    upstreamUrl = TD_SERVICE_ALERTS_URL;
+    cacheControl = 'public, max-age=30, s-maxage=60, stale-while-revalidate=120';
+    contentType = 'application/xml; charset=utf-8';
+    expectsXml = true;
+  }
 
   if (routeName === 'route-geometry') {
     const incomingUrl = new URL(request.url);
@@ -88,10 +102,14 @@ export async function onRequestGet({ request, params }) {
   try {
     const upstream = await fetch(upstreamUrl, {
       headers: {
-        Accept: 'application/json',
+        Accept: expectsXml ? 'application/xml, text/xml' : 'application/json',
       },
       cf: {
-        cacheTtl: routeName === 'route-geometry' ? 604800 : 86400,
+        cacheTtl: routeName === 'service-alerts'
+          ? 60
+          : routeName === 'route-geometry'
+            ? 604800
+            : 86400,
         cacheEverything: true,
       },
     });
@@ -105,17 +123,21 @@ export async function onRequestGet({ request, params }) {
     }
 
     try {
-      JSON.parse(text);
+      if (expectsXml) {
+        if (!/<message\b/i.test(text) && !/<list\b/i.test(text)) throw new Error('Invalid XML');
+      } else {
+        JSON.parse(text);
+      }
     } catch {
       return jsonResponse({
         status: 'UPSTREAM_ERROR',
-        error_message: 'Route-data upstream returned non-JSON content.',
+        error_message: `Route-data upstream returned invalid ${expectsXml ? 'XML' : 'JSON'} content.`,
       }, 502);
     }
 
     return new Response(text, {
       status: 200,
-      headers: responseHeaders(cacheControl),
+      headers: responseHeaders(cacheControl, contentType),
     });
   } catch (error) {
     return jsonResponse({

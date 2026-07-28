@@ -45,15 +45,21 @@ const geocodeOk = await checkEndpoint('Geocoding', 'geocode/json', {
   components: 'country:hk',
 });
 
+const autocompleteOk = await checkEndpoint('Places autocomplete', 'place/autocomplete/json', {
+  input: 'Central',
+  components: 'country:hk',
+  language: 'zh-TW',
+});
+
 const directionsOk = await checkEndpoint('Directions', 'directions/json', {
   origin: '22.2819,114.1589',
   destination: '22.2866,114.1937',
   mode: 'walking',
 });
 
-if (!geocodeOk || !directionsOk) {
-  console.error('GCP_API_KEY test failed. Check that Geocoding and Directions APIs are enabled, billing is active, and key restrictions allow server-side web service calls.');
+if (!geocodeOk || !autocompleteOk || !directionsOk) {
+  console.error('GCP_API_KEY test failed. Check that Places, Geocoding, and Directions APIs are enabled, billing is active, and key restrictions allow server-side web service calls.');
   process.exit(1);
 }
 
-console.log('GCP_API_KEY looks usable for geocoding and directions.');
+console.log('GCP_API_KEY looks usable for place autocomplete, geocoding, and directions.');

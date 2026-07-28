@@ -7,6 +7,7 @@ A React route planner for Hong Kong. It searches KMB routes locally, validates l
 - KMB direct, one-transfer, and two-transfer route generation
 - Nearby-stop lookup through an in-browser spatial index
 - Live KMB ETA filtering with a user-controlled strict ETA option
+- Official Transport Department service-alert matching and disruption-aware ranking
 - Leave-at and arrive-by validation against compact historical service windows
 - Local walking estimates with optional, capped Google ride-time refinement
 - Optional Google Transit options when KMB is unavailable or has an ETA gap
@@ -35,7 +36,7 @@ For Google-backed features, set this server-side value:
 GCP_API_KEY=your_google_maps_platform_key
 ```
 
-Enable only the Geocoding and Directions APIs for that key. The server proxy rejects other Google Maps API paths, strips unsupported parameters, and accepts Directions coordinates only within Hong Kong. Do not expose the key through a `VITE_` variable.
+Enable the Places API, Geocoding API, and Directions API for that key. The server proxy rejects other Google Maps API paths, strips unsupported parameters, restricts autocomplete to Hong Kong, and accepts Directions coordinates only within Hong Kong. Do not expose the key through a `VITE_` variable.
 
 If the frontend and API are hosted separately, also set:
 
@@ -60,7 +61,7 @@ The production build is written to `dist/`.
 
 ### 1. Resolve the journey
 
-The app converts the entered origin and destination into WGS84 coordinates. KMB stop suggestions are matched locally without a network request. A submitted free-text place that is not a selected KMB stop uses one cached Google Geocoding request through the server proxy. The same coordinates are reused throughout the search.
+The app converts the entered origin and destination into WGS84 coordinates. KMB stop suggestions are matched locally and shown first. After three typed characters and a 400 ms pause, the same dropdown also shows Hong Kong place predictions from Google Maps. Selecting a Google prediction resolves its place ID through one Geocoding request; an unselected free-text place is geocoded only when the search is submitted. The same coordinates are reused throughout the search.
 
 ### 2. Load KMB network data
 
@@ -131,12 +132,22 @@ CSDI responses are cached in browser storage for up to 30 days, while the server
 
 ## External Request Minimisation
 
-- KMB stop-name autocomplete runs locally in the browser.
-- External type-ahead is disabled; a free-text place is geocoded only after the user submits the search.
+- KMB stop-name autocomplete runs locally and is displayed before Google predictions.
+- Google Maps autocomplete waits for three characters and a 400 ms typing pause, and cancels stale requests. Predictions are not persistently cached.
 - KMB candidate walking time is calculated locally instead of requesting one Directions route per candidate.
 - Google ride refinement is opt-in and capped at eight candidates.
 - Candidate service validation is capped at 120 diverse routes and the UI returns at most 30 ranked results.
 - CSDI and optional Google geometry responses use persistent browser caches.
+
+## Service Disruption Logic
+
+The app refreshes the Transport Department Special Traffic News feed every two minutes through `/api/kmb/service-alerts`. Closed incidents are ignored. An alert affects a journey only when its bilingual notice explicitly names one of that journey's KMB route numbers; generic district or road notices are not guessed onto routes.
+
+- A notice explicitly reporting suspended service removes that journey option.
+- A diversion, truncation, or stop-change notice keeps the option but adds a 20-minute ranking penalty.
+- A delay or busy-traffic notice keeps the option but adds a 10-minute ranking penalty.
+- The displayed journey estimate remains the ETA/schedule estimate; the separate warning explains any ranking penalty.
+- If the official feed is unavailable, the app retains normal ETA/schedule planning and shows a transparent warning.
 
 ## Operation-Time Data
 

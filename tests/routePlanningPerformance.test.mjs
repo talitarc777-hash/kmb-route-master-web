@@ -14,7 +14,10 @@ import {
   buildKmbGeometryCacheKey,
   filterKmbOverlayVariantsByDirection,
 } from '../src/utils/kmbGeometryCache.js';
-import { findLocalKmbStopSuggestions } from '../src/utils/locationSearch.js';
+import {
+  findLocalKmbStopSuggestions,
+  normalizeGooglePlaceSuggestions,
+} from '../src/utils/locationSearch.js';
 
 const engineSource = await readFile(new URL('../public/routeEngine.js', import.meta.url), 'utf8');
 
@@ -847,6 +850,30 @@ test('local KMB stop suggestions prioritize exact stop IDs without an external l
   assert.equal(suggestions[0].place_id, 'kmb-stop:KT609');
   assert.equal(suggestions[0].lat, 22.31);
   assert.match(suggestions[0].description, /觀塘法院/);
+});
+
+test('Google autocomplete predictions are normalized for the shared place dropdown', () => {
+  const suggestions = normalizeGooglePlaceSuggestions({
+    status: 'OK',
+    predictions: [{
+      place_id: 'ChIJ-central',
+      description: 'Central, Hong Kong',
+      structured_formatting: {
+        main_text: 'Central',
+        secondary_text: 'Hong Kong',
+      },
+    }],
+  });
+
+  assert.deepEqual(suggestions, [{
+    source: 'google',
+    place_id: 'ChIJ-central',
+    description: 'Central, Hong Kong',
+    structured_formatting: {
+      main_text: 'Central',
+      secondary_text: 'Hong Kong',
+    },
+  }]);
 });
 
 test('latest-request tracker marks an earlier result stale', () => {

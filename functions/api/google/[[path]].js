@@ -5,7 +5,11 @@ const jsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',
   'Cache-Control': 'no-store',
 };
-const ALLOWED_GOOGLE_PATHS = new Set(['geocode/json', 'directions/json']);
+const ALLOWED_GOOGLE_PATHS = new Set([
+  'geocode/json',
+  'directions/json',
+  'place/autocomplete/json',
+]);
 const ALLOWED_DIRECTIONS_MODES = new Set(['walking', 'driving', 'transit']);
 const HK_BOUNDS = { minLat: 21.8, maxLat: 22.7, minLng: 113.7, maxLng: 114.6 };
 
@@ -33,7 +37,23 @@ function normalizeHkCoordinate(value) {
 
 function buildGoogleQuery(subpath, incomingParams, apiKey) {
   const query = new URLSearchParams({ key: apiKey });
+  if (subpath === 'place/autocomplete/json') {
+    const input = String(incomingParams.get('input') || '').trim();
+    if (input.length < 3 || input.length > 200) return null;
+    query.set('input', input);
+    query.set('components', 'country:hk');
+    query.set('language', 'zh-TW');
+    query.set('location', '22.3193,114.1694');
+    query.set('radius', '50000');
+    return query;
+  }
   if (subpath === 'geocode/json') {
+    const placeId = String(incomingParams.get('place_id') || '').trim();
+    if (placeId) {
+      if (!/^[A-Za-z0-9_-]{5,300}$/.test(placeId)) return null;
+      query.set('place_id', placeId);
+      return query;
+    }
     const address = String(incomingParams.get('address') || '').trim();
     if (!address || address.length > 200) return null;
     query.set('address', address);

@@ -10,7 +10,8 @@ CSDI_BUS_ROUTE_QUERY_URL = (
     "https://portal.csdi.gov.hk/server/rest/services/common/"
     "td_rcd_1638844988873_41214/FeatureServer/0/query"
 )
-ALLOWED_GOOGLE_PATHS = {"geocode/json", "directions/json"}
+TD_SERVICE_ALERTS_URL = "https://www.td.gov.hk/en/special_news/trafficnews.xml"
+ALLOWED_GOOGLE_PATHS = {"geocode/json", "directions/json", "place/autocomplete/json"}
 ALLOWED_DIRECTIONS_MODES = {"walking", "driving", "transit"}
 HK_BOUNDS = {"min_lat": 21.8, "max_lat": 22.7, "min_lng": 113.7, "max_lng": 114.6}
 
@@ -30,7 +31,24 @@ def normalize_hk_coordinate(value):
 
 def build_google_query(subpath, incoming_query, api_key):
     value = lambda name: str(incoming_query.get(name, [""])[0]).strip()
+    if subpath == "place/autocomplete/json":
+        input_text = value("input")
+        if len(input_text) < 3 or len(input_text) > 200:
+            return None
+        return {
+            "input": [input_text],
+            "components": ["country:hk"],
+            "language": ["zh-TW"],
+            "location": ["22.3193,114.1694"],
+            "radius": ["50000"],
+            "key": [api_key],
+        }
     if subpath == "geocode/json":
+        place_id = value("place_id")
+        if place_id:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{5,300}", place_id):
+                return None
+            return {"place_id": [place_id], "key": [api_key]}
         address = value("address")
         if not address or len(address) > 200:
             return None
@@ -92,6 +110,7 @@ class handler(BaseHTTPRequestHandler):
         query_params = urllib.parse.parse_qs(parsed_path.query)
         path = parsed_path.path
         cache_control = "no-store"
+        content_type = "application/json; charset=utf-8"
         
         # Determine the target URL based on the path
         if '/api/google/' in path:
@@ -125,6 +144,11 @@ class handler(BaseHTTPRequestHandler):
             
             target_url = f"https://maps.googleapis.com/maps/api/{google_subpath}?{new_query}"
         
+        elif path.endswith('/api/kmb/service-alerts'):
+            target_url = TD_SERVICE_ALERTS_URL
+            cache_control = "public, max-age=30, s-maxage=60, stale-while-revalidate=120"
+            content_type = "application/xml; charset=utf-8"
+
         elif path.endswith('/api/kmb/route-geometry'):
             route = str(query_params.get('route', [''])[0]).strip().upper()
             if not re.fullmatch(r'[A-Z0-9]{1,8}', route):
@@ -176,7 +200,7 @@ class handler(BaseHTTPRequestHandler):
             data = self.fetch_upstream_bytes(target_url, headers, timeout_sec=timeout_sec, retries=retries)
             
             self.send_response(200)
-            self.send_header('Content-type', 'application/json')
+            self.send_header('Content-type', content_type)
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Cache-Control', cache_control)
             self.end_headers()
