@@ -519,6 +519,92 @@ test('planned search rejects a clearly inactive route before Google enrichment',
   assert.equal(urls.some((url) => url.includes('/eta/')), false);
 });
 
+test('planned service validation runs before the 120-candidate shortlist cap', async () => {
+  const engine = loadEngine(async (url) => {
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const point = { lat: 22.3000, lng: 114.1700 };
+  const makeSegment = (route, fromStop, toStop) => ({
+    route,
+    routeKey: `${route}|I|1`,
+    bound: 'I',
+    service_type: '1',
+    fromStop,
+    toStop,
+    stops: [fromStop, toStop],
+    routeInfo: { co: 'KMB', freq: '10' },
+    routeStopRecordExists: true,
+    boardingStopSequence: 1,
+    isLoopOrAmbiguousRoute: false,
+  });
+  const makeDirectCandidate = (index) => {
+    const route = `X${index}`;
+    return {
+      dedupKey: `direct|${route}|${index}`,
+      routePairKey: `direct|${route}|I|1`,
+      transfers: 0,
+      originLoc: point,
+      destLoc: point,
+      oLat: point.lat,
+      oLng: point.lng,
+      dLat: point.lat,
+      dLng: point.lng,
+      segments: [makeSegment(route, `S${index}`, `E${index}`)],
+    };
+  };
+  const inactiveCandidates = Array.from({ length: 125 }, (_, index) => (
+    makeDirectCandidate(index)
+  ));
+  const validCandidate = {
+    dedupKey: 'transfer|106|968|valid',
+    routePairKey: '1t|106|I|1->968|I|1',
+    transfers: 1,
+    originLoc: point,
+    destLoc: point,
+    oLat: point.lat,
+    oLng: point.lng,
+    dLat: point.lat,
+    dLng: point.lng,
+    t1Lat: point.lat,
+    t1Lng: point.lng,
+    t2Lat: point.lat,
+    t2Lng: point.lng,
+    segments: [
+      makeSegment('106', 'A', 'B'),
+      makeSegment('968', 'C', 'D'),
+    ],
+  };
+  const stationPeriod = (slot) => ({
+    weekday: { s: '06:00', e: '23:00', n: 50, d: 10, a: [slot] },
+  });
+  const operationSchedule = {
+    route_stops: {
+      '106|I|1|A': stationPeriod('15:50'),
+      '968|I|1|C': stationPeriod('15:55'),
+    },
+    routes: {},
+  };
+
+  const result = await engine.preparePlannedValidationShortlist(
+    [...inactiveCandidates, validCandidate],
+    {
+      timeMode: 'arrive',
+      dateValue: '2026-07-30',
+      timeValue: '16:00',
+      now: new Date(2026, 6, 30, 10, 0, 0),
+      allowSparseHistoricalFallback: false,
+      schedule: operationSchedule,
+    },
+  );
+
+  assert.equal(result.rejectedCount, inactiveCandidates.length);
+  assert.equal(result.candidates.length, 1);
+  assert.equal(
+    result.candidates[0].segments.map((segment) => segment.route).join(' -> '),
+    '106 -> 968',
+  );
+});
+
 test('Google ride refinement is opt-in and never borrows another bus route duration', async () => {
   const operationSchedule = schedule();
   const urls = [];

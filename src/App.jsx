@@ -33,6 +33,7 @@ const ROUTE_COLORS = [
 ];
 
 const PERSISTENT_CACHE_LIMIT = 200;
+const PLANNED_SEARCH_CACHE_LIMIT = 16;
 const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
 const GCP_TRANSIT_GAP_CACHE_KEY = 'kmb_gcp_transit_gap_cache_v1';
 const STATIC_OPERATOR_FARE_CACHE_KEY = 'kmb_static_operator_fare_cache_v1';
@@ -640,6 +641,24 @@ function etaDisplayIdentity(etaValue) {
   if (!etaValue) return 'no-eta';
   const etaDate = new Date(etaValue);
   return Number.isNaN(etaDate.getTime()) ? String(etaValue) : etaDate.toISOString();
+}
+
+function getCachedPlannedSearch(cache, key) {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  // Refresh insertion order so frequently repeated searches are retained.
+  cache.delete(key);
+  cache.set(key, cached);
+  return cached;
+}
+
+function cachePlannedSearchResults(cache, key, routes) {
+  cache.delete(key);
+  cache.set(key, cloneRouteResults(routes));
+  while (cache.size > PLANNED_SEARCH_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
 }
 
 async function fetchOfficialServiceAlerts() {
@@ -3191,7 +3210,7 @@ const App = () => {
       });
       const canReusePlannedSearch = timeMode !== 'now';
       const cachedSearch = canReusePlannedSearch
-        ? searchCacheRef.current.get(searchCacheKey)
+        ? getCachedPlannedSearch(searchCacheRef.current, searchCacheKey)
         : null;
 
       if (cachedSearch) {
@@ -3300,11 +3319,7 @@ const App = () => {
           }
 
           if (canReusePlannedSearch) {
-            searchCacheRef.current.set(searchCacheKey, cloneRouteResults(finalResults));
-            if (searchCacheRef.current.size > 8) {
-              const oldestKey = searchCacheRef.current.keys().next().value;
-              searchCacheRef.current.delete(oldestKey);
-            }
+            cachePlannedSearchResults(searchCacheRef.current, searchCacheKey, finalResults);
           }
 
           if (isCurrentSearch()) {
@@ -3333,11 +3348,7 @@ const App = () => {
       }
 
       if (canReusePlannedSearch) {
-        searchCacheRef.current.set(searchCacheKey, cloneRouteResults(finalResults));
-        if (searchCacheRef.current.size > 8) {
-          const oldestKey = searchCacheRef.current.keys().next().value;
-          searchCacheRef.current.delete(oldestKey);
-        }
+        cachePlannedSearchResults(searchCacheRef.current, searchCacheKey, finalResults);
       }
 
       finalResults = filterRouteOptionsByGoogleTransitPermission(

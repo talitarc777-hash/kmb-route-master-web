@@ -98,6 +98,8 @@ The lookup key is route, bound, service type, and boarding stop. Service windows
 
 KMB validation is authoritative at the boarding stop. Every segment is matched by route, bound, service type, boarding stop, and stop sequence. When a station (`rs`) profile exists, its active window decides validity and a negative result can never be overridden by route-level evidence. Sample count, sample days, and nearby observed 15-minute ETA slots determine high or medium confidence. If the station key is entirely absent, an explicitly enabled route-level (`r`) fallback may retain an exact route-stop candidate at low confidence; that fallback is blocked for route 110, loops, duplicated-stop patterns, and other ambiguous patterns.
 
+Planned searches apply this local service evidence to the complete generated candidate pool before imposing the 120-candidate network-enrichment cap. This prevents inactive nearby route pairs from filling the cap and hiding a valid route that ranked lower on geographic heuristics alone.
+
 ### 5. Estimate journey time
 
 Total time combines:
@@ -135,7 +137,8 @@ CSDI responses are cached in browser storage for up to 30 days, while the server
 - Google Maps is the only autocomplete suggestion source. It waits for three characters and a 400 ms typing pause and cancels stale requests. Predictions are not persistently cached.
 - Access, interchange, destination, and live-GPS approach walking times use Google Directions. Identical walking legs share cached/in-flight requests, and requests run with bounded concurrency.
 - Google ride refinement is opt-in and capped at eight candidates.
-- Candidate service validation is capped at 120 diverse routes and the UI returns at most 30 ranked results.
+- Planned service validation runs locally before paid Google walking enrichment. Only up to 120 diverse, service-supported candidates proceed to network enrichment, and the UI returns at most 30 ranked results.
+- The 16 most recently used exact Leave-at/Arrive-by searches are retained in memory for the current app session, so repeating one does not issue the same Google requests again.
 - CSDI and optional Google geometry responses use persistent browser caches.
 
 ## Service Disruption Logic

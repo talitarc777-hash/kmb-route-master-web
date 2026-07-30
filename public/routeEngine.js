@@ -1451,7 +1451,7 @@ async function earlyFilterPlannedCandidates(candidates, options = {}) {
     if (options.timeMode === 'now' || candidates.length === 0) {
         return { candidates, rejectedCount: 0 };
     }
-    const schedule = await loadKmbOperationSchedule();
+    const schedule = options.schedule || await loadKmbOperationSchedule();
     if (!schedule) return { candidates, rejectedCount: 0 };
 
     const plannedAnchorTime = buildPlannedDateTime(options.dateValue, options.timeValue, options.now);
@@ -1475,6 +1475,38 @@ async function earlyFilterPlannedCandidates(candidates, options = {}) {
         if (historicalValid || !isDefinitiveEarlyHistoricalRejection(route)) retained.push(route);
     }
     return { candidates: retained, rejectedCount: candidates.length - retained.length };
+}
+
+function buildDiverseValidationShortlist(candidates, limit = MAX_NETWORK_CANDIDATES) {
+    const seenForValidation = new Set();
+    const originRoutePairs = new Map();
+    const routePairVariantCount = new Map();
+    const shortlisted = [];
+    for (const candidate of candidates || []) {
+        if (seenForValidation.has(candidate.dedupKey)) continue;
+        const originRoute = candidate.segments[0].routeKey || candidate.segments[0].route;
+        const pairKey = candidate.routePairKey || candidate.dedupKey;
+        const pairs = originRoutePairs.get(originRoute) || new Set();
+        const variantCount = routePairVariantCount.get(pairKey) || 0;
+
+        if ((pairs.has(pairKey) || pairs.size < 6) && variantCount < MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR) {
+            seenForValidation.add(candidate.dedupKey);
+            pairs.add(pairKey);
+            originRoutePairs.set(originRoute, pairs);
+            routePairVariantCount.set(pairKey, variantCount + 1);
+            shortlisted.push(candidate);
+            if (shortlisted.length >= limit) break;
+        }
+    }
+    return shortlisted;
+}
+
+async function preparePlannedValidationShortlist(candidates, options = {}) {
+    const serviceFilter = await earlyFilterPlannedCandidates(candidates, options);
+    return {
+        candidates: buildDiverseValidationShortlist(serviceFilter.candidates),
+        rejectedCount: serviceFilter.rejectedCount,
+    };
 }
 
 async function earlyFilterNowCandidates(candidates, now, strictEtaOnly) {
@@ -2152,50 +2184,34 @@ async function findRoutes(params) {
         return score(a) - score(b);
     });
 
-    // Bound service validation work after preserving route and transfer diversity.
-    const seenForValidation = new Set();
-    const originRoutePairs = new Map();
-    const routePairVariantCount = new Map();
-    const candidates = [];
+    // Reject meaningless same-number transfers before any service or Google work.
     let repeatedRouteCandidatesRejected = 0;
+    const nonRepeatedCandidates = [];
     for (const c of found) {
         if (hasRepeatedRouteTransfer(c)) {
             repeatedRouteCandidatesRejected += 1;
             continue;
         }
-        if (!seenForValidation.has(c.dedupKey)) {
-            const origR = c.segments[0].routeKey || c.segments[0].route;
-            const pairKey = c.routePairKey || c.dedupKey;
-            const pairs = originRoutePairs.get(origR) || new Set();
-            const variantCount = routePairVariantCount.get(pairKey) || 0;
-
-            // Limit route combinations per origin while preserving several transfer points
-            // for the same pair until ETA and walking-time validation can rank them.
-            if ((pairs.has(pairKey) || pairs.size < 6) && variantCount < MAX_TRANSFER_VARIANTS_PER_ROUTE_PAIR) {
-                seenForValidation.add(c.dedupKey);
-                pairs.add(pairKey);
-                originRoutePairs.set(origR, pairs);
-                routePairVariantCount.set(pairKey, variantCount + 1);
-                candidates.push(c);
-                if (candidates.length >= MAX_NETWORK_CANDIDATES) break;
-            }
-        }
+        nonRepeatedCandidates.push(c);
     }
 
-    // A preliminary estimate is used only to reject clearly inactive planned services
-    // before paid Google walking requests are made. Displayed/ranked walking times are
-    // replaced with Google Directions durations below.
+    // Planned service evidence must be checked before the shortlist cap. Otherwise a
+    // large group of nearby but inactive route pairs can consume every shortlist slot
+    // and hide a valid route that appears later in the heuristic ordering.
     finishStage('candidateGeneration');
-    const earlyFilter = await earlyFilterPlannedCandidates(candidates, {
+    const plannedShortlist = await preparePlannedValidationShortlist(nonRepeatedCandidates, {
         timeMode,
         dateValue,
         timeValue,
         now,
         allowSparseHistoricalFallback,
     });
+    // Bound ETA and Google work only after planned candidates have been filtered,
+    // while preserving route-pair and transfer-point diversity.
+    const candidates = plannedShortlist.candidates;
     const earlyNowFilter = timeMode === 'now'
-        ? await earlyFilterNowCandidates(earlyFilter.candidates, now, strictEtaOnly)
-        : { candidates: earlyFilter.candidates, rejectedCount: 0 };
+        ? await earlyFilterNowCandidates(candidates, now, strictEtaOnly)
+        : { candidates, rejectedCount: 0 };
     const networkCandidates = earlyNowFilter.candidates;
     finishStage('earlyServiceFilter');
 
@@ -2275,7 +2291,7 @@ async function findRoutes(params) {
         slowestStep: { name: slowestStep[0], durationMs: slowestStep[1] },
         candidatesGenerated: found.length,
         candidatesShortlisted: candidates.length,
-        earlyHistoricalRejected: earlyFilter.rejectedCount,
+        earlyHistoricalRejected: plannedShortlist.rejectedCount,
         earlyLiveEtaRejected: earlyNowFilter.rejectedCount,
         repeatedRouteCandidatesRejected,
         googleRefinementEnabled: useGoogleRefinement,
@@ -2319,6 +2335,7 @@ window.routeEngine = {
     retainTransferVariants,
     visibleRouteSequenceKey,
     deduplicateRankedRouteSequences,
+    preparePlannedValidationShortlist,
     getLastPlanningDebugSummary,
     STRICT_STOP_LEVEL_ROUTES,
 };
