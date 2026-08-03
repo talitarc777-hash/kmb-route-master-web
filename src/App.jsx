@@ -39,6 +39,7 @@ const ROUTE_COLORS = [
 
 const PERSISTENT_CACHE_LIMIT = 200;
 const PLANNED_SEARCH_CACHE_LIMIT = 16;
+const GPS_LOCATION_MAP_SCALE = 300;
 const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
 const GCP_TRANSIT_GAP_CACHE_KEY = 'kmb_gcp_transit_gap_cache_v1';
 const STATIC_OPERATOR_FARE_CACHE_KEY = 'kmb_static_operator_fare_cache_v1';
@@ -4023,7 +4024,7 @@ const App = () => {
     const target = Point
       ? new Point({ x: lng, y: lat, spatialReference: { wkid: 4326 } })
       : { longitude: lng, latitude: lat };
-    view.goTo({ target, scale: 1000 }).catch(() => {});
+    view.goTo({ target, scale: GPS_LOCATION_MAP_SCALE }).catch(() => {});
   }, []);
 
   useEffect(() => {
