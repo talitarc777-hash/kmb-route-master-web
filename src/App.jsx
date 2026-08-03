@@ -12,6 +12,11 @@ import {
 } from './utils/kmbGeometryCache.js';
 import { normalizeGooglePlaceSuggestions } from './utils/locationSearch.js';
 import {
+  headingFromDeviceOrientation,
+  normalizeHeading,
+  smoothHeading,
+} from './utils/locationHeading.js';
+import {
   applyServiceAlertsToRoutes,
   parseTdServiceAlerts,
   rankRoutesByDisruption,
@@ -2237,6 +2242,8 @@ const App = () => {
   const stationLabelLayerRef = useRef(null);
   const currentLocationLayerRef = useRef(null);
   const currentLocationRef = useRef(null);
+  const currentHeadingRef = useRef(null);
+  const headingRenderFrameRef = useRef(null);
   const gpsWatchIdRef = useRef(null);
   const arcgisModulesRef = useRef(null);
   const stopMapRef = useRef({});
@@ -2625,6 +2632,16 @@ const App = () => {
           if (currentLocation) {
             renderCurrentLocationMarker(currentLocation.lat, currentLocation.lng);
           }
+          view.watch('rotation', () => {
+            const latestLocation = currentLocationRef.current;
+            if (latestLocation && currentHeadingRef.current !== null) {
+              renderCurrentLocationMarker(
+                latestLocation.lat,
+                latestLocation.lng,
+                currentHeadingRef.current,
+              );
+            }
+          });
           view.on('click', async (event) => {
             const stationLayers = [layer, routeOverlayStopLayer, routeOverlayLayer];
             const hit = await view.hitTest(event, { include: stationLayers });
@@ -2955,14 +2972,34 @@ const App = () => {
     );
   };
 
-  const renderCurrentLocationMarker = useCallback((lat, lng) => {
+  const renderCurrentLocationMarker = useCallback((lat, lng, heading = currentHeadingRef.current) => {
     const { Point, Graphic } = arcgisModulesRef.current || {};
     const layer = currentLocationLayerRef.current;
     if (!layer || !Point || !Graphic) return;
+    const geometry = new Point({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
+    const normalizedHeading = normalizeHeading(heading);
+    const mapRotation = Number(viewRef.current?.rotation) || 0;
     layer.removeAll();
+    if (normalizedHeading !== null) {
+      layer.add(
+        new Graphic({
+          geometry,
+          symbol: {
+            type: 'simple-marker',
+            style: 'path',
+            path: 'M 0,-18 L 11,11 L 0,7 L -11,11 Z',
+            color: [37, 99, 235, 0.7],
+            size: 28,
+            angle: normalizeHeading(normalizedHeading + mapRotation),
+            outline: { color: [255, 255, 255, 0.92], width: 1 },
+          },
+          attributes: { type: 'current-location-heading', heading: normalizedHeading },
+        }),
+      );
+    }
     layer.add(
       new Graphic({
-        geometry: new Point({ x: lng, y: lat, spatialReference: { wkid: 4326 } }),
+        geometry,
         symbol: {
           type: 'simple-marker',
           style: 'circle',
@@ -2970,6 +3007,7 @@ const App = () => {
           size: 12,
           outline: { color: [255, 255, 255, 1], width: 2 },
         },
+        attributes: { type: 'current-location' },
       }),
     );
   }, []);
@@ -3996,9 +4034,18 @@ const App = () => {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
           accuracy: position.coords.accuracy,
+          heading: normalizeHeading(position.coords.heading),
         };
+        if (nextLocation.heading !== null) {
+          currentHeadingRef.current = smoothHeading(
+            currentHeadingRef.current,
+            nextLocation.heading,
+            0.35,
+          );
+        }
+        nextLocation.heading = currentHeadingRef.current;
         currentLocationRef.current = nextLocation;
-        renderCurrentLocationMarker(nextLocation.lat, nextLocation.lng);
+        renderCurrentLocationMarker(nextLocation.lat, nextLocation.lng, nextLocation.heading);
       },
       (error) => {
         if (error?.code === 1) {
@@ -4021,6 +4068,62 @@ const App = () => {
     };
   }, [isGpsTimingEnabled, renderCurrentLocationMarker, timeMode]);
 
+  useEffect(() => {
+    if (!isGpsTimingEnabled || timeMode !== 'now') return undefined;
+    let hasAbsoluteEvent = false;
+    const screenAngle = () => Number(
+      window.screen?.orientation?.angle ?? window.orientation ?? 0,
+    ) || 0;
+    const handleOrientation = (event) => {
+      if (event.type === 'deviceorientationabsolute') hasAbsoluteEvent = true;
+      if (hasAbsoluteEvent && event.type !== 'deviceorientationabsolute' &&
+          normalizeHeading(event.webkitCompassHeading) === null) return;
+      const nextHeading = headingFromDeviceOrientation(event, screenAngle());
+      if (nextHeading === null) return;
+      currentHeadingRef.current = smoothHeading(currentHeadingRef.current, nextHeading);
+      const location = currentLocationRef.current;
+      if (!location) return;
+      currentLocationRef.current = { ...location, heading: currentHeadingRef.current };
+      if (headingRenderFrameRef.current !== null) return;
+      headingRenderFrameRef.current = window.requestAnimationFrame(() => {
+        headingRenderFrameRef.current = null;
+        const latestLocation = currentLocationRef.current;
+        if (latestLocation) {
+          renderCurrentLocationMarker(
+            latestLocation.lat,
+            latestLocation.lng,
+            currentHeadingRef.current,
+          );
+        }
+      });
+    };
+
+    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+    window.addEventListener('deviceorientation', handleOrientation, true);
+    return () => {
+      window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+      window.removeEventListener('deviceorientation', handleOrientation, true);
+      if (headingRenderFrameRef.current !== null) {
+        window.cancelAnimationFrame(headingRenderFrameRef.current);
+        headingRenderFrameRef.current = null;
+      }
+      currentHeadingRef.current = null;
+      const location = currentLocationRef.current;
+      if (location) renderCurrentLocationMarker(location.lat, location.lng, null);
+    };
+  }, [isGpsTimingEnabled, renderCurrentLocationMarker, timeMode]);
+
+  const requestDeviceOrientationAccess = useCallback(async () => {
+    const orientationEvent = window.DeviceOrientationEvent;
+    if (typeof orientationEvent?.requestPermission !== 'function') return true;
+    try {
+      return await orientationEvent.requestPermission(true) === 'granted';
+    } catch {
+      // GPS course can still provide a heading while the user is moving.
+      return false;
+    }
+  }, []);
+
   const getCurrentGpsLocation = useCallback(async () => {
     if (!navigator.geolocation) {
       throw new Error('GPS is not supported on this device/browser.');
@@ -4036,6 +4139,7 @@ const App = () => {
       lat: position.coords.latitude,
       lng: position.coords.longitude,
       accuracy: position.coords.accuracy,
+      heading: normalizeHeading(position.coords.heading),
     };
   }, []);
 
@@ -4052,6 +4156,11 @@ const App = () => {
   const stopGpsTracking = useCallback(() => {
     setIsGpsTimingEnabled(false);
     currentLocationRef.current = null;
+    currentHeadingRef.current = null;
+    if (headingRenderFrameRef.current !== null) {
+      window.cancelAnimationFrame(headingRenderFrameRef.current);
+      headingRenderFrameRef.current = null;
+    }
     currentLocationLayerRef.current?.removeAll();
   }, []);
 
@@ -4063,11 +4172,14 @@ const App = () => {
     setIsLocating(true);
     setSearchError(null);
     try {
-      const { lat, lng, accuracy } = await getCurrentGpsLocation();
+      const orientationPermission = requestDeviceOrientationAccess();
+      const { lat, lng, accuracy, heading } = await getCurrentGpsLocation();
+      await orientationPermission;
       setOrigin(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-      currentLocationRef.current = { lat, lng, accuracy };
+      currentHeadingRef.current = heading;
+      currentLocationRef.current = { lat, lng, accuracy, heading };
       setIsGpsTimingEnabled(true);
-      renderCurrentLocationMarker(lat, lng);
+      renderCurrentLocationMarker(lat, lng, heading);
       zoomToLocation(lat, lng);
     } catch (err) {
       setSearchError(gpsErrorMessage(err));
@@ -4087,10 +4199,13 @@ const App = () => {
     setSearchError(null);
     setRefreshFeedback({ type: 'loading', message: 'Getting GPS location and checking catchable ETAs...' });
     try {
+      const orientationPermission = requestDeviceOrientationAccess();
       const location = await getCurrentGpsLocation();
+      await orientationPermission;
+      currentHeadingRef.current = location.heading;
       currentLocationRef.current = location;
       setIsGpsTimingEnabled(timeMode === 'now');
-      renderCurrentLocationMarker(location.lat, location.lng);
+      renderCurrentLocationMarker(location.lat, location.lng, location.heading);
 
       let refreshedRoute = selectedRoute;
       if (timeMode === 'now' && !isFallbackRoute(selectedRoute)) {

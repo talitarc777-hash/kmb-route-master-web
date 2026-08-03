@@ -15,8 +15,27 @@ import {
   filterKmbOverlayVariantsByDirection,
 } from '../src/utils/kmbGeometryCache.js';
 import { normalizeGooglePlaceSuggestions } from '../src/utils/locationSearch.js';
+import {
+  headingFromDeviceOrientation,
+  normalizeHeading,
+  smoothHeading,
+} from '../src/utils/locationHeading.js';
 
 const engineSource = await readFile(new URL('../public/routeEngine.js', import.meta.url), 'utf8');
+
+test('GPS heading helpers normalize, screen-adjust, and smoothly cross north', () => {
+  assert.equal(normalizeHeading(370), 10);
+  assert.equal(normalizeHeading(-10), 350);
+  assert.equal(normalizeHeading(null), null);
+  assert.equal(headingFromDeviceOrientation({ webkitCompassHeading: 25 }, 90), 115);
+  assert.equal(headingFromDeviceOrientation({
+    type: 'deviceorientationabsolute',
+    absolute: true,
+    alpha: 90,
+  }), 270);
+  assert.equal(headingFromDeviceOrientation({ alpha: 90, absolute: false }), null);
+  assert.equal(smoothHeading(350, 10, 0.25), 355);
+});
 
 function jsonResponse(payload, { ok = true, status = 200 } = {}) {
   return {

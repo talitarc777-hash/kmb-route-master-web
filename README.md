@@ -136,6 +136,7 @@ CSDI responses are cached in browser storage for up to 30 days, while the server
 
 - Google Maps is the only autocomplete suggestion source. It waits for three characters and a 400 ms typing pause and cancels stale requests. Predictions are not persistently cached.
 - Access, interchange, destination, and live-GPS approach walking times use Google Directions. Identical walking legs share cached/in-flight requests, and requests run with bounded concurrency.
+- While live GPS is enabled, the blue map marker uses on-device absolute orientation or the GPS movement course to show a smoothed direction arrow. This sensor display makes no Google request and falls back to the blue dot when no reliable heading is available.
 - Google ride refinement is opt-in and capped at eight candidates.
 - Planned service validation runs locally before paid Google walking enrichment. Only up to 120 diverse, service-supported candidates proceed to network enrichment, and the UI returns at most 30 ranked results.
 - The 16 most recently used exact Leave-at/Arrive-by searches are retained in memory for the current app session, so repeating one does not issue the same Google requests again.
@@ -210,6 +211,7 @@ The `functions/api/` handlers can proxy KMB and Google requests. The current Clo
 src/App.jsx                         Main UI, search orchestration, ranking, map display
 src/utils/apiBase.js               Same-origin or external API URL handling
 src/utils/locationSearch.js        Google place-prediction normalization
+src/utils/locationHeading.js       GPS/compass heading normalization and smoothing
 src/utils/routePlanningRequests.js KMB data loading, validation, and ordered network indexes
 public/routeEngine.js              KMB graph search, ETA/schedule validation, timing
 public/operator-data/              Runtime schedules and compact operator datasets
