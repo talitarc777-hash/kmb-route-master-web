@@ -67,18 +67,19 @@ function jsonResponse(payload, { ok = true, status = 200 } = {}) {
   };
 }
 
-function loadEngine(fetchImpl) {
-  const storage = new Map();
+function loadEngine(fetchImpl, storage = new Map()) {
+  const localStorage = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  };
   const context = {
     console,
     fetch: fetchImpl,
     URLSearchParams,
+    localStorage,
     window: {
       location: { hostname: 'example.test' },
-      localStorage: {
-        getItem: (key) => storage.get(key) ?? null,
-        setItem: (key, value) => storage.set(key, value),
-      },
+      localStorage,
     },
   };
   vm.createContext(context);
@@ -683,6 +684,52 @@ test('Google ride refinement is opt-in and never borrows another bus route durat
   assert.equal(result.debugSummary.requests.gcpNetworkRequests, 1);
   assert.equal(result.filteredCandidates[0].segments[0].rideDurationSource, 'heuristic_per_stop');
   assert.equal(urls.filter((url) => url.includes('/api/google/')).length, 1);
+});
+
+test('Google KMB ride duration is persisted and reused before another API request', async () => {
+  const operationSchedule = schedule();
+  const storage = new Map();
+  let googleCalls = 0;
+  const fetchImpl = async (url) => {
+    const value = String(url);
+    if (value.includes('kmb_operation_time_slots')) return jsonResponse(operationSchedule);
+    if (value.includes('/api/google/') && value.includes('mode=transit')) {
+      googleCalls += 1;
+      return jsonResponse({
+        status: 'OK',
+        routes: [{
+          legs: [{
+            steps: [{
+              travel_mode: 'TRANSIT',
+              duration: { value: 300 },
+              transit_details: {
+                line: { short_name: '1', vehicle: { type: 'BUS' } },
+              },
+            }],
+          }],
+        }],
+      });
+    }
+    throw new Error(`Unexpected network request: ${url}`);
+  };
+
+  const params = {
+    ...directFixture(),
+    timeMode: 'leave',
+    dateValue: '2026-07-15',
+    timeValue: '08:00',
+    useGoogleRideTimeReference: true,
+  };
+  const first = await loadEngine(fetchImpl, storage).findRoutes(params);
+  assert.equal(googleCalls, 1);
+  assert.equal(first.filteredCandidates[0].segments[0].rideDurationMinutes, 5);
+  assert.equal(first.filteredCandidates[0].segments[0].rideDurationSource, 'google_transit_bus_duration');
+
+  const second = await loadEngine(fetchImpl, storage).findRoutes(params);
+  assert.equal(googleCalls, 1);
+  assert.equal(second.debugSummary.requests.gcpNetworkRequests, 0);
+  assert.equal(second.debugSummary.requests.rideTimeReferenceHits, 1);
+  assert.equal(second.filteredCandidates[0].segments[0].rideDurationMinutes, 5);
 });
 
 test('Now search rejects a route with no live ETA before Google enrichment', async () => {

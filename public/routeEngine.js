@@ -31,6 +31,9 @@ const GCP_CACHE = new Map(); // in-memory promise cache
 const GCP_CACHE_STORAGE_KEY = 'kmb_gcp_route_cache_v1';
 const GCP_CACHE_MAX_ENTRIES = 400;
 const GCP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const KMB_RIDE_TIME_REFERENCE_STORAGE_KEY = 'kmb_ride_time_reference_v1';
+const KMB_RIDE_TIME_REFERENCE_MAX_ENTRIES = 800;
+const KMB_RIDE_TIME_REFERENCE_TTL_MS = 24 * 60 * 60 * 1000;
 const GCP_DRIVING_ROUTE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const KMB_OPERATION_SCHEDULE_URL = '/operator-data/kmb_operation_time_slots.runtime.json?v=3';
 const KMB_ROUTE_STOP_SLOT_TOLERANCE_MIN = 20;
@@ -55,9 +58,12 @@ const REQUEST_STATS = {
     historicalNetworkRequests: 0,
     historicalCacheHits: 0,
     duplicateRequestsPrevented: 0,
+    rideTimeReferenceHits: 0,
+    rideTimeReferenceWrites: 0,
     payloadBytes: 0,
 };
 let GCP_PERSISTED_CACHE = null;
+let KMB_RIDE_TIME_REFERENCE_CACHE = null;
 let KMB_OPERATION_SCHEDULE_PROMISE = null;
 let LAST_PLANNING_DEBUG_SUMMARY = null;
 
@@ -252,6 +258,90 @@ function setGcpCachedValue(cacheKey, value, ttlMs = GCP_CACHE_TTL_MS) {
 
 function getGcpRouteCacheTtl(mode) {
     return mode === 'driving' ? GCP_DRIVING_ROUTE_CACHE_TTL_MS : GCP_CACHE_TTL_MS;
+}
+
+function loadKmbRideTimeReferenceCache() {
+    if (KMB_RIDE_TIME_REFERENCE_CACHE) return KMB_RIDE_TIME_REFERENCE_CACHE;
+    KMB_RIDE_TIME_REFERENCE_CACHE = new Map();
+    try {
+        const raw = localStorage.getItem(KMB_RIDE_TIME_REFERENCE_STORAGE_KEY);
+        if (!raw) return KMB_RIDE_TIME_REFERENCE_CACHE;
+        const rows = JSON.parse(raw);
+        const now = Date.now();
+        for (const row of rows) {
+            if (!row?.key || !Number.isFinite(Number(row.duration)) || !row.expiresAt) continue;
+            if (Number(row.expiresAt) <= now) continue;
+            KMB_RIDE_TIME_REFERENCE_CACHE.set(row.key, row);
+        }
+    } catch {
+        KMB_RIDE_TIME_REFERENCE_CACHE = new Map();
+    }
+    return KMB_RIDE_TIME_REFERENCE_CACHE;
+}
+
+function saveKmbRideTimeReferenceCache(cache) {
+    try {
+        const now = Date.now();
+        const rows = Array.from(cache.entries())
+            .map(([key, row]) => ({ key, ...row }))
+            .filter((row) => Number(row.expiresAt) > now)
+            .sort((a, b) => Number(b.savedAt || 0) - Number(a.savedAt || 0))
+            .slice(0, KMB_RIDE_TIME_REFERENCE_MAX_ENTRIES);
+        localStorage.setItem(KMB_RIDE_TIME_REFERENCE_STORAGE_KEY, JSON.stringify(rows));
+    } catch {
+        // Local reference storage is an optimization; routing remains functional without it.
+    }
+}
+
+function buildKmbRideTimeReferenceKey(segment, timeMode, referenceTime) {
+    const routeCode = String(segment?.route || '').trim().toUpperCase();
+    const bound = String(segment?.bound || '').trim().toUpperCase();
+    const serviceType = String(segment?.service_type || '1').trim();
+    const fromStop = String(segment?.fromStop || '').trim();
+    const toStop = String(segment?.toStop || '').trim();
+    if (!routeCode || !fromStop || !toStop) return null;
+    const routeKey = String(segment?.routeKey || `${routeCode}|${bound}|${serviceType}`).trim();
+    const selectedStopSequence = Array.isArray(segment?.stops) && segment.stops.length > 0
+        ? segment.stops.map((stop) => String(stop).trim()).join(',')
+        : `${fromStop},${toStop}`;
+    return [
+        'ride-time-v1',
+        routeKey,
+        selectedStopSequence,
+        timeMode || 'now',
+        bucketTimestamp(referenceTime),
+    ].join('|');
+}
+
+function getKmbRideTimeReference(key) {
+    if (!key) return null;
+    const cache = loadKmbRideTimeReferenceCache();
+    const row = cache.get(key);
+    if (!row) return null;
+    if (Number(row.expiresAt) <= Date.now()) {
+        cache.delete(key);
+        saveKmbRideTimeReferenceCache(cache);
+        return null;
+    }
+    REQUEST_STATS.rideTimeReferenceHits += 1;
+    REQUEST_STATS.duplicateRequestsPrevented += 1;
+    return {
+        duration: Math.max(1, Math.round(Number(row.duration))),
+        source: 'google_transit_bus_duration',
+        reference: true,
+    };
+}
+
+function setKmbRideTimeReference(key, duration) {
+    if (!key || !Number.isFinite(Number(duration)) || Number(duration) <= 0) return;
+    const cache = loadKmbRideTimeReferenceCache();
+    cache.set(key, {
+        duration: Math.max(1, Math.round(Number(duration))),
+        savedAt: Date.now(),
+        expiresAt: Date.now() + KMB_RIDE_TIME_REFERENCE_TTL_MS,
+    });
+    saveKmbRideTimeReferenceCache(cache);
+    REQUEST_STATS.rideTimeReferenceWrites += 1;
 }
 
 async function fetchGCPRoute(lat1, lng1, lat2, lng2, mode = 'walking', intermediateStops = []) {
@@ -943,9 +1033,17 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
     const routeCode = String(segment?.route || '').trim().toUpperCase();
     const serviceType = String(segment?.service_type || '1').trim();
     const timeMode = options.timeMode || 'now';
-    const referenceTime = timeMode === 'arrive'
-        ? options.arrivalTime
-        : options.departureTime;
+    // Prefer the leg's actual planned boarding/arrival time.  This keeps the
+    // reference tied to the traffic period for that particular leg instead of
+    // using the journey anchor for every segment.
+    const segmentTime = timeMode === 'arrive' ? segment?.arrivalTime : segment?.boardTime;
+    const parsedSegmentTime = segmentTime ? new Date(segmentTime) : null;
+    const referenceTime = parsedSegmentTime instanceof Date && !Number.isNaN(parsedSegmentTime.getTime())
+        ? parsedSegmentTime
+        : (timeMode === 'arrive' ? options.arrivalTime : options.departureTime);
+    const referenceKey = buildKmbRideTimeReferenceKey(segment, timeMode, referenceTime);
+    const storedReference = getKmbRideTimeReference(referenceKey);
+    if (storedReference) return storedReference;
     const cacheKey = [
         'transit-ride',
         routeCode || 'unknown',
@@ -956,7 +1054,14 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
         bucketTimestamp(referenceTime),
     ].join('|');
     const cached = getGcpCachedValue(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+        return cached.then((payload) => {
+            if (payload?.source === 'google_transit_bus_duration') {
+                setKmbRideTimeReference(referenceKey, payload.duration);
+            }
+            return payload;
+        });
+    }
 
     const promise = (async () => {
         REQUEST_STATS.gcpNetworkRequests += 1;
@@ -992,6 +1097,7 @@ async function fetchGCPTransitRideDuration(segment, stopMap, options = {}) {
                         )
                     );
                     const payload = { duration, source: 'google_transit_bus_duration' };
+                    setKmbRideTimeReference(referenceKey, duration);
                     setGcpCachedValue(cacheKey, payload);
                     return payload;
                 }
@@ -1927,7 +2033,7 @@ function findTwoTransferCandidates({
 }
 
 async function findRoutes(params) {
-    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, currentLocation = null, useGoogleRefinement = false, onProgress } = params;
+    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, currentLocation = null, useGoogleRefinement = false, useGoogleRideTimeReference = false, onProgress } = params;
     const planningStartedAt = Date.now();
     const now = new Date();
     const requestStatsBefore = requestStatsSnapshot();
@@ -2264,10 +2370,13 @@ async function findRoutes(params) {
     }));
     finishStage('serviceValidation');
 
-    // Optional Google ride refinement is bounded and explicitly enabled.
+    // Google ride-time references are bounded and explicitly enabled.  The
+    // legacy refinement flag remains supported for callers/tests that already
+    // opt into it.
+    const shouldUseGoogleRideTimeReference = useGoogleRideTimeReference || useGoogleRefinement;
     let googleRideCandidatesRefined = 0;
-    if (useGoogleRefinement && filteredCandidates.length > 0) {
-        onProgress?.('Refining in-vehicle bus time...');
+    if (shouldUseGoogleRideTimeReference && filteredCandidates.length > 0) {
+        onProgress?.('Estimating KMB in-vehicle bus time...');
         const plannedAnchorTime = buildPlannedDateTime(dateValue, timeValue, now);
         filteredCandidates.sort(compareRouteCandidates);
         const rideRefinementCandidates = filteredCandidates.slice(
@@ -2322,6 +2431,7 @@ async function findRoutes(params) {
         earlyLiveEtaRejected: earlyNowFilter.rejectedCount,
         repeatedRouteCandidatesRejected,
         googleRefinementEnabled: useGoogleRefinement,
+        googleRideTimeReferenceEnabled: shouldUseGoogleRideTimeReference,
         googleRideCandidatesRefined,
         googleWalkingUniqueLegs: googleWalkingSummary.uniqueLegCount,
         googleWalkingFallbacks: googleWalkingSummary.fallbackCount,

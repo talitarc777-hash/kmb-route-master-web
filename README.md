@@ -9,7 +9,7 @@ A React route planner for Hong Kong. It searches KMB routes locally, validates l
 - Live KMB ETA filtering with a user-controlled strict ETA option
 - Official Transport Department service-alert matching and disruption-aware ranking
 - Leave-at and arrive-by validation against compact historical service windows
-- Google Directions walking times with optional, capped Google ride-time refinement
+- Google Directions walking times plus bounded Google Transit ride-time references for KMB legs
 - Optional Google Transit options when KMB is unavailable or has an ETA gap
 - KMB monthly-pass treatment: KMB legs are ranked as zero additional fare
 - Citybus, Tram, MTR, Light Rail, and MTR Bus fare/rail metadata from cached or official open data
@@ -108,9 +108,9 @@ Total time combines:
 - waiting/boarding allowance
 - in-vehicle ride time
 
-When Google Transit ride refinement is off, KMB in-vehicle time is estimated from the geographic distance across the selected stop sequence plus stop intervals. This prevents long express/highway sections with few stops (for example, 968X to Tai Lam) from being incorrectly treated as only a few minutes. Explicit Google transit ride durations still replace this estimate only when that optional refinement is enabled.
+KMB in-vehicle time starts with an estimate from the geographic distance across the selected stop sequence plus stop intervals. This prevents long express/highway sections with few stops (for example, 968X to Tai Lam) from being incorrectly treated as only a few minutes. The app then uses Google Transit only for the bounded set of best KMB candidates whose route/stop/time-bucket reference is missing. A matching KMB bus duration is stored in a bounded browser reference cache (30-minute time buckets, 24-hour expiry) and reused by later searches; fallback estimates are never stored as Google references.
 
-Candidate discovery uses geographic proximity, but the walking time shown and used for route timing/ranking comes from Google Directions walking routes for access, interchange, and destination legs. Duplicate walking requests are shared and processed with bounded concurrency. A straight-line estimate is retained only as a resilience fallback when Google Directions cannot return a walking route. When Google ride refinement is explicitly enabled, Directions Transit may refine only the eight best KMB candidates, and only a bus step whose route number matches the KMB leg is accepted. If refinement fails or returns another route, the local ride estimate is retained.
+Candidate discovery uses geographic proximity, but the walking time shown and used for route timing/ranking comes from Google Directions walking routes for access, interchange, and destination legs. Duplicate walking requests are shared and processed with bounded concurrency. A straight-line estimate is retained only as a resilience fallback when Google Directions cannot return a walking route. Ride-time reference lookups are checked before any Google request; when a request is needed, only a bus step whose route number matches the KMB leg is accepted. If Google fails or returns another route, the local ride estimate is retained.
 
 ### 6. Optional Google Transit gap search
 
@@ -139,7 +139,7 @@ CSDI responses are cached in browser storage for up to 30 days, while the server
 - Google Maps is the only autocomplete suggestion source. It waits for three characters and a 400 ms typing pause and cancels stale requests. Predictions are not persistently cached.
 - Access, interchange, destination, and live-GPS approach walking times use Google Directions. Identical walking legs share cached/in-flight requests, and requests run with bounded concurrency.
 - While live GPS is enabled, the blue map marker uses on-device absolute orientation or the GPS movement course to show a smoothed direction arrow. This sensor display makes no Google request and falls back to the blue dot when no reliable heading is available.
-- Google ride refinement is opt-in and capped at eight candidates.
+- Google KMB ride-time references are capped at eight candidates per search and reused from the persistent browser cache whenever available.
 - Planned service validation runs locally before paid Google walking enrichment. Only up to 120 diverse, service-supported candidates proceed to network enrichment, and the UI returns at most 30 ranked results.
 - The 16 most recently used exact Leave-at/Arrive-by searches are retained in memory for the current app session, so repeating one does not issue the same Google requests again.
 - CSDI and optional Google geometry responses use persistent browser caches.

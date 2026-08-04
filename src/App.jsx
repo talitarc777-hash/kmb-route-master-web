@@ -3275,6 +3275,10 @@ const App = () => {
           strictEtaOnly: searchAllowFallback ? false : searchStrictEtaOnly,
           allowSparseHistoricalFallback: timeMode !== 'now',
           useGoogleRefinement: searchAllowFallback,
+          // Use Google only as a bounded KMB ride-time reference.  It does not
+          // add Citybus/Google alternatives unless the user enables that
+          // separate fallback option above.
+          useGoogleRideTimeReference: true,
           currentLocation: timeMode === 'now' && isGpsTimingEnabled
             ? currentLocationRef.current
             : null,
