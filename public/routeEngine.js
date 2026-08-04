@@ -912,7 +912,19 @@ function getLegApproachMinutes(route, segmentIndex) {
 }
 
 function getFallbackRideDurationMinutes(segment) {
-    return (segment?.stops?.length || 0) * RIDE_MIN_PER_STOP;
+    const stopCount = segment?.stops?.length || 0;
+    const intervalCount = Math.max(1, stopCount - 1);
+    const routeDistanceKm = Number(segment?.routeDistanceKm);
+    if (Number.isFinite(routeDistanceKm) && routeDistanceKm > 0) {
+        // Stop spacing distinguishes express/highway sections from dense urban
+        // sections. Distance prevents sparse routes such as 968X from being
+        // reduced to only a few minutes merely because they have few stops.
+        return Math.max(
+            1,
+            Math.round(routeDistanceKm * 0.8 + intervalCount * RIDE_MIN_PER_STOP),
+        );
+    }
+    return stopCount * RIDE_MIN_PER_STOP;
 }
 
 function getRideDurationMinutes(segment) {
@@ -1326,6 +1338,21 @@ function annotateHistoricalSegmentContext(segment, routeStops, stopMap) {
         uniqueStopCount !== fullStops.length ||
         (fullStops.length > 1 && fullStops[0] === fullStops[fullStops.length - 1])
     );
+    let routeDistanceKm = 0;
+    for (let index = 1; index < (segment.stops || []).length; index++) {
+        const previousStop = stopMap?.[segment.stops[index - 1]];
+        const currentStop = stopMap?.[segment.stops[index]];
+        if (!previousStop || !currentStop) continue;
+        routeDistanceKm += haversine(
+            Number(previousStop.lat),
+            Number(previousStop.lng),
+            Number(currentStop.lat),
+            Number(currentStop.lng),
+        );
+    }
+    segment.routeDistanceKm = routeDistanceKm > 0 ? routeDistanceKm : null;
+    segment.rideDurationMinutes = getFallbackRideDurationMinutes(segment);
+    segment.rideDurationSource = 'distance_stop_estimate';
 }
 
 function applyStraightLineWalkingEstimate(route) {
@@ -2329,6 +2356,7 @@ window.routeEngine = {
     clearETACache,
     getActiveEtas,
     getNextValidBusETA,
+    getFallbackRideDurationMinutes,
     applyRouteTiming,
     validateSegmentHistoricalSchedule,
     compareRouteCandidates,

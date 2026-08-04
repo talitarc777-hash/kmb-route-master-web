@@ -108,6 +108,8 @@ Total time combines:
 - waiting/boarding allowance
 - in-vehicle ride time
 
+When Google Transit ride refinement is off, KMB in-vehicle time is estimated from the geographic distance across the selected stop sequence plus stop intervals. This prevents long express/highway sections with few stops (for example, 968X to Tai Lam) from being incorrectly treated as only a few minutes. Explicit Google transit ride durations still replace this estimate only when that optional refinement is enabled.
+
 Candidate discovery uses geographic proximity, but the walking time shown and used for route timing/ranking comes from Google Directions walking routes for access, interchange, and destination legs. Duplicate walking requests are shared and processed with bounded concurrency. A straight-line estimate is retained only as a resilience fallback when Google Directions cannot return a walking route. When Google ride refinement is explicitly enabled, Directions Transit may refine only the eight best KMB candidates, and only a bus step whose route number matches the KMB leg is accepted. If refinement fails or returns another route, the local ride estimate is retained.
 
 ### 6. Optional Google Transit gap search

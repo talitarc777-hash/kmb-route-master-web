@@ -37,6 +37,26 @@ test('GPS heading helpers normalize, screen-adjust, and smoothly cross north', (
   assert.equal(smoothHeading(350, 10, 0.25), 355);
 });
 
+test('KMB ride estimates include route distance for sparse express sections', () => {
+  const engine = loadEngine(async (url) => {
+    throw new Error('Unexpected network request: ' + url);
+  });
+  assert.equal(
+    engine.getFallbackRideDurationMinutes({
+      stops: ['A', 'B', 'C', 'D'],
+      routeDistanceKm: 21.5,
+    }),
+    22,
+  );
+  assert.equal(
+    engine.getFallbackRideDurationMinutes({
+      stops: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
+      routeDistanceKm: 10.9,
+    }),
+    22,
+  );
+});
+
 function jsonResponse(payload, { ok = true, status = 200 } = {}) {
   return {
     ok,
