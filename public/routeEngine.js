@@ -1861,8 +1861,8 @@ function compareDisplayDuplicateCandidates(a, b) {
     if (Number.isFinite(walkingA) && Number.isFinite(walkingB)) {
         const walkingDelta = walkingA - walkingB;
         // Walking convenience is the primary choice. ETA only breaks a close
-        // walking-time decision (three minutes or less apart).
-        if (Math.abs(walkingDelta) > 3) return walkingDelta;
+        // walking-time decision (five minutes or less apart).
+        if (Math.abs(walkingDelta) > 5) return walkingDelta;
 
         const etaA = candidateEtaWaitMinutes(a);
         const etaB = candidateEtaWaitMinutes(b);

@@ -443,12 +443,12 @@ test('duplicate-card choice prioritizes walking, then a close ETA within ten min
 
   const walkingWinner = engine.deduplicateRankedRouteSequences([
     makeCandidate({ id: 'short-walk', walkTimeTransfer: 5, waitMinutes: 18, estimatedTime: 70 }),
-    makeCandidate({ id: 'long-walk', walkTimeTransfer: 9, waitMinutes: 3, estimatedTime: 60 }),
+    makeCandidate({ id: 'long-walk', walkTimeTransfer: 12, waitMinutes: 3, estimatedTime: 60 }),
   ]);
   assert.equal(walkingWinner[0].id, 'short-walk');
 
   const etaWinner = engine.deduplicateRankedRouteSequences([
-    makeCandidate({ id: 'close-walk-late-bus', walkTimeTransfer: 8, waitMinutes: 14, estimatedTime: 70 }),
+    makeCandidate({ id: 'close-walk-late-bus', walkTimeTransfer: 5, waitMinutes: 14, estimatedTime: 70 }),
     makeCandidate({ id: 'close-walk-quick-bus', walkTimeTransfer: 10, waitMinutes: 4, estimatedTime: 65 }),
   ]);
   assert.equal(etaWinner[0].id, 'close-walk-quick-bus');
