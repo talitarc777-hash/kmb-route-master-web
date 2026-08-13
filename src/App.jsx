@@ -22,6 +22,11 @@ import {
   rankRoutesByDisruption,
   serviceAlertLabel,
 } from './utils/serviceAlerts.js';
+import {
+  annotateRoutePassThrough,
+  createRoutePassThroughDetector,
+  getBookmarkRoutePassThroughInfo,
+} from './utils/routePassThrough.js';
 
 publishApiBaseUrl();
 
@@ -633,14 +638,8 @@ function dayClassLabel(dayClass) {
   return 'Weekday';
 }
 
-function kmbVariantRemark(segment) {
-  const route = String(segment?.route || '').toUpperCase();
-  const bound = String(segment?.bound || '').toUpperCase();
-  const serviceType = String(segment?.service_type || '1');
-  if (route === '269C' && bound === 'O' && serviceType === '5') {
-    return 'Includes Tin Shui Wai Station + Shek Po Tsuen';
-  }
-  return null;
+function routePassThroughRemark(segment) {
+  return segment?.passThroughInfo?.label || null;
 }
 
 function etaDisplayIdentity(etaValue) {
@@ -708,7 +707,7 @@ function mergeSameVisibleRouteOptions(options = []) {
         return;
       }
 
-      if (!kmbVariantRemark(displayOptions[existingIndex]) && kmbVariantRemark(displayOption)) {
+      if (!routePassThroughRemark(displayOptions[existingIndex]) && routePassThroughRemark(displayOption)) {
         displayOptions[existingIndex] = displayOption;
       }
     });
@@ -749,7 +748,7 @@ function mergeSameVisibleCurrentEtaOptions(options = [], fallbackStopId = '', et
       return;
     }
 
-    if (!kmbVariantRemark(displayOptions[existingIndex]) && kmbVariantRemark(option)) {
+    if (!routePassThroughRemark(displayOptions[existingIndex]) && routePassThroughRemark(option)) {
       displayOptions[existingIndex] = option;
     }
   });
@@ -1640,7 +1639,7 @@ const CurrentStopEtaList = ({
       {mergeSameVisibleCurrentEtaOptions(options, fallbackStopId, etaMap).map((option) => {
         const etaKey = kmbEtaOptionKey(option, fallbackStopId);
         const currentEtas = etaMap.get(etaKey);
-        const variantRemark = kmbVariantRemark(option);
+        const variantRemark = routePassThroughRemark(option);
         return (
           <div key={etaKey} className="flex flex-col items-start gap-0.5">
             <div className="flex flex-wrap items-center gap-1">
@@ -1729,7 +1728,14 @@ const ServiceAlertNotice = ({ route, detailed = false }) => {
 };
 
 // Bookmark Panel Component
-const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }) => {
+const BookmarkPanel = ({
+  stopMap,
+  stopRoutes,
+  passThroughDetector,
+  onClose,
+  bookmarks,
+  setBookmarks,
+}) => {
   const [etaMap, setEtaMap] = useState(new Map());
   const [editing, setEditing] = useState(null);
   const [newGroupName, setNewGroupName] = useState('');
@@ -1787,8 +1793,20 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
       if (!route) continue;
       if (!grouped.has(route)) grouped.set(route, []);
       const variants = grouped.get(route);
-      if (!variants.some((v) => v.service_type === item.service_type)) {
-        variants.push({ route, service_type: item.service_type || '1' });
+      const bound = String(item.bound || '').trim().toUpperCase();
+      const serviceType = String(item.service_type || '1');
+      if (!variants.some((v) => (
+        v.bound === bound
+        && v.service_type === serviceType
+        && v.seq === item.seq
+      ))) {
+        variants.push({
+          operator: 'KMB',
+          route,
+          bound,
+          service_type: serviceType,
+          seq: item.seq,
+        });
       }
     }
     return Array.from(grouped.entries())
@@ -1889,6 +1907,23 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
     return Array.from(grouped.values());
   };
 
+  const getBookmarkPassThroughNotices = (groupedStops = []) => {
+    const notices = new Map();
+    groupedStops.forEach((stop) => {
+      (stop.routes || []).forEach((bookmarkRoute) => {
+        const info = getBookmarkRoutePassThroughInfo(bookmarkRoute, {
+          bookmarkStopId: stop.stopId,
+          stopRoutes,
+          detector: passThroughDetector,
+        });
+        if (!info) return;
+        const route = String(bookmarkRoute.route || '').trim();
+        notices.set(`${route}|${info.stationId}`, { route, ...info });
+      });
+    });
+    return Array.from(notices.values());
+  };
+
   const toggleGroupedBookmarkRoute = (
     groupIndex,
     groupedStops,
@@ -1911,11 +1946,14 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
               ? [...currentRoutes, ...variants]
               : currentRoutes;
           const deduped = Array.from(new Map(nextRoutes.map((item) => [
-            `${item.route}|${item.service_type || '1'}|${item.stopId || stop.stopId}`,
+            `${item.route}|${item.bound || ''}|${item.service_type || '1'}|${item.stopId || stop.stopId}|${item.seq || ''}`,
             {
+              operator: item.operator || 'KMB',
               route: item.route,
+              bound: item.bound,
               service_type: item.service_type || '1',
               stopId: item.stopId || stop.stopId,
+              seq: item.seq,
             },
           ])).values());
           return { ...stop, routes: deduped };
@@ -2072,6 +2110,7 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
               const routeOptions = getAvailableRoutesForNamedStation(s.stopId);
               const selectedRoutes = stopGroup.stops.flatMap((stop) => stop.routes || []);
               const selectedRouteNames = new Set(selectedRoutes.map((item) => item.route));
+              const passThroughNotices = getBookmarkPassThroughNotices(stopGroup.stops);
               return (
                 <div
                   key={stopGroup.key || si}
@@ -2113,6 +2152,18 @@ const BookmarkPanel = ({ stopMap, stopRoutes, onClose, bookmarks, setBookmarks }
                             </span>
                           ))}
                         </div>
+                        {passThroughNotices.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {passThroughNotices.map((notice) => (
+                              <span
+                                key={`${notice.route}|${notice.stationId}`}
+                                className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700"
+                              >
+                                {notice.route} {'\u00B7'} {notice.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-400">
@@ -2251,6 +2302,7 @@ const App = () => {
   const routeMapRef = useRef({});
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
+  const passThroughDetectorRef = useRef(createRoutePassThroughDetector());
   const compactOperatorDatasetCacheRef = useRef(new Map());
   const searchCacheRef = useRef(new Map());
   const kmbRouteGeometryCacheRef = useRef(new Map());
@@ -2341,11 +2393,15 @@ const App = () => {
             !previous ||
             (candidateEta && (!previous.nextEta || candidateEta < previous.nextEta));
           if (shouldReplace) {
-            routeOptionMap.set(optionKey, {
+            routeOptionMap.set(optionKey, annotateRoutePassThrough({
+              operator: 'KMB',
               route: candidateSeg.route,
               bound: candidateSeg.bound,
               service_type: candidateSeg.service_type || '1',
+              routeKey: candidateSeg.routeKey,
               fromStop: candidateSeg.fromStop,
+              toStop: candidateSeg.toStop,
+              stops: candidateSeg.stops,
               readyTime: candidateSeg.readyTime || null,
               nextEta: candidateEta,
               activeEtas: Array.isArray(candidateSeg.activeEtas) ? candidateSeg.activeEtas : [],
@@ -2355,7 +2411,7 @@ const App = () => {
               busInterval: candidateSeg.busInterval ?? null,
               serviceAlerts: optionAlerts,
               serviceAlertSeverity: optionAlerts[0]?.severity || null,
-            });
+            }, passThroughDetectorRef.current));
           }
         });
 
@@ -2369,7 +2425,7 @@ const App = () => {
           .sort((a, b) => a - b)[0];
 
         return {
-          ...seg,
+          ...annotateRoutePassThrough({ ...seg, operator: 'KMB' }, passThroughDetectorRef.current),
           routeLabel: routeNames.join('/'),
           routeOptions,
           nextEta: earliestEta || seg.nextEta,
@@ -2565,6 +2621,10 @@ const App = () => {
       routeMapRef.current = network.routeMap;
       routeStopsRef.current = network.routeStops;
       stopRoutesRef.current = network.stopRoutes;
+      passThroughDetectorRef.current = createRoutePassThroughDetector({
+        routeStops: network.routeStops,
+        stopMap: network.stopMap,
+      });
 
       setLoadingStatus('Ready');
       setDataLoaded(true);
@@ -4571,6 +4631,7 @@ const App = () => {
           <BookmarkPanel
             stopMap={stopMapRef.current}
             stopRoutes={stopRoutesRef.current}
+            passThroughDetector={passThroughDetectorRef.current}
             onClose={() => setShowBookmarks(false)}
             bookmarks={bookmarks}
             setBookmarks={setBookmarks}
@@ -4974,7 +5035,7 @@ const App = () => {
                               {seg.routeOptions && seg.routeOptions.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
                                   {mergeSameVisibleRouteOptions(seg.routeOptions).map((option) => {
-                                    const variantRemark = kmbVariantRemark(option);
+                                    const variantRemark = routePassThroughRemark(option);
                                     return (
                                       <div
                                         key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}|${etaDisplayIdentity(option.nextEta)}`}
@@ -5234,8 +5295,11 @@ const App = () => {
                                 stop.stop_id,
                                 getLegStopName(stop),
                                 (stopRoutesRef.current[stop.stop_id] || []).map((r) => ({
+                                  operator: 'KMB',
                                   route: r.route,
+                                  bound: r.bound,
                                   service_type: r.service_type,
+                                  seq: r.seq,
                                 })),
                               )
                             }
@@ -5402,8 +5466,11 @@ const App = () => {
             const scheduleText = timeMode === 'now' ? null : formatHistoricalSchedule(displaySeg.historicalSchedule || seg.historicalSchedule);
             const scheduleClass = historicalScheduleClass(displaySeg.historicalSchedule || seg.historicalSchedule);
             const routesAtFromStop = (stopRoutesRef.current[seg.fromStop] || []).map((r) => ({
+              operator: 'KMB',
               route: r.route,
+              bound: r.bound,
               service_type: r.service_type,
+              seq: r.seq,
             }));
             const currentEtaOptions = (
               displaySeg.routeOptions && displaySeg.routeOptions.length > 0
@@ -5470,8 +5537,11 @@ const App = () => {
                         {seg.stops.slice(1, -1).map((stopId, stopIdx) => {
                           const stp = stopMapRef.current[stopId];
                           const rts = (stopRoutesRef.current[stopId] || []).map((r) => ({
+                            operator: 'KMB',
                             route: r.route,
+                            bound: r.bound,
                             service_type: r.service_type,
+                            seq: r.seq,
                           }));
                           return (
                             <div
