@@ -1642,8 +1642,15 @@ const CurrentStopEtaList = ({
         const variantRemark = routePassThroughRemark(option);
         return (
           <div key={etaKey} className="flex flex-col items-start gap-0.5">
-            <div className="flex flex-wrap items-center gap-1">
-              <span className="text-[10px] font-black text-slate-600">{option.route}</span>
+            <div className="flex flex-wrap items-start gap-1">
+              <div className="flex flex-col items-start gap-0.5">
+                <span className="text-[10px] font-black text-slate-600">{option.route}</span>
+                {variantRemark && (
+                  <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
+                    {variantRemark}
+                  </span>
+                )}
+              </div>
               {currentEtas?.length > 0 ? (
                 currentEtas.map((eta, etaIndex) => (
                   <span
@@ -1660,11 +1667,6 @@ const CurrentStopEtaList = ({
                 </span>
               )}
             </div>
-            {variantRemark && (
-              <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
-                {variantRemark}
-              </span>
-            )}
             {option.serviceAlerts?.length > 0 && (
               <span
                 className={`rounded-md border px-1.5 py-0.5 text-[9px] font-bold leading-tight ${serviceAlertBadgeClass(option.serviceAlertSeverity)}`}
@@ -2143,27 +2145,35 @@ const BookmarkPanel = ({
                           {hasEtaData && etas.length === 0 && (
                             <span className="text-xs text-slate-400">No ETA available now</span>
                           )}
-                          {etas.slice(0, 4).map((e, ei) => (
-                            <span
-                              key={ei}
-                              className={`rounded-full border bg-white px-2 py-0.5 text-xs font-bold eta-${e.color}`}
-                            >
-                              {e.route} {'\u00B7'} {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
-                            </span>
-                          ))}
+                          {etas.slice(0, 4).map((e, ei) => {
+                            const normalizedEtaRoute = String(e.route || '').trim().toUpperCase();
+                            const isFirstRouteEta = etas.findIndex((eta) => (
+                              String(eta.route || '').trim().toUpperCase() === normalizedEtaRoute
+                            )) === ei;
+                            const routeNotices = isFirstRouteEta
+                              ? passThroughNotices.filter((notice) => (
+                                String(notice.route || '').trim().toUpperCase() === normalizedEtaRoute
+                              ))
+                              : [];
+                            return (
+                              <div key={ei} className="flex flex-col items-start gap-0.5">
+                                <span
+                                  className={`rounded-full border bg-white px-2 py-0.5 text-xs font-bold eta-${e.color}`}
+                                >
+                                  {e.route} {'\u00B7'} {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
+                                </span>
+                                {routeNotices.map((notice) => (
+                                  <span
+                                    key={`${notice.route}|${notice.stationId}`}
+                                    className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700"
+                                  >
+                                    {notice.label}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })}
                         </div>
-                        {passThroughNotices.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {passThroughNotices.map((notice) => (
-                              <span
-                                key={`${notice.route}|${notice.stationId}`}
-                                className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700"
-                              >
-                                {notice.route} {'\u00B7'} {notice.label}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-400">
@@ -2215,7 +2225,21 @@ const BookmarkPanel = ({
                                 }`}
                                 title={selected ? 'Included in ETA review. Tap to remove.' : 'Excluded from ETA review. Tap to add.'}
                               >
-                                {route}
+                                <span className="flex flex-col items-start gap-0.5">
+                                  <span>{route}</span>
+                                  {passThroughNotices
+                                    .filter((notice) => (
+                                      String(notice.route || '').trim().toUpperCase() === route.toUpperCase()
+                                    ))
+                                    .map((notice) => (
+                                      <span
+                                        key={`${notice.route}|${notice.stationId}`}
+                                        className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700"
+                                      >
+                                        {notice.label}
+                                      </span>
+                                    ))}
+                                </span>
                               </button>
                             );
                           })}
@@ -5041,6 +5065,16 @@ const App = () => {
                                         key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}|${etaDisplayIdentity(option.nextEta)}`}
                                         className="flex flex-col items-start gap-0.5"
                                       >
+                                        {variantRemark && (
+                                          <div className="flex flex-col items-start gap-0.5">
+                                            <span className="text-[10px] font-black leading-none text-slate-600">
+                                              {option.route}
+                                            </span>
+                                            <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
+                                              {variantRemark}
+                                            </span>
+                                          </div>
+                                        )}
                                         <span
                                           className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)} ${option.etaCatchable === false ? 'opacity-40 grayscale' : ''}`}
                                           title={[
@@ -5052,13 +5086,8 @@ const App = () => {
                                               : '',
                                           ].filter(Boolean).join(' · ') || undefined}
                                         >
-                                          {option.serviceAlerts?.length > 0 ? '\u26A0\uFE0F ' : ''}{option.route}: {getEtaText(option.nextEta)}
+                                          {option.serviceAlerts?.length > 0 ? '\u26A0\uFE0F ' : ''}{variantRemark ? getEtaText(option.nextEta) : `${option.route}: ${getEtaText(option.nextEta)}`}
                                         </span>
-                                        {variantRemark && (
-                                          <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
-                                            {variantRemark}
-                                          </span>
-                                        )}
                                       </div>
                                     );
                                   })}
