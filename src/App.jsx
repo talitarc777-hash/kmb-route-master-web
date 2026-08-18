@@ -2311,6 +2311,8 @@ const App = () => {
   );
 
   const mapRef = useRef(null);
+  const mapGpsButtonRef = useRef(null);
+  const mapGpsActionRef = useRef(null);
   const viewRef = useRef(null);
   const graphicsLayerRef = useRef(null);
   const routeOverlayLayerRef = useRef(null);
@@ -2712,6 +2714,12 @@ const App = () => {
           stationLabelLayerRef.current = stationLabelLayer;
           currentLocationLayerRef.current = currentLocationLayer;
           viewRef.current = view;
+          const mapGpsButton = document.createElement('button');
+          mapGpsButton.type = 'button';
+          mapGpsButton.className = 'esri-widget esri-widget--button flex h-11 w-11 items-center justify-center rounded-xl border border-blue-200 bg-white/95 text-lg text-blue-700 shadow-lg backdrop-blur transition hover:border-blue-400 hover:bg-white disabled:cursor-wait disabled:opacity-50';
+          mapGpsButton.addEventListener('click', () => mapGpsActionRef.current?.());
+          mapGpsButtonRef.current = mapGpsButton;
+          view.ui.add(mapGpsButton, { position: 'top-left', index: 1 });
           view.ui.padding = { top: 80 };
           const currentLocation = currentLocationRef.current;
           if (currentLocation) {
@@ -4344,6 +4352,21 @@ const App = () => {
     }
   };
 
+  useEffect(() => {
+    mapGpsActionRef.current = selectedRoute
+      ? handleLocateSelectedRoute
+      : handleUseCurrentLocation;
+    const button = mapGpsButtonRef.current;
+    if (!button) return;
+    const label = isGpsTimingEnabled
+      ? 'Stop live GPS updates'
+      : 'Show my current GPS location';
+    button.disabled = isLocating;
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.textContent = isLocating ? '\u21BB' : isGpsTimingEnabled ? '\u25C9' : '\u{1F4CD}';
+  }, [isGpsTimingEnabled, isLocating, mapLoaded, selectedRoute]);
+
   const startRouteDetailResize = useCallback((event) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     event.preventDefault();
@@ -4565,18 +4588,6 @@ const App = () => {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 bg-white/90 backdrop-blur px-6 py-4 rounded-2xl shadow-xl text-sm font-bold text-slate-600">
           {'\u{1F5FA}\uFE0F'} {loadingStatus}
         </div>
-      )}
-
-      {selectedRoute && !showBookmarks && (
-        <button
-          type={'button'}
-          onClick={handleLocateSelectedRoute}
-          disabled={isLocating}
-          className={'absolute left-3 top-[72px] z-30 min-h-11 rounded-2xl border border-blue-200 bg-white/95 px-3 py-2 text-xs font-black text-blue-700 shadow-xl backdrop-blur disabled:opacity-50 sm:top-[88px]'}
-          title={isGpsTimingEnabled ? 'Stop live GPS updates' : 'Show my location and recalculate catchable buses'}
-        >
-          {isLocating ? 'Locating...' : isGpsTimingEnabled ? 'Stop GPS' : '\u{1F4CD} My location'}
-        </button>
       )}
 
       {selectedRoute && !showBookmarks && (
