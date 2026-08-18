@@ -97,7 +97,14 @@ function updateStopRoutes(bookmarks, groupIndex, stopId, routes) {
 
 async function fetchStopETAs(stopId, routes) {
     const results = await Promise.all(
-        routes.map(async ({ route, service_type, stopId: routeStopId }) => {
+        routes.map(async ({
+            route,
+            bound,
+            direction,
+            service_type,
+            operator,
+            stopId: routeStopId,
+        }) => {
             try {
                 const svc = service_type || '1';
                 const etaStopId = routeStopId || stopId;
@@ -118,8 +125,16 @@ async function fetchStopETAs(stopId, routes) {
                         const waitMs = new Date(e.eta) - now;
                         const waitMin = Math.round(waitMs / 60000);
                         return {
-                            route,
+                            operator: e.co || operator || 'KMB',
+                            route: e.route || route,
+                            direction: e.dir || e.direction || e.bound || direction || bound || '',
+                            bound: e.dir || e.direction || e.bound || direction || bound || '',
+                            service_type: String(e.service_type ?? svc),
                             eta: e.eta,
+                            eta_seq: e.eta_seq,
+                            rmk_en: e.rmk_en || '',
+                            rmk_tc: e.rmk_tc || '',
+                            rmk_sc: e.rmk_sc || '',
                             waitMin,
                             color: waitMin <= 5 ? 'green' : waitMin <= 15 ? 'yellow' : 'grey',
                         };

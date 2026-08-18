@@ -27,6 +27,11 @@ import {
   createRoutePassThroughDetector,
   getBookmarkRoutePassThroughInfo,
 } from './utils/routePassThrough.js';
+import {
+  annotateKmbEtaSpecialTrip,
+  createKmbSpecialTripDetector,
+  formatKmbSpecialTripInfo,
+} from './utils/kmbSpecialTrips.js';
 
 publishApiBaseUrl();
 
@@ -642,6 +647,14 @@ function routePassThroughRemark(segment) {
   return segment?.passThroughInfo?.label || null;
 }
 
+function etaSpecialTripRemark(eta) {
+  return formatKmbSpecialTripInfo(eta?.specialTripInfo, 'en') || null;
+}
+
+function kmbEtaRemark(eta) {
+  return String(eta?.rmk_en || eta?.rmk_tc || eta?.rmk_sc || '').trim() || null;
+}
+
 function etaDisplayIdentity(etaValue) {
   if (!etaValue) return 'no-eta';
   const etaDate = new Date(etaValue);
@@ -691,13 +704,25 @@ function mergeSameVisibleRouteOptions(options = []) {
       ? option.displayEtas
       : [{ eta: option?.nextEta || null, catchable: true }];
     etaRows.forEach((etaRow) => {
+      const etaDirection = String(
+        etaRow?.dir || etaRow?.direction || etaRow?.bound || option?.bound || '',
+      ).trim().toUpperCase();
+      const etaServiceType = String(
+        etaRow?.service_type ?? etaRow?.serviceType ?? option?.service_type ?? '1',
+      ).trim();
       const displayOption = {
         ...option,
+        etaRecord: etaRow,
+        etaDirection,
+        etaServiceType,
+        specialTripInfo: etaRow?.specialTripInfo || null,
         nextEta: etaRow?.eta || null,
         etaCatchable: etaRow?.catchable !== false,
       };
       const displayKey = [
         String(displayOption?.route || '').toUpperCase(),
+        etaDirection,
+        etaServiceType,
         etaDisplayIdentity(displayOption?.nextEta),
       ].join('|');
       const existingIndex = optionIndexByKey.get(displayKey);
@@ -707,7 +732,13 @@ function mergeSameVisibleRouteOptions(options = []) {
         return;
       }
 
-      if (!routePassThroughRemark(displayOptions[existingIndex]) && routePassThroughRemark(displayOption)) {
+      if (
+        (!displayOptions[existingIndex]?.specialTripInfo && displayOption.specialTripInfo)
+        || (
+          !routePassThroughRemark(displayOptions[existingIndex])
+          && routePassThroughRemark(displayOption)
+        )
+      ) {
         displayOptions[existingIndex] = displayOption;
       }
     });
@@ -728,7 +759,11 @@ function kmbEtaOptionKey(segment, fallbackStopId = '') {
 function etaListDisplayIdentity(etas) {
   if (!etas) return 'pending';
   if (etas.length === 0) return 'no-current-eta';
-  return etas.slice(0, 3).map((eta) => etaDisplayIdentity(eta?.eta)).join(',');
+  return etas.slice(0, 3).map((eta) => [
+    String(eta?.dir || eta?.direction || eta?.bound || '').trim().toUpperCase(),
+    String(eta?.service_type ?? eta?.serviceType ?? '').trim(),
+    etaDisplayIdentity(eta?.eta),
+  ].join('|')).join(',');
 }
 
 function mergeSameVisibleCurrentEtaOptions(options = [], fallbackStopId = '', etaMap = new Map()) {
@@ -1639,7 +1674,11 @@ const CurrentStopEtaList = ({
       {mergeSameVisibleCurrentEtaOptions(options, fallbackStopId, etaMap).map((option) => {
         const etaKey = kmbEtaOptionKey(option, fallbackStopId);
         const currentEtas = etaMap.get(etaKey);
-        const variantRemark = routePassThroughRemark(option);
+        const variantRemark = currentEtas?.some((eta) => (
+          eta.specialTripInfo?.addedStopIds?.includes(option.passThroughInfo?.targetStopId)
+        ))
+          ? null
+          : routePassThroughRemark(option);
         return (
           <div key={etaKey} className="flex flex-col items-start gap-0.5">
             <div className="flex flex-wrap items-start gap-1">
@@ -1652,15 +1691,33 @@ const CurrentStopEtaList = ({
                 )}
               </div>
               {currentEtas?.length > 0 ? (
-                currentEtas.map((eta, etaIndex) => (
-                  <span
-                    key={`${eta.eta}|${etaIndex}`}
-                    className={`rounded-full border px-2 py-1 text-[11px] font-bold ${getEtaChipClass(eta.eta)} ${!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) ? 'opacity-40 grayscale' : ''}`}
-                    title={!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) ? 'Not catchable from the calculated ready time' : undefined}
-                  >
-                    {getEtaText(eta.eta)}
-                  </span>
-                ))
+                currentEtas.map((eta, etaIndex) => {
+                  const specialRemark = etaSpecialTripRemark(eta);
+                  const officialRemark = kmbEtaRemark(eta);
+                  return (
+                    <div
+                      key={`${eta.eta}|${eta.service_type || ''}|${etaIndex}`}
+                      className="flex flex-col items-start gap-0.5"
+                    >
+                      <span
+                        className={`rounded-full border px-2 py-1 text-[11px] font-bold ${getEtaChipClass(eta.eta)} ${!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) ? 'opacity-40 grayscale' : ''}`}
+                        title={!isEtaCatchableAtReadyTime(eta.eta, option.readyTime) ? 'Not catchable from the calculated ready time' : undefined}
+                      >
+                        {getEtaText(eta.eta)}
+                      </span>
+                      {specialRemark && (
+                        <span className="max-w-[220px] rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-blue-700">
+                          {specialRemark}
+                        </span>
+                      )}
+                      {officialRemark && officialRemark !== specialRemark && (
+                        <span className="max-w-[220px] text-[9px] font-semibold leading-tight text-slate-500">
+                          {officialRemark}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
               ) : (
                 <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-400">
                   {isLoading && !etaMap.has(etaKey) ? 'Loading...' : 'No current ETA'}
@@ -1734,6 +1791,7 @@ const BookmarkPanel = ({
   stopMap,
   stopRoutes,
   passThroughDetector,
+  specialTripDetector,
   onClose,
   bookmarks,
   setBookmarks,
@@ -1760,14 +1818,22 @@ const BookmarkPanel = ({
     setEtaUpdateError(null);
     try {
       const updates = await window.bookmarkEngine.refreshBookmarkETAs(bookmarks);
-      setEtaMap(new Map(updates));
+      const annotatedUpdates = new Map(Array.from(updates.entries()).map(([stopId, etas]) => [
+        stopId,
+        (etas || []).map((eta) => annotateKmbEtaSpecialTrip(
+          eta,
+          eta,
+          specialTripDetector,
+        )),
+      ]));
+      setEtaMap(annotatedUpdates);
       setLastEtaUpdateAt(new Date());
     } catch (error) {
       setEtaUpdateError(error?.message || 'Could not update bookmark ETAs.');
     } finally {
       setIsUpdatingEtas(false);
     }
-  }, [bookmarks, isUpdatingEtas, totalBookmarkedStops]);
+  }, [bookmarks, isUpdatingEtas, specialTripDetector, totalBookmarkedStops]);
 
   useEffect(() => {
     if (didInitialEtaRefreshRef.current) return;
@@ -2105,7 +2171,12 @@ const BookmarkPanel = ({
               const etas = Array.from(new Map(
                 groupedStopIds
                   .flatMap((stopId) => etaMap.get(stopId) || [])
-                  .map((eta) => [`${eta.route}|${eta.eta}`, eta]),
+                  .map((eta) => [[
+                    eta.route,
+                    eta.direction || eta.dir || eta.bound || '',
+                    eta.service_type || '1',
+                    eta.eta,
+                  ].join('|'), eta]),
               ).values()).sort((a, b) => a.waitMin - b.waitMin);
               const stopKey = `${gi}|${stopGroup.key}`;
               const isExpanded = expandedStopKey === stopKey;
@@ -2147,21 +2218,37 @@ const BookmarkPanel = ({
                           )}
                           {etas.slice(0, 4).map((e, ei) => {
                             const normalizedEtaRoute = String(e.route || '').trim().toUpperCase();
+                            const specialRemark = etaSpecialTripRemark(e);
+                            const officialRemark = kmbEtaRemark(e);
                             const isFirstRouteEta = etas.findIndex((eta) => (
                               String(eta.route || '').trim().toUpperCase() === normalizedEtaRoute
                             )) === ei;
                             const routeNotices = isFirstRouteEta
                               ? passThroughNotices.filter((notice) => (
                                 String(notice.route || '').trim().toUpperCase() === normalizedEtaRoute
+                                && !e.specialTripInfo?.addedStopIds?.includes(notice.targetStopId)
                               ))
                               : [];
                             return (
-                              <div key={ei} className="flex flex-col items-start gap-0.5">
+                              <div
+                                key={`${e.route}|${e.direction || e.bound || ''}|${e.service_type || '1'}|${e.eta}|${ei}`}
+                                className="flex flex-col items-start gap-0.5"
+                              >
                                 <span
                                   className={`rounded-full border bg-white px-2 py-0.5 text-xs font-bold eta-${e.color}`}
                                 >
                                   {e.route} {'\u00B7'} {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
                                 </span>
+                                {specialRemark && (
+                                  <span className="max-w-[220px] rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-blue-700">
+                                    {specialRemark}
+                                  </span>
+                                )}
+                                {officialRemark && officialRemark !== specialRemark && (
+                                  <span className="max-w-[220px] text-[9px] font-semibold leading-tight text-slate-500">
+                                    {officialRemark}
+                                  </span>
+                                )}
                                 {routeNotices.map((notice) => (
                                   <span
                                     key={`${notice.route}|${notice.stationId}`}
@@ -2329,6 +2416,7 @@ const App = () => {
   const routeStopsRef = useRef({});
   const stopRoutesRef = useRef({});
   const passThroughDetectorRef = useRef(createRoutePassThroughDetector());
+  const specialTripDetectorRef = useRef(createKmbSpecialTripDetector());
   const compactOperatorDatasetCacheRef = useRef(new Map());
   const searchCacheRef = useRef(new Map());
   const kmbRouteGeometryCacheRef = useRef(new Map());
@@ -2415,6 +2503,19 @@ const App = () => {
           const optionAlerts = (routeCandidate.serviceAlerts || []).filter(
             (alert) => alert.routeCode === String(candidateSeg.route).trim().toUpperCase(),
           );
+          const etaVariantFallback = {
+            operator: 'KMB',
+            route: candidateSeg.route,
+            bound: candidateSeg.bound,
+            service_type: candidateSeg.service_type || '1',
+          };
+          const annotateEtaRows = (rows) => (Array.isArray(rows) ? rows : []).map((eta) => (
+            annotateKmbEtaSpecialTrip(
+              eta,
+              etaVariantFallback,
+              specialTripDetectorRef.current,
+            )
+          ));
           const shouldReplace =
             !previous ||
             (candidateEta && (!previous.nextEta || candidateEta < previous.nextEta));
@@ -2430,9 +2531,9 @@ const App = () => {
               stops: candidateSeg.stops,
               readyTime: candidateSeg.readyTime || null,
               nextEta: candidateEta,
-              activeEtas: Array.isArray(candidateSeg.activeEtas) ? candidateSeg.activeEtas : [],
-              catchableEtas: Array.isArray(candidateSeg.catchableEtas) ? candidateSeg.catchableEtas : [],
-              displayEtas: Array.isArray(candidateSeg.displayEtas) ? candidateSeg.displayEtas : [],
+              activeEtas: annotateEtaRows(candidateSeg.activeEtas),
+              catchableEtas: annotateEtaRows(candidateSeg.catchableEtas),
+              displayEtas: annotateEtaRows(candidateSeg.displayEtas),
               hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
               busInterval: candidateSeg.busInterval ?? null,
               serviceAlerts: optionAlerts,
@@ -2648,6 +2749,10 @@ const App = () => {
       routeStopsRef.current = network.routeStops;
       stopRoutesRef.current = network.stopRoutes;
       passThroughDetectorRef.current = createRoutePassThroughDetector({
+        routeStops: network.routeStops,
+        stopMap: network.stopMap,
+      });
+      specialTripDetectorRef.current = createKmbSpecialTripDetector({
         routeStops: network.routeStops,
         stopMap: network.stopMap,
       });
@@ -3979,6 +4084,16 @@ const App = () => {
           );
           const currentRows = (rows || [])
             .filter((row) => row?.eta)
+            .map((row) => annotateKmbEtaSpecialTrip(
+              row,
+              {
+                operator: 'KMB',
+                route: option.route,
+                bound: option.bound,
+                service_type: option.service_type || '1',
+              },
+              specialTripDetectorRef.current,
+            ))
             .sort((a, b) => new Date(a.eta) - new Date(b.eta));
           return [key, currentRows];
         }),
@@ -4667,6 +4782,7 @@ const App = () => {
             stopMap={stopMapRef.current}
             stopRoutes={stopRoutesRef.current}
             passThroughDetector={passThroughDetectorRef.current}
+            specialTripDetector={specialTripDetectorRef.current}
             onClose={() => setShowBookmarks(false)}
             bookmarks={bookmarks}
             setBookmarks={setBookmarks}
@@ -5070,10 +5186,16 @@ const App = () => {
                               {seg.routeOptions && seg.routeOptions.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
                                   {mergeSameVisibleRouteOptions(seg.routeOptions).map((option) => {
-                                    const variantRemark = routePassThroughRemark(option);
+                                    const specialRemark = etaSpecialTripRemark(option);
+                                    const officialRemark = kmbEtaRemark(option.etaRecord);
+                                    const variantRemark = option.specialTripInfo?.addedStopIds?.includes(
+                                      option.passThroughInfo?.targetStopId,
+                                    )
+                                      ? null
+                                      : routePassThroughRemark(option);
                                     return (
                                       <div
-                                        key={`${option.route}|${option.bound || ''}|${option.service_type || '1'}|${etaDisplayIdentity(option.nextEta)}`}
+                                        key={`${option.route}|${option.etaDirection || option.bound || ''}|${option.etaServiceType || option.service_type || '1'}|${etaDisplayIdentity(option.nextEta)}`}
                                         className="flex flex-col items-start gap-0.5"
                                       >
                                         {variantRemark && (
@@ -5099,6 +5221,16 @@ const App = () => {
                                         >
                                           {option.serviceAlerts?.length > 0 ? '\u26A0\uFE0F ' : ''}{variantRemark ? getEtaText(option.nextEta) : `${option.route}: ${getEtaText(option.nextEta)}`}
                                         </span>
+                                        {specialRemark && (
+                                          <span className="max-w-[220px] rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-blue-700">
+                                            {specialRemark}
+                                          </span>
+                                        )}
+                                        {officialRemark && officialRemark !== specialRemark && (
+                                          <span className="max-w-[220px] text-[9px] font-semibold leading-tight text-slate-500">
+                                            {officialRemark}
+                                          </span>
+                                        )}
                                       </div>
                                     );
                                   })}
