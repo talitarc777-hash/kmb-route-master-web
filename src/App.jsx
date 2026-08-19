@@ -649,21 +649,18 @@ function kmbEtaRemark(eta) {
   return String(eta?.rmk_en || eta?.rmk_tc || eta?.rmk_sc || '').trim() || null;
 }
 
-function specialTripStopNames(stops = [], fallbackStopIds = []) {
-  const names = stops.map((stop) => (
-    String(stop?.nameEn || stop?.nameTc || stop?.id || '').trim()
+function specialTripStopNames(stops = []) {
+  return stops.map((stop) => (
+    String(stop?.nameTc || stop?.nameSc || '').trim()
   )).filter(Boolean);
-  return names.length > 0
-    ? names
-    : (Array.isArray(fallbackStopIds) ? fallbackStopIds : []);
 }
 
 const SpecialTripBadge = ({ info, officialRemark = null }) => {
   const [isOpen, setIsOpen] = useState(false);
   if (!info?.isSpecialTrip) return null;
 
-  const passedStops = specialTripStopNames(info.addedStops, info.addedStopIds);
-  const skippedStops = specialTripStopNames(info.skippedStops, info.skippedStopIds);
+  const passedStops = specialTripStopNames(info.addedStops);
+  const skippedStops = specialTripStopNames(info.skippedStops);
 
   return (
     <>
