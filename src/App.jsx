@@ -25,12 +25,10 @@ import {
 import {
   annotateRoutePassThrough,
   createRoutePassThroughDetector,
-  getBookmarkRoutePassThroughInfo,
 } from './utils/routePassThrough.js';
 import {
   annotateKmbEtaSpecialTrip,
   createKmbSpecialTripDetector,
-  formatKmbSpecialTripInfo,
 } from './utils/kmbSpecialTrips.js';
 
 publishApiBaseUrl();
@@ -647,13 +645,111 @@ function routePassThroughRemark(segment) {
   return segment?.passThroughInfo?.label || null;
 }
 
-function etaSpecialTripRemark(eta) {
-  return formatKmbSpecialTripInfo(eta?.specialTripInfo, 'en') || null;
-}
-
 function kmbEtaRemark(eta) {
   return String(eta?.rmk_en || eta?.rmk_tc || eta?.rmk_sc || '').trim() || null;
 }
+
+function specialTripStopNames(stops = [], fallbackStopIds = []) {
+  const names = stops.map((stop) => (
+    String(stop?.nameEn || stop?.nameTc || stop?.id || '').trim()
+  )).filter(Boolean);
+  return names.length > 0
+    ? names
+    : (Array.isArray(fallbackStopIds) ? fallbackStopIds : []);
+}
+
+const SpecialTripBadge = ({ info, officialRemark = null }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  if (!info?.isSpecialTrip) return null;
+
+  const passedStops = specialTripStopNames(info.addedStops, info.addedStopIds);
+  const skippedStops = specialTripStopNames(info.skippedStops, info.skippedStopIds);
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        title="View special-trip stopping pattern"
+        onKeyDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen(true);
+        }}
+        className="rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-blue-700 hover:bg-blue-100"
+      >
+        Special trip
+      </button>
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Special trip details"
+            className="w-full max-w-sm rounded-2xl bg-white p-5 text-left shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-base font-black text-slate-800">Special trip</div>
+                <div className="mt-1 text-xs font-semibold text-slate-400">
+                  This departure has a different stopping pattern.
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close special trip details"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsOpen(false);
+                }}
+                className="rounded-full bg-slate-100 px-2 py-1 text-sm font-black text-slate-500 hover:bg-slate-200"
+              >
+                {'\u2715'}
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 text-sm">
+              {passedStops.length > 0 && (
+                <div>
+                  <div className="text-xs font-black uppercase tracking-wide text-blue-600">
+                    Passes through
+                  </div>
+                  <div className="mt-1 font-bold text-slate-700">{passedStops.join(', ')}</div>
+                </div>
+              )}
+              {skippedStops.length > 0 && (
+                <div>
+                  <div className="text-xs font-black uppercase tracking-wide text-amber-600">
+                    Skips
+                  </div>
+                  <div className="mt-1 font-bold text-slate-700">{skippedStops.join(', ')}</div>
+                </div>
+              )}
+              {passedStops.length === 0 && skippedStops.length === 0 && (
+                <div className="font-semibold text-slate-600">Different stopping pattern</div>
+              )}
+              {officialRemark && (
+                <div className="border-t border-slate-100 pt-3">
+                  <div className="text-xs font-black uppercase tracking-wide text-slate-400">
+                    KMB remark
+                  </div>
+                  <div className="mt-1 font-semibold text-slate-600">{officialRemark}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 function etaDisplayIdentity(etaValue) {
   if (!etaValue) return 'no-eta';
@@ -1674,25 +1770,14 @@ const CurrentStopEtaList = ({
       {mergeSameVisibleCurrentEtaOptions(options, fallbackStopId, etaMap).map((option) => {
         const etaKey = kmbEtaOptionKey(option, fallbackStopId);
         const currentEtas = etaMap.get(etaKey);
-        const variantRemark = currentEtas?.some((eta) => (
-          eta.specialTripInfo?.addedStopIds?.includes(option.passThroughInfo?.targetStopId)
-        ))
-          ? null
-          : routePassThroughRemark(option);
         return (
           <div key={etaKey} className="flex flex-col items-start gap-0.5">
             <div className="flex flex-wrap items-start gap-1">
               <div className="flex flex-col items-start gap-0.5">
                 <span className="text-[10px] font-black text-slate-600">{option.route}</span>
-                {variantRemark && (
-                  <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
-                    {variantRemark}
-                  </span>
-                )}
               </div>
               {currentEtas?.length > 0 ? (
                 currentEtas.map((eta, etaIndex) => {
-                  const specialRemark = etaSpecialTripRemark(eta);
                   const officialRemark = kmbEtaRemark(eta);
                   return (
                     <div
@@ -1705,12 +1790,11 @@ const CurrentStopEtaList = ({
                       >
                         {getEtaText(eta.eta)}
                       </span>
-                      {specialRemark && (
-                        <span className="max-w-[220px] rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-blue-700">
-                          {specialRemark}
-                        </span>
-                      )}
-                      {officialRemark && officialRemark !== specialRemark && (
+                      <SpecialTripBadge
+                        info={eta.specialTripInfo}
+                        officialRemark={officialRemark}
+                      />
+                      {!eta.specialTripInfo && officialRemark && (
                         <span className="max-w-[220px] text-[9px] font-semibold leading-tight text-slate-500">
                           {officialRemark}
                         </span>
@@ -1790,7 +1874,6 @@ const ServiceAlertNotice = ({ route, detailed = false }) => {
 const BookmarkPanel = ({
   stopMap,
   stopRoutes,
-  passThroughDetector,
   specialTripDetector,
   onClose,
   bookmarks,
@@ -1973,23 +2056,6 @@ const BookmarkPanel = ({
       grouped.get(groupKey).stops.push(stop);
     });
     return Array.from(grouped.values());
-  };
-
-  const getBookmarkPassThroughNotices = (groupedStops = []) => {
-    const notices = new Map();
-    groupedStops.forEach((stop) => {
-      (stop.routes || []).forEach((bookmarkRoute) => {
-        const info = getBookmarkRoutePassThroughInfo(bookmarkRoute, {
-          bookmarkStopId: stop.stopId,
-          stopRoutes,
-          detector: passThroughDetector,
-        });
-        if (!info) return;
-        const route = String(bookmarkRoute.route || '').trim();
-        notices.set(`${route}|${info.stationId}`, { route, ...info });
-      });
-    });
-    return Array.from(notices.values());
   };
 
   const toggleGroupedBookmarkRoute = (
@@ -2183,7 +2249,6 @@ const BookmarkPanel = ({
               const routeOptions = getAvailableRoutesForNamedStation(s.stopId);
               const selectedRoutes = stopGroup.stops.flatMap((stop) => stop.routes || []);
               const selectedRouteNames = new Set(selectedRoutes.map((item) => item.route));
-              const passThroughNotices = getBookmarkPassThroughNotices(stopGroup.stops);
               return (
                 <div
                   key={stopGroup.key || si}
@@ -2217,18 +2282,7 @@ const BookmarkPanel = ({
                             <span className="text-xs text-slate-400">No ETA available now</span>
                           )}
                           {etas.slice(0, 4).map((e, ei) => {
-                            const normalizedEtaRoute = String(e.route || '').trim().toUpperCase();
-                            const specialRemark = etaSpecialTripRemark(e);
                             const officialRemark = kmbEtaRemark(e);
-                            const isFirstRouteEta = etas.findIndex((eta) => (
-                              String(eta.route || '').trim().toUpperCase() === normalizedEtaRoute
-                            )) === ei;
-                            const routeNotices = isFirstRouteEta
-                              ? passThroughNotices.filter((notice) => (
-                                String(notice.route || '').trim().toUpperCase() === normalizedEtaRoute
-                                && !e.specialTripInfo?.addedStopIds?.includes(notice.targetStopId)
-                              ))
-                              : [];
                             return (
                               <div
                                 key={`${e.route}|${e.direction || e.bound || ''}|${e.service_type || '1'}|${e.eta}|${ei}`}
@@ -2239,24 +2293,15 @@ const BookmarkPanel = ({
                                 >
                                   {e.route} {'\u00B7'} {e.waitMin <= 0 ? 'Arriving' : `${e.waitMin}min`}
                                 </span>
-                                {specialRemark && (
-                                  <span className="max-w-[220px] rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-blue-700">
-                                    {specialRemark}
-                                  </span>
-                                )}
-                                {officialRemark && officialRemark !== specialRemark && (
+                                <SpecialTripBadge
+                                  info={e.specialTripInfo}
+                                  officialRemark={officialRemark}
+                                />
+                                {!e.specialTripInfo && officialRemark && (
                                   <span className="max-w-[220px] text-[9px] font-semibold leading-tight text-slate-500">
                                     {officialRemark}
                                   </span>
                                 )}
-                                {routeNotices.map((notice) => (
-                                  <span
-                                    key={`${notice.route}|${notice.stationId}`}
-                                    className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700"
-                                  >
-                                    {notice.label}
-                                  </span>
-                                ))}
                               </div>
                             );
                           })}
@@ -2312,21 +2357,7 @@ const BookmarkPanel = ({
                                 }`}
                                 title={selected ? 'Included in ETA review. Tap to remove.' : 'Excluded from ETA review. Tap to add.'}
                               >
-                                <span className="flex flex-col items-start gap-0.5">
-                                  <span>{route}</span>
-                                  {passThroughNotices
-                                    .filter((notice) => (
-                                      String(notice.route || '').trim().toUpperCase() === route.toUpperCase()
-                                    ))
-                                    .map((notice) => (
-                                      <span
-                                        key={`${notice.route}|${notice.stationId}`}
-                                        className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700"
-                                      >
-                                        {notice.label}
-                                      </span>
-                                    ))}
-                                </span>
+                                {route}
                               </button>
                             );
                           })}
@@ -4781,7 +4812,6 @@ const App = () => {
           <BookmarkPanel
             stopMap={stopMapRef.current}
             stopRoutes={stopRoutesRef.current}
-            passThroughDetector={passThroughDetectorRef.current}
             specialTripDetector={specialTripDetectorRef.current}
             onClose={() => setShowBookmarks(false)}
             bookmarks={bookmarks}
@@ -5186,28 +5216,12 @@ const App = () => {
                               {seg.routeOptions && seg.routeOptions.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 max-w-full sm:max-w-[220px]">
                                   {mergeSameVisibleRouteOptions(seg.routeOptions).map((option) => {
-                                    const specialRemark = etaSpecialTripRemark(option);
                                     const officialRemark = kmbEtaRemark(option.etaRecord);
-                                    const variantRemark = option.specialTripInfo?.addedStopIds?.includes(
-                                      option.passThroughInfo?.targetStopId,
-                                    )
-                                      ? null
-                                      : routePassThroughRemark(option);
                                     return (
                                       <div
                                         key={`${option.route}|${option.etaDirection || option.bound || ''}|${option.etaServiceType || option.service_type || '1'}|${etaDisplayIdentity(option.nextEta)}`}
                                         className="flex flex-col items-start gap-0.5"
                                       >
-                                        {variantRemark && (
-                                          <div className="flex flex-col items-start gap-0.5">
-                                            <span className="text-[10px] font-black leading-none text-slate-600">
-                                              {option.route}
-                                            </span>
-                                            <span className="max-w-[220px] rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-amber-700">
-                                              {variantRemark}
-                                            </span>
-                                          </div>
-                                        )}
                                         <span
                                           className={`text-[10px] leading-none whitespace-nowrap px-2 py-1 rounded-full border ${getEtaChipClass(option.nextEta)} ${option.etaCatchable === false ? 'opacity-40 grayscale' : ''}`}
                                           title={[
@@ -5219,14 +5233,13 @@ const App = () => {
                                               : '',
                                           ].filter(Boolean).join(' · ') || undefined}
                                         >
-                                          {option.serviceAlerts?.length > 0 ? '\u26A0\uFE0F ' : ''}{variantRemark ? getEtaText(option.nextEta) : `${option.route}: ${getEtaText(option.nextEta)}`}
+                                          {option.serviceAlerts?.length > 0 ? '\u26A0\uFE0F ' : ''}{option.route}: {getEtaText(option.nextEta)}
                                         </span>
-                                        {specialRemark && (
-                                          <span className="max-w-[220px] rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold leading-tight text-blue-700">
-                                            {specialRemark}
-                                          </span>
-                                        )}
-                                        {officialRemark && officialRemark !== specialRemark && (
+                                        <SpecialTripBadge
+                                          info={option.specialTripInfo}
+                                          officialRemark={officialRemark}
+                                        />
+                                        {!option.specialTripInfo && officialRemark && (
                                           <span className="max-w-[220px] text-[9px] font-semibold leading-tight text-slate-500">
                                             {officialRemark}
                                           </span>
