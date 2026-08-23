@@ -1824,12 +1824,17 @@ function clampRouteDetailHeight(value) {
   return Math.min(82, Math.max(28, Math.round(value)));
 }
 
-const RouteDetailResizeHandle = ({ height, onPointerDown, onChange }) => (
+const RouteDetailResizeHandle = ({
+  height,
+  onPointerDown,
+  onChange,
+  ariaLabel = 'Resize map and route details',
+}) => (
   <div className="sticky top-0 z-20 -mx-4 -mt-4 mb-3 rounded-t-[2rem] border-b border-slate-100 bg-white/95 px-3 pb-2 pt-2 backdrop-blur">
     <div className="flex items-center justify-center">
       <div
         role="separator"
-        aria-label="Resize map and route details"
+        aria-label={ariaLabel}
         aria-orientation="horizontal"
         aria-valuemin={28}
         aria-valuemax={82}
@@ -2386,6 +2391,7 @@ const App = () => {
   const [isLoadingSelectedEtas, setIsLoadingSelectedEtas] = useState(false);
   const [selectedEtaUpdatedAt, setSelectedEtaUpdatedAt] = useState(null);
   const [routeDetailHeight, setRouteDetailHeight] = useState(48);
+  const [resultsPanelHeight, setResultsPanelHeight] = useState(52);
   const [isLoading, setIsLoading] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(true);
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
@@ -4537,6 +4543,33 @@ const App = () => {
     setRouteDetailHeight(clampRouteDetailHeight(height));
   }, []);
 
+  const startResultsPanelResize = useCallback((event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = resultsPanelHeight;
+
+    const handlePointerMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const viewportHeight = window.innerHeight || 1;
+      const deltaVh = ((startY - moveEvent.clientY) / viewportHeight) * 100;
+      setResultsPanelHeight(clampRouteDetailHeight(startHeight + deltaVh));
+    };
+    const stopResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }, [resultsPanelHeight]);
+
+  const changeResultsPanelHeight = useCallback((height) => {
+    setResultsPanelHeight(clampRouteDetailHeight(height));
+  }, []);
+
   const detailSegments = selectedRoute?.segmentDisplay || selectedRoute?.segments || [];
 
   useEffect(() => {
@@ -4736,7 +4769,7 @@ const App = () => {
       {selectedRoute && !showBookmarks && (
         <form
           onSubmit={drawFullKmbRouteOverlay}
-          className="absolute left-3 right-3 top-[124px] z-30 w-auto rounded-2xl border border-slate-200 bg-white/90 backdrop-blur p-2 shadow-xl sm:left-auto sm:right-3 sm:top-[88px] sm:w-[min(92vw,300px)]"
+          className="absolute left-16 right-2 top-[76px] z-30 w-auto rounded-xl border border-slate-200 bg-white/90 p-1.5 shadow-xl backdrop-blur sm:left-auto sm:right-3 sm:top-[88px] sm:w-[min(92vw,300px)] sm:rounded-2xl sm:p-2"
         >
           <div className="flex items-center gap-2">
             <input
@@ -4748,12 +4781,12 @@ const App = () => {
                 setOverlayFeedback(null);
               }}
               placeholder="Bus route"
-              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black uppercase text-slate-700 outline-none focus:border-[#E1251B]"
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-black uppercase text-slate-700 outline-none focus:border-[#E1251B] sm:rounded-xl sm:px-3 sm:py-2"
             />
             <button
               type="submit"
               disabled={isOverlayLoading || !overlayRouteNumber.trim()}
-              className="shrink-0 rounded-xl bg-[#E1251B] px-3 py-2 text-xs font-black text-white shadow-sm disabled:opacity-50"
+              className="shrink-0 rounded-lg bg-[#E1251B] px-2 py-1.5 text-xs font-black text-white shadow-sm disabled:opacity-50 sm:rounded-xl sm:px-3 sm:py-2"
               title="Show full route transparently on map"
             >
               {isOverlayLoading ? '...' : 'View'}
@@ -4761,13 +4794,13 @@ const App = () => {
             <button
               type="button"
               onClick={clearRouteOverlay}
-              className="shrink-0 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-black text-slate-500"
+              className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-black text-slate-500 sm:rounded-xl sm:py-2"
               title="Clear full-route overlay"
             >
               Clear
             </button>
           </div>
-          <div className={'mt-2 flex items-center justify-between gap-2 px-1'}>
+          <div className={'mt-1 flex items-center justify-between gap-2 px-1 sm:mt-2'}>
             <span className={'text-[10px] font-black uppercase tracking-wide text-slate-400'}>
               Direction {isOverlayDirectionManual ? '(manual)' : '(auto)'}
             </span>
@@ -4820,10 +4853,17 @@ const App = () => {
       {/* Results panel */}
       {results.length > 0 && !selectedRoute && !showBookmarks && (
         <div
-          className={`safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 bg-white p-3 sm:p-4 rounded-t-[2rem] shadow-2xl scrollbar-hide slide-up flex flex-col ${
-            isResultsMinimized ? 'max-h-[110px] overflow-hidden' : 'max-h-[75dvh] md:max-h-[60vh] overflow-y-auto'
-          }`}
+          className="safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 flex flex-col overflow-hidden rounded-t-[2rem] bg-white p-3 shadow-2xl scrollbar-hide slide-up sm:p-4"
+          style={{
+            height: isResultsMinimized ? '110px' : `${resultsPanelHeight}vh`,
+          }}
         >
+          <RouteDetailResizeHandle
+            height={resultsPanelHeight}
+            onPointerDown={startResultsPanelResize}
+            onChange={changeResultsPanelHeight}
+            ariaLabel="Resize map and route results"
+          />
           <div className="mb-3 shrink-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
