@@ -649,6 +649,18 @@ function kmbEtaRemark(eta) {
   return String(eta?.rmk_en || eta?.rmk_tc || eta?.rmk_sc || '').trim() || null;
 }
 
+function compareBookmarkEtaArrival(left, right) {
+  const leftTime = new Date(left?.eta).getTime();
+  const rightTime = new Date(right?.eta).getTime();
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) {
+    return Number.isFinite(leftTime) ? -1 : 1;
+  }
+  return Number(left?.eta_seq || 0) - Number(right?.eta_seq || 0);
+}
+
 function specialTripStopNames(stops = []) {
   return stops.map((stop) => (
     String(stop?.nameTc || stop?.nameSc || '').trim()
@@ -2245,7 +2257,7 @@ const BookmarkPanel = ({
                     eta.service_type || '1',
                     eta.eta,
                   ].join('|'), eta]),
-              ).values()).sort((a, b) => a.waitMin - b.waitMin);
+              ).values()).sort(compareBookmarkEtaArrival);
               const stopKey = `${gi}|${stopGroup.key}`;
               const isExpanded = expandedStopKey === stopKey;
               const routeOptions = getAvailableRoutesForNamedStation(s.stopId);

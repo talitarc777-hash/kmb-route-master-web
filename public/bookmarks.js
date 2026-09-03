@@ -95,6 +95,18 @@ function updateStopRoutes(bookmarks, groupIndex, stopId, routes) {
 // ETA FETCHING FOR BOOKMARKS
 // ─────────────────────────────────────────────────────────────────────
 
+function compareEtaArrival(left, right) {
+    const leftTime = new Date(left?.eta).getTime();
+    const rightTime = new Date(right?.eta).getTime();
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+        return leftTime - rightTime;
+    }
+    if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) {
+        return Number.isFinite(leftTime) ? -1 : 1;
+    }
+    return Number(left?.eta_seq || 0) - Number(right?.eta_seq || 0);
+}
+
 async function fetchStopETAs(stopId, routes) {
     const results = await Promise.all(
         routes.map(async ({
@@ -120,6 +132,7 @@ async function fetchStopETAs(stopId, routes) {
                 const now = new Date();
                 const upcoming = (data.data || [])
                     .filter(e => e.eta && new Date(e.eta) > now)
+                    .sort(compareEtaArrival)
                     .slice(0, 3)
                     .map(e => {
                         const waitMs = new Date(e.eta) - now;
@@ -145,7 +158,7 @@ async function fetchStopETAs(stopId, routes) {
             }
         })
     );
-    return results.flat().sort((a, b) => a.waitMin - b.waitMin);
+    return results.flat().sort(compareEtaArrival);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -183,6 +196,7 @@ window.bookmarkEngine = {
     addStop,
     removeStop,
     updateStopRoutes,
+    compareEtaArrival,
     fetchStopETAs,
     refreshBookmarkETAs,
 };

@@ -244,3 +244,49 @@ test('bookmark realtime ETA preserves the individual arrival service type for an
     'Special trip · via Shek Po Tsuen',
   );
 });
+
+test('bookmark ETA order uses exact arrival timestamps when rounded minutes are equal', async () => {
+  const now = Date.now();
+  const laterNormalEta = new Date(now + 5 * 60_000 + 20_000).toISOString();
+  const earlierSpecialEta = new Date(now + 4 * 60_000 + 40_000).toISOString();
+  const context = {
+    console,
+    localStorage: {
+      getItem: () => null,
+      setItem: () => {},
+    },
+    fetch: async (url) => ({
+      json: async () => ({
+        data: String(url).includes('/69X/2?')
+          ? [{
+              route: '69X',
+              dir: 'O',
+              service_type: 2,
+              eta: earlierSpecialEta,
+              eta_seq: 1,
+            }]
+          : [{
+              route: '69X',
+              dir: 'O',
+              service_type: 1,
+              eta: laterNormalEta,
+              eta_seq: 1,
+            }],
+      }),
+    }),
+    window: {},
+  };
+  vm.createContext(context);
+  vm.runInContext(bookmarkEngineSource, context, { filename: 'bookmarks.js' });
+
+  const etas = await context.window.bookmarkEngine.fetchStopETAs('STOP', [
+    { route: '69X', bound: 'O', service_type: '1' },
+    { route: '69X', bound: 'O', service_type: '2' },
+  ]);
+
+  assert.equal(etas[0].service_type, '2');
+  assert.equal(etas[0].eta, earlierSpecialEta);
+  assert.equal(etas[1].service_type, '1');
+  assert.equal(etas[1].eta, laterNormalEta);
+  assert.equal(etas[0].waitMin, etas[1].waitMin);
+});
