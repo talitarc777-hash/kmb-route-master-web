@@ -30,6 +30,7 @@ import {
   annotateKmbEtaSpecialTrip,
   createKmbSpecialTripDetector,
 } from './utils/kmbSpecialTrips.js';
+import { selectVisibleBookmarkEtas } from './utils/bookmarkEtaDisplay.js';
 
 publishApiBaseUrl();
 
@@ -2295,7 +2296,7 @@ const BookmarkPanel = ({
                           {hasEtaData && etas.length === 0 && (
                             <span className="text-xs text-slate-400">No ETA available now</span>
                           )}
-                          {etas.slice(0, 4).map((e, ei) => {
+                          {selectVisibleBookmarkEtas(etas).map((e, ei) => {
                             const officialRemark = kmbEtaRemark(e);
                             return (
                               <div

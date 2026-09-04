@@ -10,6 +10,7 @@ import {
   diffKmbStopSequences,
   formatKmbSpecialTripInfo,
 } from '../src/utils/kmbSpecialTrips.js';
+import { selectVisibleBookmarkEtas } from '../src/utils/bookmarkEtaDisplay.js';
 
 const bookmarkEngineSource = await readFile(
   new URL('../public/bookmarks.js', import.meta.url),
@@ -289,4 +290,22 @@ test('bookmark ETA order uses exact arrival timestamps when rounded minutes are 
   assert.equal(etas[1].service_type, '1');
   assert.equal(etas[1].eta, laterNormalEta);
   assert.equal(etas[0].waitMin, etas[1].waitMin);
+});
+
+test('bookmark ETA display keeps the first six plus every additional bus within one minute', () => {
+  const etas = [
+    { id: '1', waitMin: 0 },
+    { id: '2', waitMin: 0 },
+    { id: '3', waitMin: 1 },
+    { id: '4', waitMin: 1 },
+    { id: '5', waitMin: 1 },
+    { id: '6', waitMin: 1 },
+    { id: '7', waitMin: 1 },
+    { id: '8', waitMin: 2 },
+  ];
+
+  assert.deepEqual(
+    selectVisibleBookmarkEtas(etas).map((eta) => eta.id),
+    ['1', '2', '3', '4', '5', '6', '7'],
+  );
 });
