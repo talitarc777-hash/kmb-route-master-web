@@ -47,7 +47,7 @@ const ROUTE_COLORS = [
 
 const PERSISTENT_CACHE_LIMIT = 200;
 const PLANNED_SEARCH_CACHE_LIMIT = 16;
-const GPS_LOCATION_MAP_SCALE = 300;
+const GPS_LOCATION_MAP_SCALE = 1000;
 const GCP_GEOCODE_CACHE_KEY = 'kmb_gcp_geocode_cache_v1';
 const GCP_TRANSIT_GAP_CACHE_KEY = 'kmb_gcp_transit_gap_cache_v1';
 const STATIC_OPERATOR_FARE_CACHE_KEY = 'kmb_static_operator_fare_cache_v1';
@@ -4514,19 +4514,35 @@ const App = () => {
   };
 
   useEffect(() => {
-    mapGpsActionRef.current = selectedRoute
-      ? handleLocateSelectedRoute
-      : handleUseCurrentLocation;
+    mapGpsActionRef.current = () => {
+      const currentLocation = currentLocationRef.current;
+      if (isGpsTimingEnabled) {
+        if (currentLocation) {
+          zoomToLocation(currentLocation.lat, currentLocation.lng);
+        }
+        stopGpsTracking();
+        return;
+      }
+      if (selectedRoute) handleLocateSelectedRoute();
+      else handleUseCurrentLocation();
+    };
     const button = mapGpsButtonRef.current;
     if (!button) return;
     const label = isGpsTimingEnabled
-      ? 'Stop live GPS updates'
+      ? 'Recenter map and stop live GPS updates'
       : 'Show my current GPS location';
     button.disabled = isLocating;
     button.title = label;
     button.setAttribute('aria-label', label);
     button.textContent = isLocating ? '\u21BB' : isGpsTimingEnabled ? '\u25C9' : '\u{1F4CD}';
-  }, [isGpsTimingEnabled, isLocating, mapLoaded, selectedRoute]);
+  }, [
+    isGpsTimingEnabled,
+    isLocating,
+    mapLoaded,
+    selectedRoute,
+    stopGpsTracking,
+    zoomToLocation,
+  ]);
 
   const startRouteDetailResize = useCallback((event) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
