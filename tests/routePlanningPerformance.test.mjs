@@ -113,6 +113,116 @@ function directFixture() {
   };
 }
 
+test('advanced search expands every walking radius to the 15-minute equivalent', () => {
+  const engine = loadEngine(async (url) => {
+    throw new Error('Unexpected network request: ' + url);
+  });
+
+  const normal = engine.getWalkingSearchLimits(false);
+  assert.equal(normal.accessRadiusKm, 0.6);
+  assert.equal(normal.transferRadiusKm, 0.6);
+  assert.equal(normal.walkingMinutes, null);
+
+  const advanced = engine.getWalkingSearchLimits(true);
+  assert.equal(advanced.accessRadiusKm, 1);
+  assert.equal(advanced.transferRadiusKm, 1);
+  assert.equal(advanced.walkingMinutes, 15);
+});
+
+test('advanced search finds a route whose first stop is beyond the normal walking radius', async () => {
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    if (value.includes('/eta/')) return jsonResponse({ data: [] });
+    if (value.includes('/api/google/')) return jsonResponse({ status: 'ZERO_RESULTS', routes: [] });
+    if (value.includes('kmb_operation_time_slots')) return jsonResponse({ route_stops: {}, routes: {} });
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const route = { route: '15', bound: 'I', service_type: '1' };
+  const fixture = {
+    originLoc: { lat: 22.3000, lng: 114.1000 },
+    destLoc: { lat: 22.3200, lng: 114.1000 },
+    stopMap: {
+      A: { lat: 22.3072, lng: 114.1000, name_en: 'Extended origin stop' },
+      D: { lat: 22.3200, lng: 114.1000, name_en: 'Destination' },
+    },
+    routeMap: { '15|I|1': { ...route, co: 'KMB', freq: '10' } },
+    routeStops: { '15|I|1': ['A', 'D'] },
+    stopRoutes: {
+      A: [{ ...route, seq: 1 }],
+      D: [{ ...route, seq: 2 }],
+    },
+    timeMode: 'now',
+    dateValue: '',
+    timeValue: '',
+    excludedRoutesText: '',
+    strictEtaOnly: false,
+    allowSparseHistoricalFallback: false,
+  };
+
+  await assert.rejects(
+    engine.findRoutes(fixture),
+    /No bus stops within 600m of origin/,
+  );
+
+  const result = await engine.findRoutes({ ...fixture, advancedSearch: true });
+  assert.equal(result.filteredCandidates.length, 1);
+  assert.equal(result.filteredCandidates[0].segments[0].route, '15');
+  assert.equal(result.debugSummary.accessWalkRadiusKm, 1);
+});
+
+test('advanced search applies the 15-minute radius between transfer stops', async () => {
+  const engine = loadEngine(async (url) => {
+    const value = String(url);
+    if (value.includes('/eta/')) return jsonResponse({ data: [] });
+    if (value.includes('/api/google/')) return jsonResponse({ status: 'ZERO_RESULTS', routes: [] });
+    if (value.includes('kmb_operation_time_slots')) return jsonResponse({ route_stops: {}, routes: {} });
+    throw new Error('Unexpected network request: ' + url);
+  });
+  const first = { route: 'A', bound: 'I', service_type: '1' };
+  const second = { route: 'B', bound: 'I', service_type: '1' };
+  const fixture = {
+    originLoc: { lat: 22.3000, lng: 114.1000 },
+    destLoc: { lat: 22.3272, lng: 114.1000 },
+    stopMap: {
+      O: { lat: 22.3000, lng: 114.1000, name_en: 'Origin' },
+      A1: { lat: 22.3100, lng: 114.1000, name_en: 'First route alight' },
+      B1: { lat: 22.3172, lng: 114.1000, name_en: 'Second route board' },
+      D: { lat: 22.3272, lng: 114.1000, name_en: 'Destination' },
+    },
+    routeMap: {
+      'A|I|1': { ...first, co: 'KMB', freq: '10' },
+      'B|I|1': { ...second, co: 'KMB', freq: '10' },
+    },
+    routeStops: {
+      'A|I|1': ['O', 'A1'],
+      'B|I|1': ['B1', 'D'],
+    },
+    stopRoutes: {
+      O: [{ ...first, seq: 1 }],
+      A1: [{ ...first, seq: 2 }],
+      B1: [{ ...second, seq: 1 }],
+      D: [{ ...second, seq: 2 }],
+    },
+    timeMode: 'now',
+    dateValue: '',
+    timeValue: '',
+    excludedRoutesText: '',
+    strictEtaOnly: false,
+    allowSparseHistoricalFallback: false,
+  };
+
+  const normal = await engine.findRoutes(fixture);
+  assert.equal(normal.filteredCandidates.length, 0);
+
+  const advanced = await engine.findRoutes({ ...fixture, advancedSearch: true });
+  assert.equal(advanced.filteredCandidates.length, 1);
+  assert.equal(
+    advanced.filteredCandidates[0].segments.map((segment) => segment.route).join(' -> '),
+    'A -> B',
+  );
+  assert.equal(advanced.debugSummary.transferWalkRadiusKm, 1);
+});
+
 test('deduplicates concurrent and fresh sequential ETA requests for 30 seconds', async () => {
   let etaRequests = 0;
   const engine = loadEngine(async (url) => {

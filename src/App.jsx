@@ -512,6 +512,7 @@ function buildSearchCacheKey({
   excludedRoutesText,
   allowFallbackNonKmb,
   strictEtaOnly,
+  advancedSearch,
 }) {
   return JSON.stringify({
     origin: [originLoc.lat.toFixed(6), originLoc.lng.toFixed(6)],
@@ -522,6 +523,7 @@ function buildSearchCacheKey({
     excludedRoutesText: (excludedRoutesText || '').trim().toUpperCase(),
     allowFallbackNonKmb: Boolean(allowFallbackNonKmb),
     strictEtaOnly: Boolean(strictEtaOnly),
+    advancedSearch: Boolean(advancedSearch),
   });
 }
 
@@ -2423,6 +2425,7 @@ const App = () => {
   const [excludedRoutesText, setExcludedRoutesText] = useState('');
   const [strictEtaOnly, setStrictEtaOnly] = useState(true);
   const [allowFallbackNonKmb, setAllowFallbackNonKmb] = useState(false);
+  const [advancedSearch, setAdvancedSearch] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isGpsTimingEnabled, setIsGpsTimingEnabled] = useState(false);
   const [isResultsMinimized, setIsResultsMinimized] = useState(false);
@@ -3463,6 +3466,7 @@ const App = () => {
     const isCurrentSearch = () => searchRequestTrackerRef.current.isCurrent(searchRequestId);
     const searchAllowFallback = overrides.allowFallbackNonKmb ?? allowFallbackNonKmb;
     const searchStrictEtaOnly = overrides.strictEtaOnly ?? strictEtaOnly;
+    const searchAdvanced = overrides.advancedSearch ?? advancedSearch;
     const preserveExistingResults = Boolean(overrides.preserveExistingResults);
     setIsLoading(true);
     setSearchError(null);
@@ -3490,6 +3494,7 @@ const App = () => {
         excludedRoutesText,
         allowFallbackNonKmb: searchAllowFallback,
         strictEtaOnly: searchStrictEtaOnly,
+        advancedSearch: searchAdvanced,
       });
       const canReusePlannedSearch = timeMode !== 'now';
       const cachedSearch = canReusePlannedSearch
@@ -3518,6 +3523,7 @@ const App = () => {
           excludedRoutesText,
           strictEtaOnly: searchAllowFallback ? false : searchStrictEtaOnly,
           allowSparseHistoricalFallback: timeMode !== 'now',
+          advancedSearch: searchAdvanced,
           useGoogleRefinement: searchAllowFallback,
           // Use Google only as a bounded KMB ride-time reference.  It does not
           // add Citybus/Google alternatives unless the user enables that
@@ -4762,6 +4768,28 @@ const App = () => {
                 </span>
               </span>
             </label>
+            <button
+              type="button"
+              aria-pressed={advancedSearch}
+              onClick={() => setAdvancedSearch((enabled) => !enabled)}
+              className={`w-full rounded-2xl border p-3 text-left transition ${
+                advancedSearch
+                  ? 'border-amber-400 bg-amber-50 text-amber-950 shadow-sm'
+                  : 'border-slate-200 bg-white/90 text-slate-600 hover:border-amber-300'
+              }`}
+            >
+              <span className="flex items-center justify-between gap-3">
+                <span className="text-xs font-black uppercase tracking-wide">Advanced search</span>
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${
+                  advancedSearch ? 'bg-amber-400 text-amber-950' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {advancedSearch ? 'On' : 'Off'}
+                </span>
+              </span>
+              <span className="mt-1 block text-[11px] font-semibold leading-snug opacity-75">
+                Allow a 15-minute walk to first, transfer, and destination stops for more options.
+              </span>
+            </button>
             <button
               type="submit"
               disabled={isLoading || !dataLoaded}

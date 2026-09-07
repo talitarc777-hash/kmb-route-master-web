@@ -3,8 +3,8 @@
  *
  * Algorithm:
  *  1. Build a spatial grid of all stops (O(1) neighbor lookups)
- *  2. Build ORIGIN SET from routes departing within 600m of the origin
- *  3. Build DEST SET from routes arriving within 600m of the destination
+ *  2. Build ORIGIN SET from routes departing within the selected walking radius
+ *  3. Build DEST SET from routes arriving within the selected walking radius
  *  4. Find direct routes from the intersection of those sets
  *  5. For one transfer, scan forward stops on each origin route;
  *                        check the spatial grid for dest-set routes nearby
@@ -19,6 +19,9 @@
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 const WALK_RADIUS_KM = 0.6;   // walk from origin/dest to bus stop
 const TRANSFER_WALK_KM = 0.6;   // walk between transfer stops
+const WALK_SPEED_KMH = 4;
+const ADVANCED_WALK_MINUTES = 15;
+const ADVANCED_WALK_RADIUS_KM = WALK_SPEED_KMH * ADVANCED_WALK_MINUTES / 60;
 const MAX_FINAL = 30;
 const MAX_NETWORK_CANDIDATES = 120;
 const RIDE_MIN_PER_STOP = 1.5;  // minutes per bus stop
@@ -172,7 +175,7 @@ function getFallbackRoute(lat1, lng1, lat2, lng2, mode) {
     const d = haversine(lat1, lng1, lat2, lng2);
     return {
         distance: d * 1000,
-        duration: Math.ceil(d / (mode === 'walking' ? 4 : 30) * 60),
+        duration: Math.ceil(d / (mode === 'walking' ? WALK_SPEED_KMH : 30) * 60),
         geometry: [[lng1, lat1], [lng2, lat2]],
         source: 'straight_line_fallback',
     };
@@ -242,6 +245,21 @@ function getGcpCachedValue(cacheKey) {
     REQUEST_STATS.gcpCacheHits += 1;
     REQUEST_STATS.duplicateRequestsPrevented += 1;
     return resolved;
+}
+
+function getWalkingSearchLimits(advancedSearch = false) {
+    if (advancedSearch) {
+        return {
+            accessRadiusKm: ADVANCED_WALK_RADIUS_KM,
+            transferRadiusKm: ADVANCED_WALK_RADIUS_KM,
+            walkingMinutes: ADVANCED_WALK_MINUTES,
+        };
+    }
+    return {
+        accessRadiusKm: WALK_RADIUS_KM,
+        transferRadiusKm: TRANSFER_WALK_KM,
+        walkingMinutes: null,
+    };
 }
 
 function setGcpCachedValue(cacheKey, value, ttlMs = GCP_CACHE_TTL_MS) {
@@ -1902,6 +1920,7 @@ function findTwoTransferCandidates({
     destLoc,
     grid,
     dedupSeen,
+    transferRadiusKm = TRANSFER_WALK_KM,
 }) {
     const candidates = [];
 
@@ -1920,7 +1939,7 @@ function findTwoTransferCandidates({
                     grid,
                     firstOutStop.lat,
                     firstOutStop.lng,
-                    TRANSFER_WALK_KM
+                    transferRadiusKm
                 ).slice(0, 4);
 
                 for (const middleBoardStop of firstBoardingStops) {
@@ -1952,7 +1971,7 @@ function findTwoTransferCandidates({
                                 grid,
                                 middleOutStop.lat,
                                 middleOutStop.lng,
-                                TRANSFER_WALK_KM
+                                transferRadiusKm
                             ).slice(0, 4);
 
                             for (const finalBoardStop of finalBoardingStops) {
@@ -2033,7 +2052,7 @@ function findTwoTransferCandidates({
 }
 
 async function findRoutes(params) {
-    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, currentLocation = null, useGoogleRefinement = false, useGoogleRideTimeReference = false, onProgress } = params;
+    const { originLoc, destLoc, stopMap, routeMap, routeStops, stopRoutes, timeMode, dateValue, timeValue, excludedRoutesText, strictEtaOnly = true, allowSparseHistoricalFallback = false, currentLocation = null, useGoogleRefinement = false, useGoogleRideTimeReference = false, advancedSearch = false, onProgress } = params;
     const planningStartedAt = Date.now();
     const now = new Date();
     const requestStatsBefore = requestStatsSnapshot();
@@ -2063,13 +2082,16 @@ async function findRoutes(params) {
             .filter(r => r.length > 0)
     );
 
-    // Find nearby stops (within 600m)
-    onProgress?.('Locating nearby bus stops...');
-    const originStops = nearbyFromGrid(grid, originLoc.lat, originLoc.lng, WALK_RADIUS_KM);
-    const destStops = nearbyFromGrid(grid, destLoc.lat, destLoc.lng, WALK_RADIUS_KM);
+    const walkingSearchLimits = getWalkingSearchLimits(advancedSearch);
+    const { accessRadiusKm, transferRadiusKm } = walkingSearchLimits;
 
-    if (originStops.length === 0) throw new Error(`No bus stops within ${WALK_RADIUS_KM * 1000}m of origin`);
-    if (destStops.length === 0) throw new Error(`No bus stops within ${WALK_RADIUS_KM * 1000}m of destination`);
+    // Find nearby origin and destination stops using the selected walking limit.
+    onProgress?.('Locating nearby bus stops...');
+    const originStops = nearbyFromGrid(grid, originLoc.lat, originLoc.lng, accessRadiusKm);
+    const destStops = nearbyFromGrid(grid, destLoc.lat, destLoc.lng, accessRadiusKm);
+
+    if (originStops.length === 0) throw new Error(`No bus stops within ${accessRadiusKm * 1000}m of origin`);
+    if (destStops.length === 0) throw new Error(`No bus stops within ${accessRadiusKm * 1000}m of destination`);
 
     onProgress?.('Building route index...');
 
@@ -2196,7 +2218,7 @@ async function findRoutes(params) {
             if (!transferStop) continue;
 
             // Find nearby stops ??use grid for speed
-            const nearby = nearbyFromGrid(grid, transferStop.lat, transferStop.lng, TRANSFER_WALK_KM);
+            const nearby = nearbyFromGrid(grid, transferStop.lat, transferStop.lng, transferRadiusKm);
 
             for (const nb of nearby) {
                 // Check if this nearby stop is a valid boarding point for any dest-set route
@@ -2285,6 +2307,7 @@ async function findRoutes(params) {
             destLoc,
             grid,
             dedupSeen,
+            transferRadiusKm,
         }));
     }
 
@@ -2435,6 +2458,9 @@ async function findRoutes(params) {
         googleRideCandidatesRefined,
         googleWalkingUniqueLegs: googleWalkingSummary.uniqueLegCount,
         googleWalkingFallbacks: googleWalkingSummary.fallbackCount,
+        advancedSearch: Boolean(advancedSearch),
+        accessWalkRadiusKm: accessRadiusKm,
+        transferWalkRadiusKm: transferRadiusKm,
         candidatesAfterEarlyFilter: networkCandidates.length,
         candidatesAfterServiceValidation: filteredCandidates.length,
         finalCandidateCount: finalCandidates.length,
@@ -2461,6 +2487,7 @@ function getLastPlanningDebugSummary() {
 // ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 window.routeEngine = {
     findRoutes,
+    getWalkingSearchLimits,
     fetchETA,
     fetchGCPRoute,
     clearETACache,
