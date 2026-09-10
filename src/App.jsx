@@ -2137,7 +2137,7 @@ const BookmarkPanel = ({
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex min-h-0 h-full flex-col">
       <div className="mb-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -2196,7 +2196,7 @@ const BookmarkPanel = ({
         </div>
       )}
 
-      <div className="space-y-4 overflow-y-auto flex-1 scrollbar-hide">
+      <div className="min-h-0 space-y-4 overflow-y-auto flex-1 scrollbar-hide">
         {bookmarks.map((group, gi) => (
           <div key={gi} className="bg-slate-50 rounded-2xl border border-slate-100 p-3">
             {/* Group header */}
@@ -2407,6 +2407,7 @@ const App = () => {
   const [selectedEtaUpdatedAt, setSelectedEtaUpdatedAt] = useState(null);
   const [routeDetailHeight, setRouteDetailHeight] = useState(48);
   const [resultsPanelHeight, setResultsPanelHeight] = useState(52);
+  const [bookmarksPanelHeight, setBookmarksPanelHeight] = useState(52);
   const [isLoading, setIsLoading] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(true);
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
@@ -4605,6 +4606,33 @@ const App = () => {
     setResultsPanelHeight(clampRouteDetailHeight(height));
   }, []);
 
+  const startBookmarksPanelResize = useCallback((event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = bookmarksPanelHeight;
+
+    const handlePointerMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const viewportHeight = window.innerHeight || 1;
+      const deltaVh = ((startY - moveEvent.clientY) / viewportHeight) * 100;
+      setBookmarksPanelHeight(clampRouteDetailHeight(startHeight + deltaVh));
+    };
+    const stopResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }, [bookmarksPanelHeight]);
+
+  const changeBookmarksPanelHeight = useCallback((height) => {
+    setBookmarksPanelHeight(clampRouteDetailHeight(height));
+  }, []);
+
   const detailSegments = selectedRoute?.segmentDisplay || selectedRoute?.segments || [];
 
   useEffect(() => {
@@ -4895,15 +4923,26 @@ const App = () => {
 
       {/* Bookmark panel */}
       {showBookmarks && (
-        <div className="safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 bg-white p-3 sm:p-4 rounded-t-[2rem] shadow-2xl max-h-[70dvh] sm:max-h-[60vh] overflow-y-auto scrollbar-hide slide-up">
-          <BookmarkPanel
-            stopMap={stopMapRef.current}
-            stopRoutes={stopRoutesRef.current}
-            specialTripDetector={specialTripDetectorRef.current}
-            onClose={() => setShowBookmarks(false)}
-            bookmarks={bookmarks}
-            setBookmarks={setBookmarks}
+        <div
+          className="safe-bottom-panel absolute bottom-0 left-0 right-0 z-20 flex flex-col overflow-hidden rounded-t-[2rem] bg-white p-3 shadow-2xl scrollbar-hide slide-up sm:p-4"
+          style={{ height: `${bookmarksPanelHeight}vh` }}
+        >
+          <RouteDetailResizeHandle
+            height={bookmarksPanelHeight}
+            onPointerDown={startBookmarksPanelResize}
+            onChange={changeBookmarksPanelHeight}
+            ariaLabel="Resize bookmarks"
           />
+          <div className="min-h-0 flex-1">
+            <BookmarkPanel
+              stopMap={stopMapRef.current}
+              stopRoutes={stopRoutesRef.current}
+              specialTripDetector={specialTripDetectorRef.current}
+              onClose={() => setShowBookmarks(false)}
+              bookmarks={bookmarks}
+              setBookmarks={setBookmarks}
+            />
+          </div>
         </div>
       )}
 
