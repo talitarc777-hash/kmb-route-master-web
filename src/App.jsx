@@ -31,6 +31,10 @@ import {
   createKmbSpecialTripDetector,
 } from './utils/kmbSpecialTrips.js';
 import { selectVisibleBookmarkEtas } from './utils/bookmarkEtaDisplay.js';
+import {
+  buildRouteResultCards,
+  findMatchingRouteResultCard,
+} from './utils/routeResultCards.js';
 
 publishApiBaseUrl();
 
@@ -2475,6 +2479,7 @@ const App = () => {
   const mapDrawRequestRef = useRef(0);
   const overlayDrawRequestRef = useRef(0);
   const selectedEtaRequestRef = useRef(0);
+  const etaRefreshRequestRef = useRef(0);
   const searchRequestTrackerRef = useRef(null);
   if (!searchRequestTrackerRef.current) {
     searchRequestTrackerRef.current = createLatestRequestTracker();
@@ -2507,118 +2512,91 @@ const App = () => {
     return annotated.routes[0] || annotated.suppressedRoutes[0] || selectedRoute;
   }, [selectedRoute, serviceAlerts]);
 
-  const displayedResultCards = useMemo(() => {
-    const groups = new Map();
-    const cardsByKey = new Map();
-    const orderedKeys = [];
-    for (const route of displayedResults) {
-      if (isFallbackRoute(route)) {
-        const key = route.id || `fallback-${orderedKeys.length}`;
-        cardsByKey.set(key, {
-          key,
-          type: 'fallback',
-          representative: route,
-          segmentDisplay: [],
-        });
-        orderedKeys.push(key);
-        continue;
-      }
-      const stopPattern = (route.segments || [])
-        .map((seg) => `${seg.fromStop}->${seg.toStop}`)
-        .join('|');
-      const groupKey = `${route.transfers}|${stopPattern}`;
-      const isNewGroup = !groups.has(groupKey);
-      if (isNewGroup) groups.set(groupKey, []);
-      groups.get(groupKey).push(route);
-      if (isNewGroup) orderedKeys.push(groupKey);
-    }
-
-    Array.from(groups.entries()).forEach(([groupKey, groupRoutes]) => {
-      const sortedRoutes = [...groupRoutes].sort(
-        (a, b) => estimatedTimeForRanking(a) - estimatedTimeForRanking(b),
-      );
-      const representative = sortedRoutes[0];
-      const segmentDisplay = (representative.segments || []).map((seg, si) => {
-        const routeOptionMap = new Map();
-        sortedRoutes.forEach((routeCandidate) => {
-          const candidateSeg = (routeCandidate.segments || [])[si];
-          if (!candidateSeg?.route) return;
-          const optionKey = `${candidateSeg.route}|${candidateSeg.bound || ''}|${candidateSeg.service_type || '1'}`;
-          const rawCandidateEta = candidateSeg.nextEta ? new Date(candidateSeg.nextEta) : null;
-          const readyTime = candidateSeg.readyTime ? new Date(candidateSeg.readyTime) : null;
-          const candidateEta = rawCandidateEta &&
-            (!readyTime || Number.isNaN(readyTime.getTime()) || rawCandidateEta >= readyTime)
-            ? rawCandidateEta
-            : null;
-          const previous = routeOptionMap.get(optionKey);
-          const optionAlerts = (routeCandidate.serviceAlerts || []).filter(
-            (alert) => alert.routeCode === String(candidateSeg.route).trim().toUpperCase(),
-          );
-          const etaVariantFallback = {
+  const buildResultCardSegmentDisplay = useCallback((sortedRoutes) => {
+    const representative = sortedRoutes[0];
+    return (representative?.segments || []).map((seg, si) => {
+      const routeOptionMap = new Map();
+      sortedRoutes.forEach((routeCandidate) => {
+        const candidateSeg = (routeCandidate.segments || [])[si];
+        if (!candidateSeg?.route) return;
+        const optionKey = `${candidateSeg.route}|${candidateSeg.bound || ''}|${candidateSeg.service_type || '1'}`;
+        const rawCandidateEta = candidateSeg.nextEta ? new Date(candidateSeg.nextEta) : null;
+        const readyTime = candidateSeg.readyTime ? new Date(candidateSeg.readyTime) : null;
+        const candidateEta = rawCandidateEta &&
+          (!readyTime || Number.isNaN(readyTime.getTime()) || rawCandidateEta >= readyTime)
+          ? rawCandidateEta
+          : null;
+        const previous = routeOptionMap.get(optionKey);
+        const optionAlerts = (routeCandidate.serviceAlerts || []).filter(
+          (alert) => alert.routeCode === String(candidateSeg.route).trim().toUpperCase(),
+        );
+        const etaVariantFallback = {
+          operator: 'KMB',
+          route: candidateSeg.route,
+          bound: candidateSeg.bound,
+          service_type: candidateSeg.service_type || '1',
+        };
+        const annotateEtaRows = (rows) => (Array.isArray(rows) ? rows : []).map((eta) => (
+          annotateKmbEtaSpecialTrip(
+            eta,
+            etaVariantFallback,
+            specialTripDetectorRef.current,
+          )
+        ));
+        const shouldReplace =
+          !previous ||
+          (candidateEta && (!previous.nextEta || candidateEta < previous.nextEta));
+        if (shouldReplace) {
+          routeOptionMap.set(optionKey, annotateRoutePassThrough({
             operator: 'KMB',
             route: candidateSeg.route,
             bound: candidateSeg.bound,
             service_type: candidateSeg.service_type || '1',
-          };
-          const annotateEtaRows = (rows) => (Array.isArray(rows) ? rows : []).map((eta) => (
-            annotateKmbEtaSpecialTrip(
-              eta,
-              etaVariantFallback,
-              specialTripDetectorRef.current,
-            )
-          ));
-          const shouldReplace =
-            !previous ||
-            (candidateEta && (!previous.nextEta || candidateEta < previous.nextEta));
-          if (shouldReplace) {
-            routeOptionMap.set(optionKey, annotateRoutePassThrough({
-              operator: 'KMB',
-              route: candidateSeg.route,
-              bound: candidateSeg.bound,
-              service_type: candidateSeg.service_type || '1',
-              routeKey: candidateSeg.routeKey,
-              fromStop: candidateSeg.fromStop,
-              toStop: candidateSeg.toStop,
-              stops: candidateSeg.stops,
-              readyTime: candidateSeg.readyTime || null,
-              nextEta: candidateEta,
-              activeEtas: annotateEtaRows(candidateSeg.activeEtas),
-              catchableEtas: annotateEtaRows(candidateSeg.catchableEtas),
-              displayEtas: annotateEtaRows(candidateSeg.displayEtas),
-              hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
-              busInterval: candidateSeg.busInterval ?? null,
-              serviceAlerts: optionAlerts,
-              serviceAlertSeverity: optionAlerts[0]?.severity || null,
-            }, passThroughDetectorRef.current));
-          }
-        });
-
-        const routeOptions = Array.from(routeOptionMap.values()).sort((a, b) =>
-          a.route.localeCompare(b.route, undefined, { numeric: true, sensitivity: 'base' }),
-        );
-        const routeNames = Array.from(new Set(routeOptions.map((o) => o.route)));
-        const earliestEta = routeOptions
-          .map((o) => o.nextEta)
-          .filter(Boolean)
-          .sort((a, b) => a - b)[0];
-
-        return {
-          ...annotateRoutePassThrough({ ...seg, operator: 'KMB' }, passThroughDetectorRef.current),
-          routeLabel: routeNames.join('/'),
-          routeOptions,
-          nextEta: earliestEta || seg.nextEta,
-        };
+            routeKey: candidateSeg.routeKey,
+            fromStop: candidateSeg.fromStop,
+            toStop: candidateSeg.toStop,
+            stops: candidateSeg.stops,
+            readyTime: candidateSeg.readyTime || null,
+            nextEta: candidateEta,
+            activeEtas: annotateEtaRows(candidateSeg.activeEtas),
+            catchableEtas: annotateEtaRows(candidateSeg.catchableEtas),
+            displayEtas: annotateEtaRows(candidateSeg.displayEtas),
+            hasActiveEta: Boolean(candidateSeg.hasActiveEta ?? candidateSeg.nextEta),
+            busInterval: candidateSeg.busInterval ?? null,
+            serviceAlerts: optionAlerts,
+            serviceAlertSeverity: optionAlerts[0]?.severity || null,
+          }, passThroughDetectorRef.current));
+        }
       });
 
-      cardsByKey.set(groupKey, {
-        key: groupKey,
-        representative,
-        segmentDisplay,
-      });
+      const routeOptions = Array.from(routeOptionMap.values()).sort((a, b) =>
+        a.route.localeCompare(b.route, undefined, { numeric: true, sensitivity: 'base' }),
+      );
+      const routeNames = Array.from(new Set(routeOptions.map((o) => o.route)));
+      const earliestEta = routeOptions
+        .map((o) => o.nextEta)
+        .filter(Boolean)
+        .sort((a, b) => a - b)[0];
+
+      return {
+        ...annotateRoutePassThrough({ ...seg, operator: 'KMB' }, passThroughDetectorRef.current),
+        routeLabel: routeNames.join('/'),
+        routeOptions,
+        nextEta: earliestEta || seg.nextEta,
+      };
     });
+  }, []);
 
-    return orderedKeys.map((key) => cardsByKey.get(key)).filter(Boolean);
-  }, [displayedResults]);
+  const buildResultCards = useCallback((routes) => buildRouteResultCards(routes, {
+    isFallbackRoute,
+    estimatedTimeForRanking,
+    buildSegmentDisplay: buildResultCardSegmentDisplay,
+  }), [buildResultCardSegmentDisplay]);
+
+  const displayedResultCards = useMemo(
+    () => buildResultCards(displayedResults),
+    [buildResultCards, displayedResults],
+  );
 
   const availableFilterRoutes = useMemo(() => {
     return Array.from(
@@ -3462,6 +3440,8 @@ const App = () => {
   const handleSearch = async (e, overrides = {}) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!dataLoaded) return;
+    etaRefreshRequestRef.current += 1;
+    selectedEtaRequestRef.current += 1;
     const searchStartedAt = Date.now();
     const searchRequestId = searchRequestTrackerRef.current.start();
     const isCurrentSearch = () => searchRequestTrackerRef.current.isCurrent(searchRequestId);
@@ -3470,6 +3450,8 @@ const App = () => {
     const searchAdvanced = overrides.advancedSearch ?? advancedSearch;
     const preserveExistingResults = Boolean(overrides.preserveExistingResults);
     setIsLoading(true);
+    setIsRefreshingEta(false);
+    setIsLoadingSelectedEtas(false);
     setSearchError(null);
     setRefreshFeedback(null);
     if (!preserveExistingResults) setResults([]);
@@ -4195,6 +4177,9 @@ const App = () => {
   const handleRefreshEtaSession = useCallback(async () => {
     if (isLoading || isRefreshingEta || results.length === 0) return;
 
+    const refreshRequestId = etaRefreshRequestRef.current + 1;
+    etaRefreshRequestRef.current = refreshRequestId;
+    const isCurrentRefresh = () => etaRefreshRequestRef.current === refreshRequestId;
     setIsRefreshingEta(true);
     setRefreshFeedback({
       type: 'loading',
@@ -4206,12 +4191,14 @@ const App = () => {
       const refreshedResults = (
         await Promise.all(results.map((route) => refreshRouteTiming(route)))
       ).filter(Boolean);
+      if (!isCurrentRefresh()) return;
 
       setResults(refreshedResults);
 
       if (refreshedResults.length === 0) {
         setSelectedRoute(null);
         clearMapGraphics();
+        clearRouteOverlay();
         setRefreshFeedback({
           type: 'error',
           message: 'No catchable routes are available right now.',
@@ -4220,23 +4207,30 @@ const App = () => {
       }
 
       if (selectedRoute) {
-        const latestBaseRoute =
-          refreshedResults.find((route) => route.id === selectedRoute.id) || selectedRoute;
-        const refreshedSelectedRoute = refreshedResults.find(
-          (route) => route.id === selectedRoute.id,
+        const refreshedCards = buildResultCards(refreshedResults);
+        const matchingCard = findMatchingRouteResultCard(
+          refreshedCards,
+          selectedRoute,
+          isFallbackRoute,
         );
 
-        if (!refreshedSelectedRoute) {
+        if (!matchingCard) {
           setSelectedRoute(null);
           clearMapGraphics();
+          clearRouteOverlay();
         } else {
-          setSelectedRoute({
+          const latestBaseRoute = matchingCard.representative;
+          const nextSelectedRoute = {
             ...selectedRoute,
             ...latestBaseRoute,
-            segmentDisplay: isFallbackRoute(latestBaseRoute)
+            segmentDisplay: matchingCard.type === 'fallback'
               ? selectedRoute.segmentDisplay || []
-              : latestBaseRoute.segments || [],
-          });
+              : matchingCard.segmentDisplay,
+          };
+          setSelectedRoute(nextSelectedRoute);
+          if (!isFallbackRoute(nextSelectedRoute) && timeMode === 'now') {
+            loadSelectedCurrentEtas(nextSelectedRoute.segmentDisplay);
+          }
         }
       }
 
@@ -4247,20 +4241,24 @@ const App = () => {
         message: `Updated at ${formatRefreshTime(refreshedAt)}`,
       });
     } catch {
+      if (!isCurrentRefresh()) return;
       setRefreshFeedback({
         type: 'error',
         message: 'Refresh failed. Please try again.',
       });
     } finally {
-      setIsRefreshingEta(false);
+      if (isCurrentRefresh()) setIsRefreshingEta(false);
     }
   }, [
+    buildResultCards,
     formatRefreshTime,
     isLoading,
     isRefreshingEta,
+    loadSelectedCurrentEtas,
     refreshRouteTiming,
     results,
     selectedRoute,
+    timeMode,
   ]);
 
   // Add to bookmark
@@ -5678,10 +5676,7 @@ const App = () => {
                 type="button"
                 onClick={async () => {
                   window.routeEngine?.clearETACache?.();
-                  await Promise.all([
-                    handleRefreshEtaSession(),
-                    loadSelectedCurrentEtas(detailSegments),
-                  ]);
+                  await handleRefreshEtaSession();
                 }}
                 disabled={isLoadingSelectedEtas || isRefreshingEta}
                 className="min-h-11 text-[11px] font-bold text-[#E1251B] border border-[#E1251B]/30 rounded-lg px-3 py-1 hover:bg-[#E1251B]/10 disabled:opacity-50 disabled:cursor-not-allowed"

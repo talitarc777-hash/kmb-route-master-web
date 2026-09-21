@@ -16,12 +16,50 @@ import {
 } from '../src/utils/kmbGeometryCache.js';
 import { normalizeGooglePlaceSuggestions } from '../src/utils/locationSearch.js';
 import {
+  buildRouteResultCards,
+  findMatchingRouteResultCard,
+  routeResultGroupKey,
+} from '../src/utils/routeResultCards.js';
+import {
   headingFromDeviceOrientation,
   normalizeHeading,
   smoothHeading,
 } from '../src/utils/locationHeading.js';
 
 const engineSource = await readFile(new URL('../public/routeEngine.js', import.meta.url), 'utf8');
+
+test('ETA refresh card grouping keeps every bus option and follows a new representative', () => {
+  const route = (id, busNumber, estimatedTime) => ({
+    id,
+    transfers: 1,
+    estimatedTime,
+    segments: [
+      { route: busNumber, fromStop: 'ORIGIN', toStop: 'TRANSFER' },
+      { route: '269C', fromStop: 'TRANSFER', toStop: 'DESTINATION' },
+    ],
+  });
+  const selectedRoute = route('before-refresh-671', '671', 80);
+  const refreshedRoutes = [
+    route('after-refresh-671', '671', 95),
+    route('after-refresh-606', '606', 85),
+  ];
+  const cards = buildRouteResultCards(refreshedRoutes, {
+    isFallbackRoute: () => false,
+    estimatedTimeForRanking: (item) => item.estimatedTime,
+    buildSegmentDisplay: (group) => [{
+      routeOptions: group.map((item) => item.segments[0].route),
+    }],
+  });
+
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].representative.id, 'after-refresh-606');
+  assert.deepEqual(cards[0].segmentDisplay[0].routeOptions, ['606', '671']);
+  assert.equal(routeResultGroupKey(selectedRoute), cards[0].key);
+  assert.equal(
+    findMatchingRouteResultCard(cards, selectedRoute, () => false)?.representative.id,
+    'after-refresh-606',
+  );
+});
 
 test('GPS heading helpers normalize, screen-adjust, and smoothly cross north', () => {
   assert.equal(normalizeHeading(370), 10);
