@@ -19,6 +19,7 @@ import {
   buildRouteResultCards,
   findMatchingRouteResultCard,
   routeResultGroupKey,
+  sortRouteResultCardsByTotalTime,
 } from '../src/utils/routeResultCards.js';
 import {
   headingFromDeviceOrientation,
@@ -59,6 +60,27 @@ test('ETA refresh card grouping keeps every bus option and follows a new represe
     findMatchingRouteResultCard(cards, selectedRoute, () => false)?.representative.id,
     'after-refresh-606',
   );
+});
+
+test('result cards are displayed by actual total journey time', () => {
+  const cards = [
+    { key: 'slow', representative: { estimatedTime: 95 } },
+    { key: 'fallback', representative: { estimated_time_min: 60 } },
+    { key: 'fast', representative: { estimatedTime: 42 } },
+    { key: 'unknown', representative: {} },
+  ];
+
+  const sorted = sortRouteResultCardsByTotalTime(
+    cards,
+    (route) => route.estimated_time_min ?? route.estimatedTime ?? 9999,
+  );
+
+  assert.deepEqual(sorted.map((card) => card.key), [
+    'fast',
+    'fallback',
+    'slow',
+    'unknown',
+  ]);
 });
 
 test('GPS heading helpers normalize, screen-adjust, and smoothly cross north', () => {

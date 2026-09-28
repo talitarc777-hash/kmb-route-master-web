@@ -58,3 +58,16 @@ export function findMatchingRouteResultCard(cards, selectedRoute, isFallbackRout
   const selectedKey = routeResultGroupKey(selectedRoute);
   return (cards || []).find((card) => card.type !== 'fallback' && card.key === selectedKey) || null;
 }
+
+export function sortRouteResultCardsByTotalTime(cards, getTotalMinutes) {
+  return (cards || [])
+    .map((card, index) => ({ card, index }))
+    .sort((left, right) => {
+      const leftMinutes = Number(getTotalMinutes(left.card.representative));
+      const rightMinutes = Number(getTotalMinutes(right.card.representative));
+      const normalizedLeft = Number.isFinite(leftMinutes) ? leftMinutes : 9999;
+      const normalizedRight = Number.isFinite(rightMinutes) ? rightMinutes : 9999;
+      return normalizedLeft - normalizedRight || left.index - right.index;
+    })
+    .map(({ card }) => card);
+}

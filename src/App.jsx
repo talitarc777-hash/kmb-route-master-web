@@ -34,6 +34,7 @@ import { selectVisibleBookmarkEtas } from './utils/bookmarkEtaDisplay.js';
 import {
   buildRouteResultCards,
   findMatchingRouteResultCard,
+  sortRouteResultCardsByTotalTime,
 } from './utils/routeResultCards.js';
 
 publishApiBaseUrl();
@@ -2593,10 +2594,10 @@ const App = () => {
     buildSegmentDisplay: buildResultCardSegmentDisplay,
   }), [buildResultCardSegmentDisplay]);
 
-  const displayedResultCards = useMemo(
-    () => buildResultCards(displayedResults),
-    [buildResultCards, displayedResults],
-  );
+  const displayedResultCards = useMemo(() => sortRouteResultCardsByTotalTime(
+    buildResultCards(displayedResults),
+    baseEstimatedTimeForRanking,
+  ), [buildResultCards, displayedResults]);
 
   const availableFilterRoutes = useMemo(() => {
     return Array.from(
